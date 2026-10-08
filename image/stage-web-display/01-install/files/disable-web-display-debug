@@ -1,0 +1,7 @@
+#!/bin/sh
+set -eu
+rm -f /etc/sudoers.d/web-display-debug
+rm -f /etc/ssh/sshd_config.d/90-web-display-debug.conf
+systemctl disable --now ssh.service ssh.socket || true
+systemctl mask ssh.service ssh.socket
+echo "Remote debug access disabled. Reboot recommended."
