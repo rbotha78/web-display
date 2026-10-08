@@ -176,3 +176,9 @@ After diagnosis, disable it on the Pi:
 sudo disable-web-display-debug
 sudo reboot
 ```
+
+## License
+
+Copyright (C) 2026 Robert Botha. Licensed under the GNU General Public License,
+version 3 or (at your option) any later version. See `LICENSE`. The firmware image
+also contains Raspberry Pi OS, Debian and Chromium, which keep their own licenses.
