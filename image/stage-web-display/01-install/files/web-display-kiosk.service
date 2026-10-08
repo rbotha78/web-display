@@ -1,0 +1,33 @@
+[Unit]
+Description=Web Display Chromium kiosk
+After=NetworkManager.service web-display.service
+Wants=NetworkManager.service
+Requires=web-display.service
+Conflicts=getty@tty7.service
+
+[Service]
+Type=simple
+User=kiosk
+Group=web-display
+SupplementaryGroups=video input render
+WorkingDirectory=/var/lib/web-display-kiosk
+RuntimeDirectory=web-display-kiosk
+RuntimeDirectoryMode=0750
+Environment=HOME=/var/lib/web-display-kiosk
+ExecStart=/usr/bin/xinit /usr/lib/web-display/kiosk-session -- :0 vt7 -nolisten tcp -nocursor -s 0 -dpms
+Restart=always
+RestartSec=5
+TTYPath=/dev/tty7
+StandardInput=tty
+StandardOutput=journal
+StandardError=journal
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/web-display-kiosk /run/web-display-kiosk
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target

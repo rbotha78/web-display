@@ -1,0 +1,8 @@
+#!/bin/sh
+set -eu
+
+xset s off
+xset -dpms
+xset s noblank
+exec dbus-run-session -- /usr/bin/python3 -m webdisplay.kiosk
+
