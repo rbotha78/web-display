@@ -1,0 +1,23 @@
+[Unit]
+Description=Web Display network supervisor and setup access point
+After=NetworkManager.service web-display.service
+Wants=NetworkManager.service
+Requires=web-display.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 -m webdisplay.netmonitor
+Restart=always
+RestartSec=5
+ExecStopPost=/usr/bin/python3 -m webdisplay.netmonitor stop-ap
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/run /etc/NetworkManager/system-connections
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+LockPersonality=true
+MemoryDenyWriteExecute=true
+
+[Install]
+WantedBy=multi-user.target
