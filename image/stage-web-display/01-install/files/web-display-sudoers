@@ -1,0 +1,3 @@
+webdisplay ALL=(root) NOPASSWD: /usr/lib/web-display/system-action reboot
+webdisplay ALL=(root) NOPASSWD: /usr/lib/web-display/wifi-action ""
+

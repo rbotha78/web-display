@@ -1,0 +1,16 @@
+#!/bin/sh
+set -eu
+
+directory=/var/lib/web-display/tls
+hostname="$(hostname)"
+install -d -o webdisplay -g web-display -m 0750 "$directory"
+if [ -s "$directory/cert.pem" ] && [ -s "$directory/key.pem" ]; then
+	exit 0
+fi
+openssl req -x509 -newkey rsa:3072 -sha256 -nodes -days 825 \
+	-subj "/CN=${hostname}.local" \
+	-addext "subjectAltName=DNS:${hostname}.local,DNS:${hostname},DNS:localhost,IP:127.0.0.1" \
+	-keyout "$directory/key.pem" -out "$directory/cert.pem"
+chown webdisplay:web-display "$directory/key.pem" "$directory/cert.pem"
+chmod 0600 "$directory/key.pem"
+chmod 0644 "$directory/cert.pem"

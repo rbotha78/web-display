@@ -1,0 +1,28 @@
+[Unit]
+Description=Web Display administration service
+After=NetworkManager.service web-display-certificate.service
+Wants=NetworkManager.service
+Requires=web-display-certificate.service
+
+[Service]
+Type=simple
+User=webdisplay
+Group=web-display
+UMask=0027
+StateDirectory=web-display
+StateDirectoryMode=0750
+RuntimeDirectory=web-display
+RuntimeDirectoryMode=0750
+ExecStart=/usr/bin/python3 -m webdisplay
+Restart=on-failure
+RestartSec=3
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/web-display /run/web-display /etc/NetworkManager/system-connections /etc/modprobe.d
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+LockPersonality=true
+MemoryDenyWriteExecute=true
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,16 @@
+[Unit]
+Description=Create Web Display HTTPS certificate
+Before=web-display.service
+
+[Service]
+Type=oneshot
+StateDirectory=web-display
+StateDirectoryMode=0750
+ExecStart=/usr/lib/web-display/create-certificate
+RemainAfterExit=yes
+ProtectSystem=strict
+ReadWritePaths=/var/lib/web-display
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

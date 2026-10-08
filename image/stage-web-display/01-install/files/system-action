@@ -1,0 +1,18 @@
+#!/bin/sh
+set -eu
+
+if [ "$#" -ne 1 ]; then
+	echo "exactly one action is required" >&2
+	exit 2
+fi
+
+case "$1" in
+	reboot)
+		exec /usr/bin/systemctl reboot
+		;;
+	*)
+		echo "unsupported action" >&2
+		exit 2
+		;;
+esac
+
