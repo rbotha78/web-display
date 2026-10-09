@@ -67,6 +67,15 @@ before the site has ever loaded). When the setup AP starts its SSID and password
 the page within about one second of the AP being created (the kiosk polls once per second
 and relaunches the browser, a few seconds on a Pi 2).
 
+### Hostname
+
+The administration page has a **Hostname** card (`POST /api/hostname`, CSRF-protected).
+Names are RFC 1123 labels (1-63 letters, digits, hyphens). The request goes through the
+sudo-restricted `hostname-action` helper, which starts a transient root unit that runs
+`hostnamectl`, updates `/etc/hosts`, restarts Avahi, regenerates the self-signed HTTPS
+certificate for the new name and restarts the management service. Reconnect at
+`https://<name>.local:8443` and accept the new certificate.
+
 ### Setup access point and recovery
 
 `web-display-network.service` (root, sandboxed) probes internet reachability every

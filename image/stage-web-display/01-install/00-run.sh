@@ -8,6 +8,7 @@ install -m 0755 files/system-action "${ROOTFS_DIR}/usr/lib/web-display/system-ac
 install -m 0755 files/create-certificate \
 	"${ROOTFS_DIR}/usr/lib/web-display/create-certificate"
 install -m 0755 files/wifi-action "${ROOTFS_DIR}/usr/lib/web-display/wifi-action"
+install -m 0755 files/hostname-action "${ROOTFS_DIR}/usr/lib/web-display/hostname-action"
 install -m 0755 files/kiosk-session "${ROOTFS_DIR}/usr/lib/web-display/kiosk-session"
 
 install -m 0644 files/web-display.service \

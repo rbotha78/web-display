@@ -93,3 +93,30 @@ test("dashboard loads settings and saves them with the CSRF token", async () => 
   });
   expect((save.init.headers as Record<string, string>)["X-CSRF-Token"]).toBe("token-1");
 });
+
+test("renaming the device posts the validated hostname", async () => {
+  const calls = mockFetch({
+    "GET /api/session": () => ({ body: { csrf: "token-1" } }),
+    "GET /api/status": () => ({
+      body: { hostname: "web-display", addresses: [], paired: true },
+    }),
+    "GET /api/network": () => ({
+      body: {
+        internet: { online: true, reachable_endpoints: 3, total_endpoints: 3 },
+        website: { reachable: true },
+        default_route: "eth0",
+        wifi: {},
+      },
+    }),
+    "GET /api/config": () => ({ body: { url: "https://example.com", auto_ap: false } }),
+    "POST /api/hostname": () => ({ status: 202, body: { hostname: "lobby", changed: true } }),
+  });
+  render(<App />);
+  const input = (await screen.findByLabelText("Device hostname")) as HTMLInputElement;
+  await waitFor(() => expect(input.value).toBe("web-display"));
+  fireEvent.change(input, { target: { value: "Lobby" } });
+  fireEvent.click(screen.getByText("Save hostname"));
+  expect(await screen.findByText(/lobby\.local:8443/)).toBeTruthy();
+  const post = calls.find((call) => call.path === "/api/hostname")!;
+  expect(JSON.parse(post.init.body as string)).toEqual({ hostname: "lobby" });
+});

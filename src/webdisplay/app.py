@@ -21,6 +21,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
 
+from .hostname_helper import validate_hostname
 from .network import default_route_interface, internet_status, website_status
 
 LOG = logging.getLogger("web-display")
@@ -217,8 +218,10 @@ class Application:
         target_path: Path,
         action_helper: Path,
         wifi_helper: Path | None = None,
+        hostname_helper: Path | None = None,
     ):
         self.wifi_helper = wifi_helper
+        self.hostname_helper = hostname_helper
         self.config = ConfigStore(state_path)
         self.sessions = SessionStore()
         self.throttle = LoginThrottle()
@@ -274,6 +277,27 @@ class Application:
         if result.returncode != 0 or not isinstance(payload, dict):
             message = payload.get("error") if isinstance(payload, dict) else None
             raise ValueError(str(message or "Wi-Fi helper failed"))
+        return payload
+
+    def set_hostname(self, name: str) -> dict[str, object]:
+        if self.hostname_helper is None:
+            raise ValueError("Hostname changes are not available")
+        result = subprocess.run(
+            ["sudo", "--non-interactive", str(self.hostname_helper)],
+            input=json.dumps({"hostname": name}),
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+        try:
+            payload = json.loads(result.stdout)
+        except ValueError:
+            LOG.error("Hostname helper returned invalid output (exit %d)", result.returncode)
+            raise ValueError("Hostname helper failed") from None
+        if result.returncode != 0 or not isinstance(payload, dict):
+            message = payload.get("error") if isinstance(payload, dict) else None
+            raise ValueError(str(message or "Hostname helper failed"))
         return payload
 
     def network_status(self) -> dict[str, object]:
@@ -451,6 +475,11 @@ def make_handler(app: Application) -> type[BaseHTTPRequestHandler]:
                         return
                     app.run_action("reboot")
                     self._json(HTTPStatus.ACCEPTED, {"ok": True})
+                elif self.path == "/api/hostname":
+                    if not self._require_session(csrf=True):
+                        return
+                    result = app.set_hostname(validate_hostname(body.get("hostname")))
+                    self._json(HTTPStatus.ACCEPTED, result)
                 elif self.path in WIFI_OPERATIONS:
                     if not self._require_session(csrf=True):
                         return
@@ -570,6 +599,7 @@ def serve(args: argparse.Namespace) -> None:
         Path(args.target),
         Path(args.action_helper),
         Path(args.wifi_helper),
+        Path(args.hostname_helper),
     )
     server = ThreadingHTTPServer((args.bind, args.port), make_handler(app))
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
@@ -593,6 +623,9 @@ def main() -> None:
         "--action-helper", default="/usr/lib/web-display/system-action"
     )
     parser.add_argument("--wifi-helper", default="/usr/lib/web-display/wifi-action")
+    parser.add_argument(
+        "--hostname-helper", default="/usr/lib/web-display/hostname-action"
+    )
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     serve(args)

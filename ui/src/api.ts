@@ -79,6 +79,8 @@ export const api = {
   saveConfig: (config: Partial<Config>) => request<Config>("/api/config", "PUT", config),
   status: () => request<Status>("/api/status"),
   network: () => request<NetworkStatus>("/api/network"),
+  setHostname: (hostname: string) =>
+    request<{ hostname: string; changed: boolean }>("/api/hostname", "POST", { hostname }),
   reboot: () => request<object>("/api/reboot", "POST"),
   scan: () => request<{ networks: Network[] }>("/api/wifi/scan", "POST"),
   setCountry: (country: string) =>

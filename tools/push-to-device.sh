@@ -13,7 +13,7 @@ stage="/tmp/web-display-push"
 
 ssh "${target}" "rm -rf ${stage} && mkdir -p ${stage}"
 scp -q -r "${root}/src/webdisplay" "${target}:${stage}/webdisplay"
-scp -q "${files}/wifi-action" "${files}/system-action" "${files}/kiosk-session" \
+scp -q "${files}/wifi-action" "${files}/hostname-action" "${files}/system-action" "${files}/kiosk-session" \
 	"${files}/web-display.service" "${files}/web-display-network.service" \
 	"${files}/web-display-sudoers" "${target}:${stage}/"
 
@@ -21,6 +21,7 @@ ssh "${target}" "sudo sh -eu" <<EOF
 rm -rf /usr/lib/python3/dist-packages/webdisplay
 cp -a ${stage}/webdisplay /usr/lib/python3/dist-packages/webdisplay
 install -m 0755 ${stage}/wifi-action /usr/lib/web-display/wifi-action
+install -m 0755 ${stage}/hostname-action /usr/lib/web-display/hostname-action
 install -m 0755 ${stage}/system-action /usr/lib/web-display/system-action
 install -m 0755 ${stage}/kiosk-session /usr/lib/web-display/kiosk-session
 install -m 0644 ${stage}/web-display.service /etc/systemd/system/web-display.service

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { ApiError, api, type NetworkStatus, type Status } from "../api";
 import { DisplayCard } from "./DisplayCard";
+import { HostnameCard } from "./HostnameCard";
 import { StatusCard } from "./StatusCard";
 import type { Notice } from "./Toast";
 import { WifiCard } from "./WifiCard";
@@ -45,6 +46,7 @@ export function Dashboard({ notify, onExpired }: Props) {
     <div className="grid">
       <StatusCard status={status} network={network} />
       <DisplayCard notify={notify} fail={fail} />
+      <HostnameCard current={status?.hostname ?? null} notify={notify} fail={fail} />
       <WifiCard network={network} notify={notify} fail={fail} refresh={refreshNetwork} />
     </div>
   );

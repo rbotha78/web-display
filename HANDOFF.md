@@ -11,9 +11,9 @@ Pi 3 WPA2 AP validation, and do not use an open AP as a workaround.
 
 The latest development firmware is
 `deploy/image_2026-10-09-web-display-development-milestone2.img.gz`,
-version 0.4.0, SHA-256
-`8c3b650f4a1d52e03f111c8ab5bfa051d6becba288aaea87bc1fbb034354c8fa`
-(passes `gzip -t`; the same-day filename is reused, so it replaces the 0.3.4 build).
+version 0.4.1, SHA-256
+`163d6ba2b76ea1b1cbab441678a18bd394a7c268f6fed3f9b6c36d5b5c4b2b4b`
+(passes `gzip -t`; the same-day filename is reused, so it replaces the 0.4.0 build).
 It has not been flashed as a clean install.
 
 ## Build And Runtime
@@ -57,7 +57,7 @@ It has not been flashed as a clean install.
   restores the saved client. The user accepts this as a blocker for now.
 - Pi 2 was unreachable from WSL at the end of the session. The Pi 3 remained
   reachable and its appliance services were active.
-- Report hardware checks separately from unit tests. Do not claim the 0.4.0
+- Report hardware checks separately from unit tests. Do not claim the 0.4.1
   image was booted or that Pi 3 WPA2 AP works.
 
 ## Validation
