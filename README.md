@@ -52,7 +52,7 @@ tests, a shell syntax check, the UI typecheck and tests, and a check that the co
 `.github/workflows/build-image.yml` builds the image on GitHub:
 
 - **Publishing a release** builds `VARIANT=release` (hardened, `xz`), checks that the tag
-  (`v0.4.2`) matches `WEB_DISPLAY_VERSION`, attaches the `.img.xz` and `SHA256SUMS` to the
+  (`v0.4.3`) matches `WEB_DISPLAY_VERSION`, attaches the `.img.xz` and `SHA256SUMS` to the
   release, and creates a build provenance attestation (`gh attestation verify <image> --repo
   rbotha78/web-display`). Release images are boot-tested on a Pi before publication.
 - **Run workflow** (manual) builds `development` or `release`. Development builds need your
@@ -111,9 +111,11 @@ retried every 10 minutes; if that fails the AP returns with new credentials. The
 as soon as internet is reachable again and the saved client network is restored.
 If a client connection attempt fails while the setup AP is active, the saved client
 profile is rolled back and the setup AP is immediately restored with rotated credentials.
-On supervisor restart, any stale setup AP is removed and the saved client profile is
-explicitly reactivated. Wi-Fi routes use metric 600; the standard Ethernet route metric
-is 100, so Ethernet remains preferred when both links are active.
+The saved Wi-Fi profile retries indefinitely, and the supervisor reactivates it every
+60 seconds if it is inactive and no setup AP is running, even when Ethernet is online or
+automatic AP is disabled. On supervisor restart, any stale setup AP is removed and the
+saved client profile is explicitly reactivated. Wi-Fi routes use metric 600; the standard
+Ethernet route metric is 100, so Ethernet remains preferred when both links are active.
 Limitation: the country must first be set while an administration route (Ethernet)
 exists. Test manually with `sudo python3 -m webdisplay.netmonitor start-ap` and `stop-ap`
 (stop `web-display-network` first, or it will remove the AP while Ethernet is online).

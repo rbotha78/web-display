@@ -51,6 +51,7 @@ def render_keyfile(ssid: str, psk: str, interface: str = "wlan0") -> str:
         "type=wifi",
         f"interface-name={interface}",
         "autoconnect=true",
+        "autoconnect-retries=0",
         "autoconnect-priority=0",
         "",
         "[wifi]",

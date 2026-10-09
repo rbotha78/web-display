@@ -38,6 +38,7 @@ CONFIG_PATH = Path("/var/lib/web-display/config.json")
 AP_ADDRESS = "10.42.0.1"
 OUTAGE_GRACE = 120
 RETRY_INTERVAL = 600
+CLIENT_RETRY_INTERVAL = 60
 TICK_SECONDS = 10
 PASSWORD_ALPHABET = "abcdefghjkmnpqrstuvwxyz23456789"
 
@@ -120,6 +121,7 @@ class Supervisor:
         self.offline_since: float | None = None
         self.ap_active = False
         self.last_retry = 0.0
+        self.last_client_retry = 0.0
 
     def start_ap(self) -> bool:
         device = wifi_device()
@@ -174,8 +176,10 @@ class Supervisor:
             active = run(
                 ["nmcli", "-t", "-f", "NAME", "connection", "show", "--active"]
             )
-            if "web-display-wifi" in active.stdout.splitlines():
+            active_names = active.stdout.splitlines()
+            if "web-display-wifi" in active_names or AP_ID in active_names:
                 return
+            LOG.info("Retrying saved Wi-Fi connection")
             result = run(
                 [
                     "nmcli",
@@ -211,6 +215,14 @@ class Supervisor:
             LOG.info("Setup AP was displaced by another connection")
             self.stop_ap()
             self.restore_client()
+            self.last_client_retry = now
+        if (
+            not self.ap_active
+            and now - self.last_client_retry >= CLIENT_RETRY_INTERVAL
+        ):
+            self.last_client_retry = now
+            if not self.ap_is_up():
+                self.restore_client()
         if online is None:
             online = bool(internet_status()["online"])
         if online:
@@ -264,6 +276,7 @@ def main() -> int:
         return 0
     supervisor.remove_ap_profile()
     supervisor.restore_client()
+    supervisor.last_client_retry = supervisor.clock()
     while True:
         try:
             locked_tick(supervisor)

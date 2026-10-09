@@ -11,9 +11,9 @@ Pi 3 WPA2 AP validation, and do not use an open AP as a workaround.
 
 The latest development firmware is
 `deploy/image_2026-10-09-web-display-development-milestone2.img.gz`,
-version 0.4.2, SHA-256
-`ebc5252e01167d63a52de0157555ad03792534ff0b14cc6b22d42589509b8261`
-(passes `gzip -t`; the same-day filename is reused, so it replaces the 0.4.1 build).
+version 0.4.3, SHA-256
+`87d7cddbbdca4abbf079e2fa120c300ef1dacb776b316219fb08a43373edeb88`
+(passes `gzip -t`), with saved-client reconnection retries.
 It was flashed to a clean SD card and cold-booted on a Pi 3 (Ethernet): the full
 first-use setup (pairing, password, display URL) worked. The user also tested the
 release image from the `v0.4.2` release on a Pi 2; the full setup worked as expected.
@@ -21,6 +21,20 @@ release image from the `v0.4.2` release on a Pi 2; the full setup worked as expe
 The `v0.4.2` pre-release was built by the GitHub workflow (release variant); its
 checksum and build attestation were verified, and it has now been boot-tested on a
 Pi 2. The release workflow no longer forces releases to be marked as pre-releases.
+
+The Pi 3 now has Ethernet connected for Wi-Fi investigation. Its Wi-Fi initially
+connected, then NetworkManager lost the association during a WPA handshake and failed
+the profile because no interactive secrets agent is available. The saved system
+profile still has its PSK. With automatic AP disabled, the supervisor previously did
+not retry an inactive client profile; 0.4.3 adds a 60-second retry and unlimited
+NetworkManager autoconnect retries. The Pi is still failing to associate despite strong
+scan signal; underlying AP/driver behavior is unresolved. Logs showed repeated
+association timeouts, so do not mark the issue resolved until Wi-Fi reconnects and
+remains stable. The latest failures reach the WPA four-way handshake and disconnect;
+NetworkManager then reports no secrets agent. Even with the saved system PSK intact,
+association retries every minute do not currently succeed. Multiple very strong
+same-SSID BSSIDs are visible on channel 13; test for inconsistent AP/mesh security or
+credentials before changing the device to pin a BSSID.
 
 ## Build And Runtime
 
@@ -42,7 +56,9 @@ Pi 2. The release workflow no longer forces releases to be marked as pre-release
 - The image runs a Python HTTPS management service on port 8443 and Chromium
   under Xorg. The Pi 2 requires Xorg's fbdev driver.
 - NetworkManager owns Wi-Fi client and setup AP connections. Ethernet route
-  metric is 100; Wi-Fi client profiles use metric 600.
+  metric is 100; Wi-Fi client profiles use metric 600. The saved Wi-Fi client now
+  retries indefinitely, and the supervisor retries an inactive profile every 60
+  seconds when no setup AP is active.
 - Automatic AP start is opt-in (`auto_ap` in config.json, default off; toggle in
   the admin page). When enabled, the supervisor starts a WPA2 AP after 120 seconds of internet outage, retries
   the saved client every 10 minutes, and restores client/AP state after
@@ -61,6 +77,12 @@ Pi 2. The release workflow no longer forces releases to be marked as pre-release
   NetworkManager hotspot with `nl80211: kernel reports: key setting validation
   failed` / `802.1X supplicant took too long to authenticate`. Failed activation
   restores the saved client. The user accepts this as a blocker for now.
+- **Pi 3 Wi-Fi client reliability:** observed on the current device: it connected at
+  boot, then lost association during a WPA handshake. NetworkManager requested secrets
+  and failed because no interactive agent exists, then subsequent association attempts
+  timed out despite strong scans. Later traces repeatedly fail at the WPA four-way
+  handshake. Ethernet remains connected. Retry improvements are deployed, but a
+  successful/stable Wi-Fi reconnect has not yet been observed.
 - Pi 2 was unreachable from WSL at the end of the session. The Pi 3 remained
   reachable and its appliance services were active.
 - Report hardware checks separately from unit tests. The v0.4.2 development image

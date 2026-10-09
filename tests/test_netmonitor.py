@@ -5,7 +5,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from webdisplay import kiosk, netmonitor, wifi_helper
-from webdisplay.netmonitor import OUTAGE_GRACE, RETRY_INTERVAL, Supervisor
+from webdisplay.netmonitor import CLIENT_RETRY_INTERVAL, OUTAGE_GRACE, RETRY_INTERVAL, Supervisor
 
 
 class FakeClock:
@@ -42,6 +42,24 @@ class SupervisorTests(unittest.TestCase):
         self.supervisor.auto_ap = lambda: False
         self.supervisor.tick(online=False)
         self.clock.now += OUTAGE_GRACE * 10
+        self.supervisor.tick(online=False)
+        self.assertEqual(self.events, [])
+
+    def test_retries_saved_client_without_ap_even_when_ethernet_is_online(self):
+        self.supervisor.ap_is_up = lambda: False
+        self.supervisor.restore_client = lambda: self.events.append("restore")
+        self.supervisor.tick(online=True)
+        self.assertEqual(self.events, ["restore"])
+        self.clock.now += CLIENT_RETRY_INTERVAL - 1
+        self.supervisor.tick(online=True)
+        self.assertEqual(self.events, ["restore"])
+        self.clock.now += 1
+        self.supervisor.tick(online=True)
+        self.assertEqual(self.events, ["restore", "restore"])
+
+    def test_does_not_retry_client_while_ap_is_active(self):
+        self.supervisor.ap_is_up = lambda: True
+        self.supervisor.restore_client = lambda: self.events.append("restore")
         self.supervisor.tick(online=False)
         self.assertEqual(self.events, [])
 

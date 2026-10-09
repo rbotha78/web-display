@@ -31,6 +31,7 @@ class ValidationTests(unittest.TestCase):
         text = wifi_helper.render_keyfile("Home", "secret123", "wlan0")
         self.assertIn("ssid=Home", text)
         self.assertIn("psk=secret123", text)
+        self.assertIn("autoconnect-retries=0", text)
         self.assertNotIn("wifi-security", wifi_helper.render_keyfile("Open", "", "wlan0"))
 
     def test_unknown_operation_rejected(self):
