@@ -2,6 +2,7 @@
 
 Policy:
 - Internet is judged by TCP probes to several endpoints, never by link or association alone.
+- Automatic AP start is opt-in (the "auto_ap" setting, disabled by default).
 - The AP starts only after OUTAGE_GRACE seconds of continuous outage.
 - Every AP session gets a new random password (credential rotation).
 - While the AP is up, the saved Wi-Fi network is retried every RETRY_INTERVAL seconds;
@@ -33,6 +34,7 @@ AP_ID = "web-display-setup"
 AP_KEYFILE = Path("/run/NetworkManager/system-connections") / f"{AP_ID}.nmconnection"
 AP_INFO = Path("/run/web-display/setup-ap.json")
 LOCK_PATH = Path("/run/web-display/network.lock")
+CONFIG_PATH = Path("/var/lib/web-display/config.json")
 AP_ADDRESS = "10.42.0.1"
 OUTAGE_GRACE = 120
 RETRY_INTERVAL = 600
@@ -103,9 +105,18 @@ def write_private(path: Path, content: str, mode: int, group: str | None = None)
             os.unlink(temporary)
 
 
+def auto_ap_enabled() -> bool:
+    try:
+        with CONFIG_PATH.open(encoding="utf-8") as stream:
+            return json.load(stream).get("auto_ap") is True
+    except (OSError, ValueError, AttributeError):
+        return False
+
+
 class Supervisor:
-    def __init__(self, clock=time.monotonic):
+    def __init__(self, clock=time.monotonic, auto_ap=auto_ap_enabled):
         self.clock = clock
+        self.auto_ap = auto_ap
         self.offline_since: float | None = None
         self.ap_active = False
         self.last_retry = 0.0
@@ -205,6 +216,13 @@ class Supervisor:
         if online:
             self.offline_since = None
             if self.ap_active:
+                self.stop_ap()
+                self.restore_client()
+            return
+        if not self.auto_ap():
+            self.offline_since = None
+            if self.ap_active:
+                LOG.info("Automatic setup AP was disabled; stopping it")
                 self.stop_ap()
                 self.restore_client()
             return

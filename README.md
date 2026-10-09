@@ -70,8 +70,11 @@ and relaunches the browser, a few seconds on a Pi 2).
 ### Setup access point and recovery
 
 `web-display-network.service` (root, sandboxed) probes internet reachability every
-10 seconds. After 120 seconds of continuous outage, and only if the Wi-Fi country is
-set and the adapter supports AP mode, it starts a WPA2 (CCMP) access point named
+10 seconds. Automatic AP start is **disabled by default**; enable it with the
+"Start the setup access point automatically" checkbox in the administration page
+(the `auto_ap` setting, also available via `PUT /api/config`). Disabling it stops a
+running automatic AP. When enabled, after 120 seconds of continuous outage, and only
+if the Wi-Fi country is set and the adapter supports AP mode, it starts a WPA2 (CCMP) access point named
 `WebDisplay-XXXX` with a freshly generated 12-character password (rotated every time
 the AP starts). The SSID, password and administration address (`https://10.42.0.1:8443/`)
 are shown on the display's fallback page. While the AP is up the saved Wi-Fi network is

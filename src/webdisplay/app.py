@@ -71,6 +71,12 @@ def validate_url(value: object) -> str:
     return value
 
 
+def validate_flag(value: object) -> bool:
+    if not isinstance(value, bool):
+        raise ValueError("Setting must be true or false")
+    return value
+
+
 class ConfigStore:
     def __init__(self, path: Path):
         self.path = path
@@ -79,12 +85,13 @@ class ConfigStore:
     def load(self) -> dict[str, object]:
         with self._lock:
             if not self.path.exists():
-                return {"url": "", "password": None}
+                return {"url": "", "password": None, "auto_ap": False}
             with self.path.open(encoding="utf-8") as stream:
                 data = json.load(stream)
             return {
                 "url": validate_url(data.get("url", "")),
                 "password": data.get("password"),
+                "auto_ap": data.get("auto_ap") is True,
             }
 
     def update(self, **changes: object) -> dict[str, object]:
@@ -93,9 +100,10 @@ class ConfigStore:
                 with self.path.open(encoding="utf-8") as stream:
                     data = json.load(stream)
             else:
-                data = {"url": "", "password": None}
+                data = {"url": "", "password": None, "auto_ap": False}
             data.update(changes)
             data["url"] = validate_url(data.get("url", ""))
+            data["auto_ap"] = validate_flag(data.get("auto_ap", False))
             atomic_write(self.path, json.dumps(data, sort_keys=True) + "\n")
             return data
 
@@ -312,7 +320,8 @@ ADMIN_PAGE = page(
 <section id="admin" hidden>
   <h2>Display</h2>
   <label>Web page URL<input id="url" type="url" placeholder="https://example.com"></label>
-  <button id="save">Save URL</button>
+  <label><input id="auto-ap" type="checkbox"> Start the setup access point automatically after about two minutes without internet</label>
+  <button id="save">Save settings</button>
   <button id="reboot">Reboot device</button>
   <h2>Status</h2><pre id="status"></pre>
   <h2>Wi-Fi</h2>
@@ -347,6 +356,7 @@ async function showAdmin(session) {
   q("admin").hidden = false;
   const [config, status] = await Promise.all([request("/api/config"), request("/api/status")]);
   q("url").value = config.url;
+  q("auto-ap").checked = config.auto_ap;
   q("status").textContent = JSON.stringify(status, null, 2);
   refreshNetwork().catch(error => message(error.message));
 }
@@ -375,8 +385,11 @@ q("log-in").onclick = async () => {
 };
 q("save").onclick = async () => {
   try {
-    const config = await request("/api/config", {method:"PUT", body:JSON.stringify({url:q("url").value})});
-    q("url").value = config.url; message("URL saved. The display will update shortly.");
+    const config = await request("/api/config", {method:"PUT", body:JSON.stringify({
+      url:q("url").value, auto_ap:q("auto-ap").checked
+    })});
+    q("url").value = config.url; q("auto-ap").checked = config.auto_ap;
+    message("Settings saved. The display will update shortly.");
   } catch (error) { message(error.message); }
 };
 q("reboot").onclick = async () => {
@@ -502,7 +515,11 @@ def make_handler(app: Application) -> type[BaseHTTPRequestHandler]:
             if self.path == "/api/config":
                 if not self._require_session():
                     return
-                self._json(HTTPStatus.OK, {"url": app.config.load()["url"]})
+                config = app.config.load()
+                self._json(
+                    HTTPStatus.OK,
+                    {"url": config["url"], "auto_ap": config["auto_ap"]},
+                )
                 return
             if self.path == "/api/status":
                 if not self._require_session():
@@ -571,9 +588,19 @@ def make_handler(app: Application) -> type[BaseHTTPRequestHandler]:
                 if not self._require_session(csrf=True):
                     return
                 body = self._body()
-                config = app.config.update(url=validate_url(body.get("url")))
+                changes: dict[str, object] = {}
+                if "url" in body:
+                    changes["url"] = validate_url(body["url"])
+                if "auto_ap" in body:
+                    changes["auto_ap"] = validate_flag(body["auto_ap"])
+                if not changes:
+                    raise ValueError("No settings supplied")
+                config = app.config.update(**changes)
                 app.publish_target()
-                self._json(HTTPStatus.OK, {"url": config["url"]})
+                self._json(
+                    HTTPStatus.OK,
+                    {"url": config["url"], "auto_ap": config["auto_ap"]},
+                )
             except ValueError as error:
                 self._json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
 

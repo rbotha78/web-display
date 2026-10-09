@@ -11,7 +11,7 @@ Pi 3 WPA2 AP validation, and do not use an open AP as a workaround.
 
 The latest development firmware is
 `deploy/image_2026-10-08-web-display-development-milestone2.img.xz`,
-version 0.3.3, SHA-256
+version 0.3.4, SHA-256
 `9c7240364795d0c8891bae40ef95164fe665b1596267e31d24fa64cc75a1b9e3`.
 It has not been flashed as a clean install.
 
@@ -33,7 +33,8 @@ It has not been flashed as a clean install.
   under Xorg. The Pi 2 requires Xorg's fbdev driver.
 - NetworkManager owns Wi-Fi client and setup AP connections. Ethernet route
   metric is 100; Wi-Fi client profiles use metric 600.
-- The supervisor starts a WPA2 AP after 120 seconds of internet outage, retries
+- Automatic AP start is opt-in (`auto_ap` in config.json, default off; toggle in
+  the admin page). When enabled, the supervisor starts a WPA2 AP after 120 seconds of internet outage, retries
   the saved client every 10 minutes, and restores client/AP state after
   transitions and failed connections. AP credentials rotate and appear on the
   kiosk fallback screen.
@@ -52,7 +53,7 @@ It has not been flashed as a clean install.
   restores the saved client. The user accepts this as a blocker for now.
 - Pi 2 was unreachable from WSL at the end of the session. The Pi 3 remained
   reachable and its appliance services were active.
-- Report hardware checks separately from unit tests. Do not claim the 0.3.3
+- Report hardware checks separately from unit tests. Do not claim the 0.3.4
   image was booted or that Pi 3 WPA2 AP works.
 
 ## Validation

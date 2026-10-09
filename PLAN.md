@@ -106,5 +106,5 @@ Ethernet route preference, outage recovery and on-screen AP credentials. Raspber
 Pi 3 built-in Wi-Fi client mode works, but its WPA2 AP fails under the current
 Trixie stack with a kernel key-validation error. The user accepts this as a Pi 3
 hardware/software blocker for now; do not use an open AP as a workaround. The
-development image is version 0.3.3. Signed remote updates, production hardening
+development image is version 0.3.4. Signed remote updates, production hardening
 and release acceptance remain future milestones.

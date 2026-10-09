@@ -155,6 +155,28 @@ class ApiTests(unittest.TestCase):
         )
         self.assertEqual(response.status, 200)
         self.assertEqual(payload["url"], "https://example.com")
+        self.assertFalse(payload["auto_ap"])
+
+        response, payload = self.request(
+            "PUT",
+            "/api/config",
+            {"auto_ap": True},
+            {"Cookie": cookie, "X-CSRF-Token": csrf},
+        )
+        self.assertEqual(response.status, 200)
+        self.assertTrue(payload["auto_ap"])
+        self.assertEqual(payload["url"], "https://example.com")
+        response, _ = self.request(
+            "PUT",
+            "/api/config",
+            {"auto_ap": "yes"},
+            {"Cookie": cookie, "X-CSRF-Token": csrf},
+        )
+        self.assertEqual(response.status, 400)
+        response, payload = self.request(
+            "GET", "/api/config", None, {"Cookie": cookie}
+        )
+        self.assertTrue(payload["auto_ap"])
         self.assertEqual(
             (Path(self.directory.name) / "target-url").read_text().strip(),
             "https://example.com",

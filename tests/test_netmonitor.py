@@ -19,7 +19,7 @@ class FakeClock:
 class SupervisorTests(unittest.TestCase):
     def setUp(self):
         self.clock = FakeClock()
-        self.supervisor = Supervisor(self.clock)
+        self.supervisor = Supervisor(self.clock, auto_ap=lambda: True)
         self.events = []
         self.supervisor.start_ap = lambda: self._start()
         self.supervisor.stop_ap = lambda: self._stop()
@@ -37,6 +37,33 @@ class SupervisorTests(unittest.TestCase):
     def _stop(self):
         self.events.append("stop")
         self.supervisor.ap_active = False
+
+    def test_no_ap_when_automatic_ap_is_disabled(self):
+        self.supervisor.auto_ap = lambda: False
+        self.supervisor.tick(online=False)
+        self.clock.now += OUTAGE_GRACE * 10
+        self.supervisor.tick(online=False)
+        self.assertEqual(self.events, [])
+
+    def test_disabling_automatic_ap_stops_a_running_ap(self):
+        self.supervisor.tick(online=False)
+        self.clock.now += OUTAGE_GRACE
+        self.supervisor.tick(online=False)
+        self.supervisor.auto_ap = lambda: False
+        self.supervisor.tick(online=False)
+        self.assertEqual(self.events, ["start", "stop", "restore"])
+
+    def test_automatic_ap_setting_defaults_to_disabled(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "config.json"
+            with patch.object(netmonitor, "CONFIG_PATH", path):
+                self.assertFalse(netmonitor.auto_ap_enabled())
+                path.write_text(json.dumps({"url": ""}))
+                self.assertFalse(netmonitor.auto_ap_enabled())
+                path.write_text(json.dumps({"auto_ap": True}))
+                self.assertTrue(netmonitor.auto_ap_enabled())
+                path.write_text("not json")
+                self.assertFalse(netmonitor.auto_ap_enabled())
 
     def test_no_ap_during_grace_period(self):
         self.supervisor.tick(online=False)
