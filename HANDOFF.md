@@ -18,6 +18,9 @@ It was flashed to a clean SD card and cold-booted on a Pi 3 (Ethernet): the full
 first-use setup (pairing, password, display URL) worked. Not yet tested: the release
 variant and the Pi 2 clean install.
 
+The `v0.4.2` pre-release was built by the GitHub workflow (release variant); its
+checksum and build attestation were verified. It has not been boot-tested yet.
+
 ## Build And Runtime
 
 - Pinned image base: Raspberry Pi OS Trixie armhf, pi-gen commit
