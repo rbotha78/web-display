@@ -11,8 +11,9 @@ Pi 3 WPA2 AP validation, and do not use an open AP as a workaround.
 
 The latest development firmware is
 `deploy/image_2026-10-09-web-display-development-milestone2.img.gz`,
-version 0.3.4, SHA-256
-`2658e0140d0b1ca68c5e27fada2fa8ac0171d86496399c46b4fb92a7076b21f0`.
+version 0.4.0, SHA-256
+`8c3b650f4a1d52e03f111c8ab5bfa051d6becba288aaea87bc1fbb034354c8fa`
+(passes `gzip -t`; the same-day filename is reused, so it replaces the 0.3.4 build).
 It has not been flashed as a clean install.
 
 ## Build And Runtime
@@ -24,6 +25,9 @@ It has not been flashed as a clean install.
   the preserved container `web_display_pigen_development` (stages 0-2) and emit
   `.img.gz`; `FRESH=1` forces a full build. Remove the container with
   `docker rm -v web_display_pigen_development` to reclaim disk space.
+- The admin UI is React + TypeScript in `ui/`; the built bundle is committed in
+  `src/webdisplay/static/` (rebuild with `cd ui && npm run build`). No Node is
+  needed on the device or for the image build. CSP forbids inline script/style.
 - Development SSH uses the public key at `~/.ssh/id_rsa.pub` by default;
   override with `DEBUG_SSH_PUBLIC_KEY`. The release variant has no debug user
   and masks SSH.
@@ -53,7 +57,7 @@ It has not been flashed as a clean install.
   restores the saved client. The user accepts this as a blocker for now.
 - Pi 2 was unreachable from WSL at the end of the session. The Pi 3 remained
   reachable and its appliance services were active.
-- Report hardware checks separately from unit tests. Do not claim the 0.3.4
+- Report hardware checks separately from unit tests. Do not claim the 0.4.0
   image was booted or that Pi 3 WPA2 AP works.
 
 ## Validation

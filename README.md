@@ -147,6 +147,21 @@ this explicit local trust procedure.
 - The mouse cursor is permanently hidden: Xorg starts with `-nocursor`, since no
   pointing device is ever used on the kiosk.
 
+## Administration UI
+
+The administration page is a React + TypeScript single-page app in `ui/` (Vite,
+no UI framework dependencies, dark/light themes, responsive). The compiled bundle
+is committed in `src/webdisplay/static/` and served by the Python service, so
+neither the Pi nor the image build needs Node. After changing anything in `ui/`:
+
+```sh
+cd ui && npm install && npm run typecheck && npm test && npm run build
+```
+
+and commit the regenerated `src/webdisplay/static/`. `npm run dev` runs a hot-reload
+server that proxies `/api` to a service on `https://localhost:8443`. The page is
+served with a strict Content-Security-Policy (no inline scripts or styles).
+
 ## Development checks
 
 ```sh

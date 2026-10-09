@@ -81,6 +81,12 @@ class BuildConfigTests(unittest.TestCase):
         self.assertIn('DEPLOY_COMPRESSION="xz"', script)
         self.assertIn('DEPLOY_COMPRESSION="${DEPLOY_COMPRESSION:-gz}"', script)
 
+    def test_admin_ui_bundle_is_committed_and_packaged(self):
+        self.assertTrue(Path("src/webdisplay/static/index.html").is_file())
+        self.assertTrue(list(Path("src/webdisplay/static/assets").glob("*.js")))
+        project = Path("pyproject.toml").read_text(encoding="utf-8")
+        self.assertIn("static/**/*", project)
+
 
 if __name__ == "__main__":
     unittest.main()

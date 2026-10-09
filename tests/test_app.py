@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from webdisplay import app as webdisplay_app
 from webdisplay.app import (
     Application,
     ConfigStore,
@@ -13,6 +14,7 @@ from webdisplay.app import (
     SessionStore,
     hash_password,
     make_handler,
+    static_file,
     validate_url,
     verify_password,
 )
@@ -126,6 +128,20 @@ class ApiTests(unittest.TestCase):
             calls, [{"operation": "connect", "ssid": "Home", "password": "secret123"}]
         )
 
+    def test_root_serves_ui_and_health_reports_pairing(self):
+        response, payload = self.request("GET", "/health")
+        self.assertEqual(payload, {"status": "ok", "paired": False})
+        self.connection.request("GET", "/")
+        response = self.connection.getresponse()
+        body = response.read()
+        self.assertEqual(response.status, 200)
+        self.assertIn(b'<div id="root">', body)
+        self.assertNotIn("unsafe-inline", response.getheader("Content-Security-Policy"))
+        self.connection.request("GET", "/assets/../app.py")
+        response = self.connection.getresponse()
+        response.read()
+        self.assertEqual(response.status, 404)
+
     def test_pair_authentication_and_csrf(self):
         response, _ = self.request("GET", "/api/config")
         self.assertEqual(response.status, 401)
@@ -181,6 +197,28 @@ class ApiTests(unittest.TestCase):
             (Path(self.directory.name) / "target-url").read_text().strip(),
             "https://example.com",
         )
+
+
+class StaticUiTests(unittest.TestCase):
+    def test_static_file_serves_index_and_assets_only_inside_the_bundle(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "static"
+            (root / "assets").mkdir(parents=True)
+            (root / "index.html").write_text("<html></html>")
+            (root / "assets" / "app.js").write_text("1")
+            (Path(directory) / "secret.html").write_text("secret")
+            self.assertEqual(static_file("/", root), (b"<html></html>", "text/html"))
+            self.assertEqual(static_file("/assets/app.js?x=1", root), (b"1", "text/javascript"))
+            self.assertIsNone(static_file("/../secret.html", root))
+            self.assertIsNone(static_file("/assets/../../secret.html", root))
+            self.assertIsNone(static_file("/%2e%2e/secret.html", root))
+            self.assertIsNone(static_file("/assets/missing.js", root))
+            self.assertIsNone(static_file("/assets/app.exe", root))
+
+    def test_built_bundle_is_present_and_has_no_inline_scripts(self):
+        index = (Path(webdisplay_app.__file__).parent / "static" / "index.html").read_text()
+        self.assertIn('src="/assets/', index)
+        self.assertNotRegex(index, r"<script(?![^>]*\bsrc=)")
 
 
 class KioskTests(unittest.TestCase):

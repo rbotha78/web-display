@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import hashlib
 import hmac
-import html
 import ipaddress
 import json
 import logging
@@ -290,139 +289,32 @@ class Application:
         return status
 
 
-def page(title: str, body: str) -> bytes:
-    return f"""<!doctype html>
-<html lang="en"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{html.escape(title)}</title>
-<style>
-body{{font:18px system-ui,sans-serif;max-width:48rem;margin:3rem auto;padding:0 1rem;
-background:#111;color:#eee}} input,button{{font:inherit;padding:.6rem;margin:.3rem 0;
-box-sizing:border-box}} input{{width:100%}} button{{cursor:pointer}} .error{{color:#ff8a8a}}
-code{{background:#292929;padding:.15rem .3rem}} a{{color:#8ecbff}}
-</style></head><body>{body}</body></html>""".encode()
+STATIC_DIR = Path(__file__).parent / "static"
+CONTENT_TYPES = {
+    ".html": "text/html",
+    ".js": "text/javascript",
+    ".css": "text/css",
+    ".svg": "image/svg+xml",
+    ".png": "image/png",
+    ".ico": "image/x-icon",
+    ".woff2": "font/woff2",
+}
 
 
-ADMIN_PAGE = page(
-    "Web display administration",
-    """<h1>Web display administration</h1>
-<p id="message"></p>
-<section id="pairing" hidden>
-  <h2>First-use pairing</h2>
-  <label>Code shown on display<input id="code" inputmode="numeric" autocomplete="one-time-code"></label>
-  <label>New administrator password<input id="pair-password" type="password" autocomplete="new-password"></label>
-  <button id="pair">Pair device</button>
-</section>
-<section id="login" hidden>
-  <label>Administrator password<input id="password" type="password" autocomplete="current-password"></label>
-  <button id="log-in">Log in</button>
-</section>
-<section id="admin" hidden>
-  <h2>Display</h2>
-  <label>Web page URL<input id="url" type="url" placeholder="https://example.com"></label>
-  <label><input id="auto-ap" type="checkbox"> Start the setup access point automatically after about two minutes without internet</label>
-  <button id="save">Save settings</button>
-  <button id="reboot">Reboot device</button>
-  <h2>Status</h2><pre id="status"></pre>
-  <h2>Wi-Fi</h2>
-  <p>Ethernet is preferred whenever it has a route. Wi-Fi needs a country code before it can be used.</p>
-  <label>Country code<input id="country" maxlength="2" placeholder="GB"></label>
-  <button id="set-country">Set country</button>
-  <button id="scan">Scan networks</button>
-  <label>Network<select id="networks"></select></label>
-  <label>Wi-Fi password<input id="wifi-password" type="password" autocomplete="off"></label>
-  <button id="wifi-connect">Connect</button>
-  <button id="wifi-forget">Forget saved network</button>
-  <h2>Network</h2><pre id="network"></pre>
-</section>
-<script src="/static/app.js" defer></script>""",
-)
-
-ADMIN_JS = b"""
-let csrf = "";
-const q = id => document.getElementById(id);
-const message = text => { q("message").textContent = text; };
-async function request(path, options = {}) {
-  options.headers = {"Content-Type": "application/json", ...(options.headers || {})};
-  if (csrf) options.headers["X-CSRF-Token"] = csrf;
-  const response = await fetch(path, options);
-  const body = await response.json();
-  if (!response.ok) throw new Error(body.error || `Request failed (${response.status})`);
-  return body;
-}
-async function showAdmin(session) {
-  csrf = session.csrf;
-  q("pairing").hidden = q("login").hidden = true;
-  q("admin").hidden = false;
-  const [config, status] = await Promise.all([request("/api/config"), request("/api/status")]);
-  q("url").value = config.url;
-  q("auto-ap").checked = config.auto_ap;
-  q("status").textContent = JSON.stringify(status, null, 2);
-  refreshNetwork().catch(error => message(error.message));
-}
-async function initialise() {
-  try { await showAdmin(await request("/api/session")); }
-  catch (_) {
-    const health = await request("/health");
-    q(document.body.dataset.paired === "true" ? "login" : "pairing").hidden = false;
-  }
-}
-q("pair").onclick = async () => {
-  try {
-    await showAdmin(await request("/api/pair", {method:"POST", body:JSON.stringify({
-      code:q("code").value, password:q("pair-password").value
-    })}));
-    message("Pairing complete.");
-  } catch (error) { message(error.message); }
-};
-q("log-in").onclick = async () => {
-  try {
-    await showAdmin(await request("/api/login", {method:"POST", body:JSON.stringify({
-      password:q("password").value
-    })}));
-    message("");
-  } catch (error) { message(error.message); }
-};
-q("save").onclick = async () => {
-  try {
-    const config = await request("/api/config", {method:"PUT", body:JSON.stringify({
-      url:q("url").value, auto_ap:q("auto-ap").checked
-    })});
-    q("url").value = config.url; q("auto-ap").checked = config.auto_ap;
-    message("Settings saved. The display will update shortly.");
-  } catch (error) { message(error.message); }
-};
-q("reboot").onclick = async () => {
-  if (!confirm("Reboot this display?")) return;
-  try { await request("/api/reboot", {method:"POST", body:"{}"}); message("Reboot requested."); }
-  catch (error) { message(error.message); }
-};
-const refreshNetwork = async () => {
-  q("network").textContent = JSON.stringify(await request("/api/network"), null, 2);
-};
-const wifiCall = async (path, body, done) => {
-  try { await request(path, {method:"POST", body:JSON.stringify(body)}); message(done); await refreshNetwork(); }
-  catch (error) { message(error.message); }
-};
-q("set-country").onclick = () => wifiCall("/api/wifi/country",
-  {country:q("country").value.toUpperCase()}, "Country set.");
-q("wifi-connect").onclick = () => wifiCall("/api/wifi/connect",
-  {ssid:q("networks").value, password:q("wifi-password").value}, "Connected.");
-q("wifi-forget").onclick = () => wifiCall("/api/wifi/forget", {}, "Saved network removed.");
-q("scan").onclick = async () => {
-  try {
-    const result = await request("/api/wifi/scan", {method:"POST", body:"{}"});
-    q("networks").replaceChildren(...result.networks.map(network => {
-      const option = document.createElement("option");
-      option.value = network.ssid;
-      option.textContent = `${network.ssid} (${network.signal}%${network.secured ? ", secured" : ""})`;
-      return option;
-    }));
-    message(`${result.networks.length} networks found.`);
-  } catch (error) { message(error.message); }
-};
-initialise().catch(error => message(error.message));
-"""
+def static_file(url_path: str, root: Path = STATIC_DIR) -> tuple[bytes, str] | None:
+    """Return a file from the built UI bundle, or None if it is not a plain file inside it."""
+    relative = "index.html" if url_path == "/" else url_path.split("?", 1)[0].lstrip("/")
+    content_type = CONTENT_TYPES.get(Path(relative).suffix)
+    if content_type is None:
+        return None
+    try:
+        base = root.resolve()
+        target = (base / relative).resolve()
+        if base not in target.parents or not target.is_file():
+            return None
+        return target.read_bytes(), content_type
+    except OSError:
+        return None
 
 
 def make_handler(app: Application) -> type[BaseHTTPRequestHandler]:
@@ -447,7 +339,7 @@ def make_handler(app: Application) -> type[BaseHTTPRequestHandler]:
             self.send_header("X-Frame-Options", "DENY")
             self.send_header(
                 "Content-Security-Policy",
-                "default-src 'self'; style-src 'unsafe-inline'; frame-ancestors 'none'",
+                "default-src 'self'; img-src 'self' data:; frame-ancestors 'none'",
             )
             if headers:
                 for name, value in headers.items():
@@ -496,16 +388,14 @@ def make_handler(app: Application) -> type[BaseHTTPRequestHandler]:
 
         def do_GET(self) -> None:
             if self.path == "/health":
-                self._json(HTTPStatus.OK, {"status": "ok"})
+                self._json(HTTPStatus.OK, {"status": "ok", "paired": app.paired()})
                 return
-            if self.path == "/":
-                body = ADMIN_PAGE.replace(
-                    b"<body>", f'<body data-paired="{str(app.paired()).lower()}">'.encode()
-                )
-                self._send(HTTPStatus.OK, body, "text/html")
-                return
-            if self.path == "/static/app.js":
-                self._send(HTTPStatus.OK, ADMIN_JS, "text/javascript")
+            if not self.path.startswith("/api/"):
+                asset = static_file(self.path)
+                if asset is None:
+                    self._json(HTTPStatus.NOT_FOUND, {"error": "not found"})
+                else:
+                    self._send(HTTPStatus.OK, asset[0], asset[1])
                 return
             if self.path == "/api/session":
                 session = self._require_session()
