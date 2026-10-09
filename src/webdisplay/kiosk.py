@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import html
 import json
+import logging
 import os
 import re
 import signal
@@ -17,6 +18,8 @@ import urllib.request
 from pathlib import Path
 
 from .app import local_addresses
+
+LOG = logging.getLogger(__name__)
 
 
 def reachable(url: str) -> bool:
@@ -119,7 +122,22 @@ def screen_size() -> str | None:
     return f"{match.group(1)},{match.group(2)}" if match else None
 
 
+PROFILE_DIR = Path("/var/lib/web-display-kiosk/chromium")
+
+
+def clear_stale_profile_locks(profile: Path = PROFILE_DIR) -> None:
+    """Chromium locks its profile as hostname-pid; a renamed host sees a stale foreign lock."""
+    for name in ("SingletonLock", "SingletonCookie", "SingletonSocket"):
+        try:
+            (profile / name).unlink()
+        except FileNotFoundError:
+            pass
+        except OSError:
+            LOG.warning("Could not remove %s", name)
+
+
 def launch(browser: str, destination: str) -> subprocess.Popen[bytes]:
+    clear_stale_profile_locks()
     arguments = [
         browser,
         "--kiosk",
@@ -128,7 +146,7 @@ def launch(browser: str, destination: str) -> subprocess.Popen[bytes]:
         "--disable-sync",
         "--disable-features=Translate",
         "--password-store=basic",
-        "--user-data-dir=/var/lib/web-display-kiosk/chromium",
+        f"--user-data-dir={PROFILE_DIR}",
         "--window-position=0,0",
     ]
     size = screen_size()

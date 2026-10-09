@@ -63,6 +63,8 @@ def apply(name: str) -> None:
     run(["systemctl", "restart", "avahi-daemon.service"])
     run(["systemctl", "restart", "web-display-certificate.service"], 120)
     run(["systemctl", "restart", "web-display.service"])
+    # Restart the kiosk so its fallback page and Chromium profile lock use the new name.
+    run(["systemctl", "restart", "web-display-kiosk.service"], 60)
 
 
 def schedule(name: str) -> dict[str, object]:
