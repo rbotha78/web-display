@@ -12,7 +12,7 @@ Pi 3 WPA2 AP validation, and do not use an open AP as a workaround.
 The latest development firmware is
 `deploy/image_2026-10-09-web-display-development-milestone2.img.gz`,
 version 0.4.2, SHA-256
-`eae85c65b346ece4fb028cac1e32984e31137816c874c1acc8b03ffd4890e654`
+`ebc5252e01167d63a52de0157555ad03792534ff0b14cc6b22d42589509b8261`
 (passes `gzip -t`; the same-day filename is reused, so it replaces the 0.4.1 build).
 It has not been flashed as a clean install.
 

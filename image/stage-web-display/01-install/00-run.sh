@@ -3,29 +3,10 @@
 install -d -m 0755 "${ROOTFS_DIR}/usr/lib/python3/dist-packages"
 cp -a files/webdisplay "${ROOTFS_DIR}/usr/lib/python3/dist-packages/"
 
-install -d -m 0755 "${ROOTFS_DIR}/usr/lib/web-display"
-install -m 0755 files/system-action "${ROOTFS_DIR}/usr/lib/web-display/system-action"
-install -m 0755 files/create-certificate \
-	"${ROOTFS_DIR}/usr/lib/web-display/create-certificate"
-install -m 0755 files/wifi-action "${ROOTFS_DIR}/usr/lib/web-display/wifi-action"
-install -m 0755 files/hostname-action "${ROOTFS_DIR}/usr/lib/web-display/hostname-action"
-install -m 0755 files/kiosk-session "${ROOTFS_DIR}/usr/lib/web-display/kiosk-session"
-
-install -m 0644 files/web-display.service \
-	"${ROOTFS_DIR}/etc/systemd/system/web-display.service"
-install -m 0644 files/web-display-certificate.service \
-	"${ROOTFS_DIR}/etc/systemd/system/web-display-certificate.service"
-install -m 0644 files/web-display-network.service \
-	"${ROOTFS_DIR}/etc/systemd/system/web-display-network.service"
-install -m 0644 files/web-display-kiosk.service \
-	"${ROOTFS_DIR}/etc/systemd/system/web-display-kiosk.service"
-install -m 0440 files/web-display-sudoers \
-	"${ROOTFS_DIR}/etc/sudoers.d/web-display"
-install -m 0644 files/Xwrapper.config "${ROOTFS_DIR}/etc/X11/Xwrapper.config"
-install -d -m 0755 "${ROOTFS_DIR}/etc/X11/xorg.conf.d"
-install -m 0644 files/20-web-display-fbdev.conf \
-	"${ROOTFS_DIR}/etc/X11/xorg.conf.d/20-web-display-fbdev.conf"
-install -m 0644 files/web-display-release "${ROOTFS_DIR}/etc/web-display-release"
+while read -r mode source destination; do
+	case "${mode}" in "" | "#"*) continue ;; esac
+	install -D -m "${mode}" "files/${source}" "${ROOTFS_DIR}${destination}"
+done < files/install-manifest
 
 if [ -f files/debug-authorized_keys ]; then
 	install -d -m 0755 "${ROOTFS_DIR}/usr/local/sbin"

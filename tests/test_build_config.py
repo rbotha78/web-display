@@ -13,6 +13,24 @@ class BuildConfigTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
         self.assertIn("userdel --remove image-build", install_script)
 
+    def test_install_manifest_is_complete_and_shared(self):
+        files = Path("image/stage-web-display/01-install/files")
+        entries = [
+            line.split()
+            for line in (files / "install-manifest").read_text(encoding="utf-8").splitlines()
+            if line.strip() and not line.startswith("#")
+        ]
+        self.assertGreater(len(entries), 10)
+        for mode, source, destination in entries:
+            self.assertRegex(mode, r"^0[0-7]{3}$")
+            self.assertTrue((files / source).is_file(), source)
+            self.assertTrue(destination.startswith("/"), destination)
+        for script in (
+            "image/stage-web-display/01-install/00-run.sh",
+            "tools/push-to-device.sh",
+        ):
+            self.assertIn("install-manifest", Path(script).read_text(encoding="utf-8"))
+
     def test_certificate_service_creates_its_state_directory(self):
         certificate_service = Path(
             "image/stage-web-display/01-install/files/"
