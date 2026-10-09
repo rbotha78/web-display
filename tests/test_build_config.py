@@ -31,6 +31,14 @@ class BuildConfigTests(unittest.TestCase):
         ):
             self.assertIn("install-manifest", Path(script).read_text(encoding="utf-8"))
 
+    def test_image_workflow_is_release_only_and_pinned(self):
+        workflow = Path(".github/workflows/build-image.yml").read_text(encoding="utf-8")
+        self.assertIn("types: [published]", workflow)
+        self.assertIn("--prerelease", workflow)
+        for line in workflow.splitlines():
+            if "uses:" in line:
+                self.assertRegex(line, r"@[0-9a-f]{40}\b")
+
     def test_certificate_service_creates_its_state_directory(self):
         certificate_service = Path(
             "image/stage-web-display/01-install/files/"

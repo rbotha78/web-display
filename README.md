@@ -43,6 +43,20 @@ and first-boot user renaming is explicitly disabled.
   full rebuild; the base is also rebuilt after `BASE_MAX_AGE_DAYS` (default 14)
   to pick up OS updates. A code-only rebuild takes about 8 minutes instead of 25. `DEPLOY_COMPRESSION=none|gz|xz|zip` overrides the format.
 
+### GitHub Actions
+
+`.github/workflows/build-image.yml` builds the image on GitHub:
+
+- **Publishing a release** builds `VARIANT=release` (hardened, `xz`), checks that the tag
+  (`v0.4.2`) matches `WEB_DISPLAY_VERSION`, attaches the `.img.xz` and `SHA256SUMS` to the
+  release, creates a build provenance attestation (`gh attestation verify <image> --repo
+  rbotha78/web-display`) and marks the release as a **pre-release** until a release image
+  has been boot-tested (remove the `--prerelease` step then).
+- **Run workflow** (manual) builds `development` or `release`. Development builds need your
+  SSH public key in the `ssh_public_key` input. The result is a workflow artifact kept for 14 days.
+
+Hosted builds are always full builds (about 30 minutes).
+
 For quick iteration without reflashing, run
 `tools/push-to-device.sh webdebug@DEVICE_IP` to copy the source and service files
 to a development device and restart the management services. It installs everything listed in
