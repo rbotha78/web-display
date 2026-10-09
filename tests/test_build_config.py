@@ -33,9 +33,11 @@ class BuildConfigTests(unittest.TestCase):
 
     def test_image_workflow_is_release_only_and_pinned(self):
         workflow = Path(".github/workflows/build-image.yml").read_text(encoding="utf-8")
+        self.assertIn("pull_request", Path(".github/workflows/ci.yml").read_text(encoding="utf-8"))
         self.assertIn("types: [published]", workflow)
         self.assertIn("--prerelease", workflow)
-        for line in workflow.splitlines():
+        pinned = workflow + Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
+        for line in pinned.splitlines():
             if "uses:" in line:
                 self.assertRegex(line, r"@[0-9a-f]{40}\b")
 

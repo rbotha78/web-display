@@ -45,6 +45,10 @@ and first-boot user renaming is explicitly disabled.
 
 ### GitHub Actions
 
+`.github/workflows/ci.yml` runs on every push to `main` and every pull request: the Python
+tests, a shell syntax check, the UI typecheck and tests, and a check that the committed
+`src/webdisplay/static/` bundle matches a fresh `npm run build`.
+
 `.github/workflows/build-image.yml` builds the image on GitHub:
 
 - **Publishing a release** builds `VARIANT=release` (hardened, `xz`), checks that the tag
