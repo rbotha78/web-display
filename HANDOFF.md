@@ -14,7 +14,9 @@ The latest development firmware is
 version 0.4.2, SHA-256
 `ebc5252e01167d63a52de0157555ad03792534ff0b14cc6b22d42589509b8261`
 (passes `gzip -t`; the same-day filename is reused, so it replaces the 0.4.1 build).
-It has not been flashed as a clean install.
+It was flashed to a clean SD card and cold-booted on a Pi 3 (Ethernet): the full
+first-use setup (pairing, password, display URL) worked. Not yet tested: the release
+variant and the Pi 2 clean install.
 
 ## Build And Runtime
 
