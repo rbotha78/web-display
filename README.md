@@ -45,7 +45,9 @@ and first-boot user renaming is explicitly disabled.
 
 For quick iteration without reflashing, run
 `tools/push-to-device.sh webdebug@DEVICE_IP` to copy the source and service files
-to a development device and restart the management service.
+to a development device and restart the management services. It installs all helpers,
+units, the release file and the Xorg config; add `--restart-kiosk` to also restart the
+kiosk (blanks the screen briefly) when kiosk code, its unit or the Xorg config changed.
 
 ## Wi-Fi (milestone 2, staged)
 
