@@ -53,9 +53,8 @@ tests, a shell syntax check, the UI typecheck and tests, and a check that the co
 
 - **Publishing a release** builds `VARIANT=release` (hardened, `xz`), checks that the tag
   (`v0.4.2`) matches `WEB_DISPLAY_VERSION`, attaches the `.img.xz` and `SHA256SUMS` to the
-  release, creates a build provenance attestation (`gh attestation verify <image> --repo
-  rbotha78/web-display`) and marks the release as a **pre-release** until a release image
-  has been boot-tested (remove the `--prerelease` step then).
+  release, and creates a build provenance attestation (`gh attestation verify <image> --repo
+  rbotha78/web-display`). Release images are boot-tested on a Pi before publication.
 - **Run workflow** (manual) builds `development` or `release`. Development builds need your
   SSH public key in the `ssh_public_key` input. The result is a workflow artifact kept for 14 days.
 

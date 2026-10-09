@@ -102,12 +102,10 @@ jobs:
           retention-days: 14
           compression-level: 0
 
-      - name: Attach the image to the release and mark it pre-release
+      - name: Attach the image to the release
         if: github.event_name == 'release'
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.event.release.tag_name }}
         run: |
           gh release upload "${TAG}" deploy/*.img.xz deploy/SHA256SUMS --clobber
-          # Remove this once a release image has been boot-tested on a device.
-          gh release edit "${TAG}" --prerelease

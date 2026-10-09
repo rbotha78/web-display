@@ -15,11 +15,12 @@ version 0.4.2, SHA-256
 `ebc5252e01167d63a52de0157555ad03792534ff0b14cc6b22d42589509b8261`
 (passes `gzip -t`; the same-day filename is reused, so it replaces the 0.4.1 build).
 It was flashed to a clean SD card and cold-booted on a Pi 3 (Ethernet): the full
-first-use setup (pairing, password, display URL) worked. Not yet tested: the release
-variant and the Pi 2 clean install.
+first-use setup (pairing, password, display URL) worked. The user also tested the
+release image from the `v0.4.2` release on a Pi 2; the full setup worked as expected.
 
 The `v0.4.2` pre-release was built by the GitHub workflow (release variant); its
-checksum and build attestation were verified. It has not been boot-tested yet.
+checksum and build attestation were verified, and it has now been boot-tested on a
+Pi 2. The release workflow no longer forces releases to be marked as pre-releases.
 
 ## Build And Runtime
 
@@ -62,8 +63,9 @@ checksum and build attestation were verified. It has not been boot-tested yet.
   restores the saved client. The user accepts this as a blocker for now.
 - Pi 2 was unreachable from WSL at the end of the session. The Pi 3 remained
   reachable and its appliance services were active.
-- Report hardware checks separately from unit tests. Do not claim the 0.4.2
-  image was booted or that Pi 3 WPA2 AP works.
+- Report hardware checks separately from unit tests. The v0.4.2 development image
+  was clean-booted on Pi 3; its release image was boot-tested on Pi 2. Do not claim
+  Pi 3 WPA2 AP works.
 
 ## Validation
 
