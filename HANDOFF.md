@@ -9,11 +9,10 @@ for agreed product requirements. The user accepts Pi 3 built-in WPA2 AP failure
 on the current Raspberry Pi OS Trixie stack as a blocker for now. Do not claim
 Pi 3 WPA2 AP validation, and do not use an open AP as a workaround.
 
-The last built development firmware is
-`deploy/image_2026-10-08-web-display-development-milestone2.img.xz`,
-version 0.3.3 (the opt-in automatic AP change, 0.3.4, is source only until the
-next build), SHA-256
-`9c7240364795d0c8891bae40ef95164fe665b1596267e31d24fa64cc75a1b9e3`.
+The latest development firmware is
+`deploy/image_2026-10-09-web-display-development-milestone2.img.gz`,
+version 0.3.4, SHA-256
+`2658e0140d0b1ca68c5e27fada2fa8ac0171d86496399c46b4fb92a7076b21f0`.
 It has not been flashed as a clean install.
 
 ## Build And Runtime
