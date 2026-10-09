@@ -30,11 +30,12 @@ not retry an inactive client profile; 0.4.3 adds a 60-second retry and unlimited
 NetworkManager autoconnect retries. The Pi is still failing to associate despite strong
 scan signal; underlying AP/driver behavior is unresolved. Logs showed repeated
 association timeouts, so do not mark the issue resolved until Wi-Fi reconnects and
-remains stable. The latest failures reach the WPA four-way handshake and disconnect;
-NetworkManager then reports no secrets agent. Even with the saved system PSK intact,
-association retries every minute do not currently succeed. Multiple very strong
-same-SSID BSSIDs are visible on channel 13; test for inconsistent AP/mesh security or
-credentials before changing the device to pin a BSSID.
+remains stable. The latest failures reached the WPA four-way handshake and disconnected;
+NetworkManager then reported no secrets agent. Even with the saved system PSK intact,
+association retries every minute initially failed. A temporary BSSID test mistakenly
+targeted nearby networks rather than the configured SSID; after restoring automatic
+selection, Wi-Fi reconnected through the configured network and stayed up for at least
+five minutes. Continue observing before closing the reliability issue.
 
 ## Build And Runtime
 
@@ -79,10 +80,11 @@ credentials before changing the device to pin a BSSID.
   restores the saved client. The user accepts this as a blocker for now.
 - **Pi 3 Wi-Fi client reliability:** observed on the current device: it connected at
   boot, then lost association during a WPA handshake. NetworkManager requested secrets
-  and failed because no interactive agent exists, then subsequent association attempts
-  timed out despite strong scans. Later traces repeatedly fail at the WPA four-way
-  handshake. Ethernet remains connected. Retry improvements are deployed, but a
-  successful/stable Wi-Fi reconnect has not yet been observed.
+  and failed because no interactive agent exists; later traces repeatedly failed at
+  the WPA four-way handshake. The 0.4.3 client retry improvements were deployed, and
+  Wi-Fi reconnected automatically after the saved profile was restored and remained
+  connected for at least five minutes. Keep Ethernet attached and observe longer/cold
+  boot before marking the issue resolved.
 - Pi 2 was unreachable from WSL at the end of the session. The Pi 3 remained
   reachable and its appliance services were active.
 - Report hardware checks separately from unit tests. The v0.4.2 development image
