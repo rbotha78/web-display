@@ -117,6 +117,10 @@ connected for at least five minutes. Root cause is unknown; track recurrence sep
   was clean-booted on Pi 3; its release image was boot-tested on Pi 2. Do not claim
   Pi 3 WPA2 AP works.
 
+- The setup AP screen shows an offline-generated Wi-Fi join QR code (`python3-segno`,
+  `kiosk.wifi_qr_svg`). New package: images need a rebuild; existing devices need
+  `apt install python3-segno` (the page omits the QR if it is missing).
+
 ## Validation
 
 - `PYTHONPATH=src python3 -m unittest discover -s tests`: 60 tests pass.

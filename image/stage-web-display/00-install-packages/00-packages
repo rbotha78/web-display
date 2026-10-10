@@ -12,6 +12,7 @@ iw
 network-manager
 openssl
 python3
+python3-segno
 python3-xlib
 sudo
 usbutils

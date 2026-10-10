@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import html
+import io
 import json
 import logging
 import os
@@ -58,6 +59,24 @@ def read_setup_ap(path: Path | None) -> dict[str, str] | None:
     return data
 
 
+def wifi_qr_payload(ssid: str, password: str) -> str:
+    def escape(value: str) -> str:
+        return re.sub(r'([\\;,:"])', r"\\\1", value)
+
+    return f"WIFI:T:WPA;S:{escape(ssid)};P:{escape(password)};;"
+
+
+def wifi_qr_svg(ssid: str, password: str) -> str:
+    try:
+        import segno
+    except ImportError:
+        return ""
+    code = segno.make(wifi_qr_payload(ssid, password), error="m")
+    stream = io.BytesIO()
+    code.save(stream, kind="svg", scale=8, border=2, dark="#000", light="#fff", xmldecl=False, svgns=True)
+    return stream.getvalue().decode("utf-8")
+
+
 def fallback_html(
     pairing_path: Path,
     certificate_path: Path,
@@ -75,6 +94,9 @@ def fallback_html(
             f"<p>Network: <strong>{html.escape(setup_ap['ssid'])}</strong></p>"
             f"<p>Password: <strong>{html.escape(setup_ap['password'])}</strong></p>"
         )
+        qr = wifi_qr_svg(setup_ap["ssid"], setup_ap["password"])
+        if qr:
+            ap_section += f'<div class="qr">{qr}</div><p>Or scan this code to join.</p>'
     admin_url = f"https://{address}:{port}/"
     pairing = ""
     if pairing_path.exists():
@@ -85,7 +107,7 @@ def fallback_html(
 <meta http-equiv="refresh" content="5"><style>
 body{{margin:0;background:#111;color:#eee;font:3vw system-ui,sans-serif;
 display:grid;place-items:center;min-height:100vh;text-align:center}}
-main{{max-width:85vw}} strong{{font-size:2em;letter-spacing:.2em}}
+main{{max-width:85vw}} .qr svg{{width:30vh;height:30vh}} strong{{font-size:2em;letter-spacing:.2em}}
 </style></head><body><main><h1>Web display setup</h1>
 {ap_section}<p>Administration: {html.escape(admin_url)}</p>{pairing}
 <p>TLS certificate SHA-256:<br><small>{html.escape(fingerprint)}</small></p>

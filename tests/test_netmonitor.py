@@ -184,6 +184,23 @@ class FallbackTests(unittest.TestCase):
         self.assertIn("pw&lt;&gt;", page)
         self.assertIn("https://10.42.0.1:8443/", page)
         self.assertNotIn("WebDisplay-AB12", plain)
+        self.assertNotIn('class="qr"', plain)
+
+    def test_wifi_qr_payload_escapes_specials(self):
+        self.assertEqual(
+            kiosk.wifi_qr_payload("a;b", 'p:w\\"x,'),
+            'WIFI:T:WPA;S:a\\;b;P:p\\:w\\\\\\"x\\,;;',
+        )
+
+    def test_setup_page_embeds_offline_qr(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            info = root / "ap.json"
+            info.write_text(json.dumps({"ssid": "WebDisplay-AB12", "password": "pw12", "address": "10.42.0.1"}))
+            with patch.object(kiosk, "local_addresses", return_value=[]):
+                page = kiosk.fallback_html(root / "none", root / "none", 8443, info)
+        self.assertIn('<div class="qr"><svg', page)
+        self.assertNotIn("http://", page.replace("http://www.w3.org/2000/svg", ""))
 
 
 class StartFailureTests(unittest.TestCase):
