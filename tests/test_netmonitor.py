@@ -154,7 +154,13 @@ class ApConfigTests(unittest.TestCase):
 
     def test_keyfile_is_wpa2_shared(self):
         text = netmonitor.render_ap_keyfile("WebDisplay-AB12", "pw", "wlan0")
-        for expected in ("mode=ap", "key-mgmt=wpa-psk", "pairwise=ccmp", "method=shared"):
+        for expected in (
+            "mode=ap",
+            "key-mgmt=wpa-psk",
+            "pairwise=ccmp",
+            "pmf=1",
+            "method=shared",
+        ):
             self.assertIn(expected, text)
         self.assertIn("autoconnect=false", text)
 
@@ -185,8 +191,7 @@ class StartFailureTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             with (
-                patch.object(netmonitor, "wifi_device", return_value="wlan0"),
-                patch.object(netmonitor, "ap_capable", return_value=True),
+                patch.object(netmonitor, "ap_device", return_value="wlan0"),
                 patch.object(netmonitor, "current_country", return_value="GB"),
                 patch.object(netmonitor, "run") as run,
                 patch.object(netmonitor, "AP_KEYFILE", root / "ap.nmconnection"),
@@ -199,6 +204,23 @@ class StartFailureTests(unittest.TestCase):
                 result = Supervisor().start_ap()
         self.assertFalse(result)
         restore.assert_called_once()
+
+
+class ApDeviceTests(unittest.TestCase):
+    def pick(self, usb):
+        with (
+            patch.object(netmonitor, "wifi_devices", return_value=["wlan0", "wlan1"]),
+            patch.object(netmonitor, "device_phy", side_effect=lambda d: d),
+            patch.object(netmonitor, "ap_capable", return_value=True),
+            patch.object(netmonitor, "is_usb", side_effect=lambda d: d in usb),
+        ):
+            return netmonitor.ap_device()
+
+    def test_prefers_usb_adapter(self):
+        self.assertEqual(self.pick({"wlan1"}), "wlan1")
+
+    def test_falls_back_to_first_radio(self):
+        self.assertEqual(self.pick(set()), "wlan0")
 
 
 class DestinationTests(unittest.TestCase):

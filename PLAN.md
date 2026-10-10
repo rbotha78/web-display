@@ -103,8 +103,9 @@ is not production-ready until the later security and recovery gates pass.
 Milestone 1 is implemented and validated on Raspberry Pi 2. Milestone 2 is
 implemented and validated on Raspberry Pi 2, including WPA2 client/AP operation,
 Ethernet route preference, outage recovery and on-screen AP credentials. Raspberry
-Pi 3 built-in Wi-Fi client mode works, but its WPA2 AP fails under the current
-Trixie stack with a kernel key-validation error. The user accepts this as a Pi 3
-hardware/software blocker for now; do not use an open AP as a workaround. The
-development image is version 0.4.2. Signed remote updates, production hardening
+Pi 3 built-in Wi-Fi client mode works. Its WPA2 AP previously failed under Trixie
+with a kernel key-validation error; explicitly disabling protected management
+frames now allows the generated WPA2 AP profile to activate, but tested Android and
+iPhone clients both fail WPA2 authentication. Do not use an open AP as a workaround.
+The development image is version 0.4.3. Signed remote updates, production hardening
 and release acceptance remain future milestones.

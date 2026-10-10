@@ -110,7 +110,10 @@ certificate for the new name and restarts the management service. Reconnect at
 running automatic AP. When enabled, after 120 seconds of continuous outage, and only
 if the Wi-Fi country is set and the adapter supports AP mode, it starts a WPA2 (CCMP) access point named
 `WebDisplay-XXXX` with a freshly generated 12-character password (rotated every time
-the AP starts). The SSID, password and administration address (`https://10.42.0.1:8443/`)
+the AP starts). WPA2-PSK/CCMP is used with protected management frames explicitly
+disabled because the Pi 3's built-in Wi-Fi fails to initialize the AP otherwise.
+This does not disable WPA2 data encryption. The SSID, password and administration
+address (`https://10.42.0.1:8443/`)
 are shown on the display's fallback page. While the AP is up the saved Wi-Fi network is
 retried every 10 minutes; if that fails the AP returns with new credentials. The AP stops
 as soon as internet is reachable again and the saved client network is restored.
@@ -124,13 +127,13 @@ Ethernet route metric is 100, so Ethernet remains preferred when both links are 
 Limitation: the country must first be set while an administration route (Ethernet)
 exists. Test manually with `sudo python3 -m webdisplay.netmonitor start-ap` and `stop-ap`
 (stop `web-display-network` first, or it will remove the AP while Ethernet is online).
-On the tested Raspberry Pi OS Trixie image, Pi 3 Model B client Wi-Fi connects, but
-NetworkManager's secured AP activation currently fails on its built-in Broadcom adapter
-with `nl80211: kernel reports: key setting validation failed` /
-`802.1X supplicant took too long to authenticate`. A standard NetworkManager WPA2 hotspot
-fails the same way, so this is not specific to the generated profile. The supervisor
-restores the saved client connection after the failed AP attempt. WPA2 AP operation on
-the Pi 3 remains an acceptance blocker; do not use an open AP as a workaround.
+On Raspberry Pi OS Trixie, Pi 3 Model B AP startup previously failed with
+`nl80211: kernel reports: key setting validation failed` /
+`802.1X supplicant took too long to authenticate`. Explicitly disabling protected
+management frames in the WPA2 profile allowed the AP to activate, but tested Android
+and iPhone clients both failed WPA2 authentication with an “incorrect password”
+message. Detailed logs show clients reaching the WPA handshake before disconnecting.
+The Pi 3's secured AP is not yet usable; do not use an open AP as a workaround.
 
 ## Flash and first use
 

@@ -70,6 +70,7 @@ def render_ap_keyfile(ssid: str, password: str, interface: str) -> str:
             "proto=rsn",
             "pairwise=ccmp",
             "group=ccmp",
+            "pmf=1",
             f"psk={password}",
             "",
             "[ipv4]",
@@ -83,10 +84,39 @@ def render_ap_keyfile(ssid: str, password: str, interface: str) -> str:
     )
 
 
-def ap_capable() -> bool:
+def ap_capable(phy: str | None = None) -> bool:
     result = run(["iw", "list"])
-    modes = re.search(r"Supported interface modes:(.*?)(?:\n\t\S|\Z)", result.stdout, re.S)
-    return bool(modes and re.search(r"\*\s+AP\s*$", modes.group(1), re.M))
+    for block in re.split(r"(?m)^Wiphy ", result.stdout):
+        if phy is not None and not block.startswith(phy + "\n"):
+            continue
+        modes = re.search(r"Supported interface modes:(.*?)(?:\n\t\S|\Z)", block, re.S)
+        if modes and re.search(r"\*\s+AP\s*$", modes.group(1), re.M):
+            return True
+    return False
+
+
+def wifi_devices() -> list[str]:
+    result = run(["nmcli", "-t", "-f", "DEVICE,TYPE", "device"])
+    return [line.partition(":")[0] for line in result.stdout.splitlines() if line.endswith(":wifi")]
+
+
+def is_usb(device: str) -> bool:
+    try:
+        return "/usb" in os.path.realpath(f"/sys/class/net/{device}/device")
+    except OSError:
+        return False
+
+
+def device_phy(device: str) -> str | None:
+    match = re.search(r"wiphy (\d+)", run(["iw", "dev", device, "info"]).stdout)
+    return f"phy{match.group(1)}" if match else None
+
+
+def ap_device() -> str | None:
+    """Pick the AP adapter: an AP-capable USB adapter first, then any AP-capable radio."""
+    candidates = [d for d in wifi_devices() if ap_capable(device_phy(d))]
+    candidates.sort(key=lambda d: not is_usb(d))
+    return candidates[0] if candidates else None
 
 
 def write_private(path: Path, content: str, mode: int, group: str | None = None) -> None:
@@ -124,8 +154,8 @@ class Supervisor:
         self.last_client_retry = 0.0
 
     def start_ap(self) -> bool:
-        device = wifi_device()
-        if device is None or not ap_capable():
+        device = ap_device()
+        if device is None:
             LOG.warning("No AP-capable Wi-Fi adapter; cannot start setup AP")
             return False
         if not current_country() or current_country() == "00":

@@ -1,13 +1,13 @@
 # Copilot Session Handoff
 
-Last updated: 2026-10-09.
+Last updated: 2026-10-10.
 
 ## Current Status
 
 Milestone 1 and the Pi 2 scope of milestone 2 are implemented. Read `PLAN.md`
-for agreed product requirements. The user accepts Pi 3 built-in WPA2 AP failure
-on the current Raspberry Pi OS Trixie stack as a blocker for now. Do not claim
-Pi 3 WPA2 AP validation, and do not use an open AP as a workaround.
+for agreed product requirements. The Pi 3 built-in WPA2 AP now starts on Trixie with
+a PMF-disabled profile, but tested Android and iPhone clients both fail WPA2
+authentication. Do not claim Pi 3 WPA2 AP validation, and do not use an open AP.
 
 The latest development firmware is
 `deploy/image_2026-10-10-web-display-development-milestone2.img.gz`,
@@ -19,6 +19,8 @@ completed successfully.
 It was flashed to a clean SD card and cold-booted on a Pi 3 (Ethernet): the full
 first-use setup (pairing, password, display URL) worked. The user also tested the
 release image from the `v0.4.2` release on a Pi 2; the full setup worked as expected.
+The Pi 3 AP `pmf=1` fix below is in local source and the installed Pi 3 service, but
+has not yet been built into a new SD-card image.
 
 The `v0.4.2` pre-release was built by the GitHub workflow (release variant); its
 checksum and build attestation were verified, and it has now been boot-tested on a
@@ -85,8 +87,23 @@ connected for at least five minutes. Root cause is unknown; track recurrence sep
 - **Pi 3 Model B:** built-in WPA2 client works, and Ethernet remains preferred.
   WPA2 AP activation fails in both the generated profile and a standard
   NetworkManager hotspot with `nl80211: kernel reports: key setting validation
-  failed` / `802.1X supplicant took too long to authenticate`. Failed activation
-  restores the saved client. The user accepts this as a blocker for now.
+  failed` / `802.1X supplicant took too long to authenticate`. On 2026-10-10,
+  reproduced the generated-profile failure on kernel 6.18.50 and the current
+  BCM43430/1 firmware. A runtime-only brcmfmac MFP feature-disable attempt did not
+  fix it. A temporary WPA2/RSN/CCMP NetworkManager AP with `wifi-sec.pmf=disable`
+  activated, then was removed. Added `pmf=1` to the appliance AP profile and pushed
+  it to the Pi 3; `Supervisor.start_ap()` then succeeded with the stock driver
+  defaults, reporting `AP_PMF=1`. A production AP stayed up with DHCP and HTTPS
+  administration service ready, but Android and iPhone clients both reported
+  “incorrect password.” Debug logging shows association and receipt of WPA2
+  handshake message 2, then client disassociation after the AP sent message 3;
+  no DHCP requests arrived. Replacing the passphrase with its valid 64-hex PSK
+  derivation did not resolve it. The test AP was stopped, debug logging reset to
+  INFO, supervisor restarted, and the configured Wi-Fi restored.
+  Built-in AP clients still fail, but a USB Edimax EW-7811Un on the Pi 3 serves a
+  secured AP correctly. The supervisor now prefers an AP-capable USB adapter
+  (`ap_device()`); verified on the Pi 3 with an authorized phone, DHCP and HTTP 200.
+  Pi 3 setup AP therefore requires a compatible USB adapter; built-in is unsupported.
 - **Pi 3 Wi-Fi client reliability:** observed on the current device: it connected at
   boot, then lost association during a WPA handshake. NetworkManager requested secrets
   and failed because no interactive agent exists; later traces repeatedly failed at
