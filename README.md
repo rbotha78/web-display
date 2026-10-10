@@ -25,6 +25,11 @@ of free space, and a native Linux filesystem. From this directory:
 The compressed image, package manifest and build logs are copied to `deploy/`.
 Package versions in that manifest are part of the release record because the
 supported Raspberry Pi repositories can change after this source revision.
+Raspbian packages are fetched from the HTTPS mirrorservice mirror by default,
+rather than the geographically redirected Oxford backend that has failed during
+builds. Override it with `RASPBIAN_MIRROR=https://... ./build-image.sh` if needed.
+Changing the mirror invalidates the cached development base and triggers a full
+base rebuild.
 The temporary account required by `pi-gen` is deleted during the custom stage,
 and first-boot user renaming is explicitly disabled.
 

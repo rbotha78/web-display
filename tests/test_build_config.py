@@ -13,6 +13,13 @@ class BuildConfigTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
         self.assertIn("userdel --remove image-build", install_script)
 
+    def test_build_uses_configurable_https_raspbian_mirror_for_base(self):
+        build_script = Path("build-image.sh").read_text(encoding="utf-8")
+        self.assertIn("https://mirrorservice.org/sites/archive.raspbian.org/raspbian", build_script)
+        self.assertIn("stage0/prerun.sh", build_script)
+        self.assertIn("stage0/00-configure-apt/files/raspbian.sources", build_script)
+        self.assertIn('BASE_ID="${PI_GEN_COMMIT}:${RASPBIAN_MIRROR}"', build_script)
+
     def test_install_manifest_is_complete_and_shared(self):
         files = Path("image/stage-web-display/01-install/files")
         entries = [
