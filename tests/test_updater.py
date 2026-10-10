@@ -1,4 +1,5 @@
 import io
+import os
 import json
 import shutil
 import subprocess
@@ -90,6 +91,16 @@ class InstallTests(UpdaterCase):
         self.assertFalse((self.root / "current" / "webdisplay" / "__pycache__").exists())
         self.assertEqual(self.updater.state()["pending"], {"version": "1.1.0", "previous": None, "attempts": 0})
         self.assertFalse((self.root / "staging").exists())
+
+    def test_installed_files_are_readable_under_a_restrictive_umask(self):
+        previous = os.umask(0o077)
+        try:
+            self.install()
+        finally:
+            os.umask(previous)
+        for path in (self.root / "current").resolve().rglob("*"):
+            mode = path.stat().st_mode & 0o777
+            self.assertEqual(mode, 0o755 if path.is_dir() else 0o644, path)
 
     def test_bundle_is_deterministic(self):
         first = self.bundle(name="a.wdupdate").read_bytes()

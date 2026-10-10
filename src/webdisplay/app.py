@@ -513,7 +513,7 @@ def make_handler(app: Application) -> type[BaseHTTPRequestHandler]:
 
         def do_GET(self) -> None:
             if self.path == "/health":
-                self._json(HTTPStatus.OK, {"status": "ok", "paired": app.paired()})
+                self._json(HTTPStatus.OK, {"status": "ok", "paired": app.paired(), "version": app.updater.running_version()})
                 return
             if not self.path.startswith("/api/"):
                 asset = static_file(self.path)

@@ -318,6 +318,9 @@ class Updater:
                 raise UpdateError("Update file is corrupt") from None
         (destination / "manifest.json").write_bytes(manifest_bytes)
         (destination / "manifest.sig").write_bytes(signature)
+        # The service user must be able to read the code whatever umask the caller has.
+        for path in (destination, *destination.rglob("*")):
+            os.chmod(path, 0o755 if path.is_dir() else 0o644)
         return manifest
 
     def extract_file(
@@ -468,7 +471,7 @@ class Updater:
         return "confirmed"
 
 
-def system_healthy(port: int = 8443) -> bool:
+def system_healthy(port: int = 8443, expected_version: str | None = None) -> bool:
     for service in SERVICES:
         result = subprocess.run(["systemctl", "is-active", "--quiet", service], check=False)
         if result.returncode != 0:
@@ -478,8 +481,11 @@ def system_healthy(port: int = 8443) -> bool:
     context.verify_mode = ssl.CERT_NONE
     try:
         with urllib.request.urlopen(f"https://127.0.0.1:{port}/health", timeout=5, context=context) as reply:
-            return reply.status == 200
-    except OSError:
+            if reply.status != 200:
+                return False
+            # The web service must actually be running the version being confirmed.
+            return expected_version is None or json.load(reply).get("version") == expected_version
+    except (OSError, ValueError):
         return False
 
 
@@ -492,6 +498,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("command", choices=["install", "guard", "confirm", "status"])
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+    os.umask(0o022)
     updater = Updater()
     try:
         if args.command == "install":
@@ -510,7 +517,12 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "guard":
             print(updater.guard())
         else:
-            print(updater.confirm(system_healthy, restart=restart_services))
+            def healthy() -> bool:
+                pending = updater.state()["pending"]
+                version = str(pending["version"]) if isinstance(pending, dict) else None
+                return system_healthy(expected_version=version)
+
+            print(updater.confirm(healthy, restart=restart_services))
         return 0
     except UpdateError as error:
         print(json.dumps({"error": str(error)}))

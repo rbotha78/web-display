@@ -130,7 +130,8 @@ class ApiTests(unittest.TestCase):
 
     def test_root_serves_ui_and_health_reports_pairing(self):
         response, payload = self.request("GET", "/health")
-        self.assertEqual(payload, {"status": "ok", "paired": False})
+        self.assertEqual({k: payload[k] for k in ("status", "paired")}, {"status": "ok", "paired": False})
+        self.assertIn("version", payload)
         self.connection.request("GET", "/")
         response = self.connection.getresponse()
         body = response.read()
