@@ -4,6 +4,16 @@ set -euo pipefail
 ROOT="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 PI_GEN_COMMIT="c4f875735c109c658cd5ee99eaaaf70886a853b5"
 PI_GEN_DIR="${ROOT}/.build/pi-gen"
+RASPBIAN_MIRROR="${RASPBIAN_MIRROR:-https://mirrorservice.org/sites/archive.raspbian.org/raspbian}"
+RASPBIAN_MIRROR="${RASPBIAN_MIRROR%/}"
+
+case "${RASPBIAN_MIRROR}" in
+http://* | https://*) ;;
+*)
+	echo "RASPBIAN_MIRROR must be an HTTP or HTTPS URL." >&2
+	exit 2
+	;;
+esac
 
 mkdir -p "${ROOT}/.build"
 if [[ ! -d "${PI_GEN_DIR}/.git" ]]; then
@@ -15,6 +25,23 @@ git -C "${PI_GEN_DIR}" checkout --quiet --detach "${PI_GEN_COMMIT}"
 git -C "${PI_GEN_DIR}" clean -ffdqx
 
 cp -a "${ROOT}/image/stage-web-display" "${PI_GEN_DIR}/stage-web-display"
+python3 - "${PI_GEN_DIR}" "${RASPBIAN_MIRROR}" <<'PY'
+from pathlib import Path
+import sys
+
+pi_gen = Path(sys.argv[1])
+mirror = sys.argv[2]
+default = "http://raspbian.raspberrypi.com/raspbian/"
+files = (
+    pi_gen / "stage0/prerun.sh",
+    pi_gen / "stage0/00-configure-apt/files/raspbian.sources",
+)
+for path in files:
+    content = path.read_text(encoding="utf-8")
+    if default not in content:
+        raise SystemExit(f"Expected default Raspbian mirror not found in {path}")
+    path.write_text(content.replace(default, mirror + "/"), encoding="utf-8")
+PY
 cp -a "${ROOT}/src/webdisplay" \
 	"${PI_GEN_DIR}/stage-web-display/01-install/files/webdisplay"
 touch "${PI_GEN_DIR}/stage2/SKIP_IMAGES"
@@ -47,7 +74,7 @@ echo "VARIANT=${VARIANT}" >>"${STAGE_FILES}/web-display-release"
 CONTAINER_NAME="web_display_pigen_${VARIANT}"
 STAMP="${ROOT}/.build/base-${VARIANT}.stamp"
 BASE_MAX_AGE_DAYS="${BASE_MAX_AGE_DAYS:-14}"
-BASE_ID="${PI_GEN_COMMIT}"
+BASE_ID="${PI_GEN_COMMIT}:${RASPBIAN_MIRROR}"
 FAST=0
 if [[ "${VARIANT}" == development ]]; then
 	DEPLOY_COMPRESSION="${DEPLOY_COMPRESSION:-gz}"

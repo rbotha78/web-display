@@ -10,10 +10,12 @@ on the current Raspberry Pi OS Trixie stack as a blocker for now. Do not claim
 Pi 3 WPA2 AP validation, and do not use an open AP as a workaround.
 
 The latest development firmware is
-`deploy/image_2026-10-09-web-display-development-milestone2.img.gz`,
+`deploy/image_2026-10-10-web-display-development-milestone2.img.gz`,
 version 0.4.3, SHA-256
-`87d7cddbbdca4abbf079e2fa120c300ef1dacb776b316219fb08a43373edeb88`
-(passes `gzip -t`), with saved-client reconnection retries.
+`54b48a6f8318f1d23435607df78035a4bf73cf7790827d4383cfec53cc8f5bb2`
+(passes `gzip -t`), with saved-client reconnection retries. This full build used
+the HTTPS mirrorservice Raspbian mirror instead of the unstable redirector and
+completed successfully.
 It was flashed to a clean SD card and cold-booted on a Pi 3 (Ethernet): the full
 first-use setup (pairing, password, display URL) worked. The user also tested the
 release image from the `v0.4.2` release on a Pi 2; the full setup worked as expected.
@@ -57,6 +59,10 @@ connected for at least five minutes. Root cause is unknown; track recurrence sep
   and masks SSH.
 - Use `tools/push-to-device.sh webdebug@DEVICE_IP` for source/service deployment
   without reflashing.
+- Raspbian packages default to
+  `https://mirrorservice.org/sites/archive.raspbian.org/raspbian`; override with
+  `RASPBIAN_MIRROR` when building. The selected mirror is part of the cached
+  development-base identity.
 - The image runs a Python HTTPS management service on port 8443 and Chromium
   under Xorg. The Pi 2 requires Xorg's fbdev driver.
 - NetworkManager owns Wi-Fi client and setup AP connections. Ethernet route
@@ -96,9 +102,9 @@ connected for at least five minutes. Root cause is unknown; track recurrence sep
 
 ## Validation
 
-- `PYTHONPATH=src python3 -m unittest discover -s tests`: 39 tests pass.
+- `PYTHONPATH=src python3 -m unittest discover -s tests`: 60 tests pass.
 - Shell syntax and Python compilation checks pass.
-- The latest compressed image passes `xz -t`; its package manifest includes
+- The latest compressed image passes `gzip -t`; its package manifest includes
   NetworkManager, dnsmasq-base, python3-xlib and openssh-server.
 - Signed remote updates, boot-slot/rollback design, appliance hardening and
   release acceptance are not implemented.
