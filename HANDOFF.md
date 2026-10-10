@@ -27,15 +27,18 @@ connected, then NetworkManager lost the association during a WPA handshake and f
 the profile because no interactive secrets agent is available. The saved system
 profile still has its PSK. With automatic AP disabled, the supervisor previously did
 not retry an inactive client profile; 0.4.3 adds a 60-second retry and unlimited
-NetworkManager autoconnect retries. The Pi is still failing to associate despite strong
-scan signal; underlying AP/driver behavior is unresolved. Logs showed repeated
-association timeouts, so do not mark the issue resolved until Wi-Fi reconnects and
-remains stable. The latest failures reached the WPA four-way handshake and disconnected;
-NetworkManager then reported no secrets agent. Even with the saved system PSK intact,
-association retries every minute initially failed. A temporary BSSID test mistakenly
-targeted nearby networks rather than the configured SSID; after restoring automatic
-selection, Wi-Fi reconnected through the configured network and stayed up for at least
-five minutes. Continue observing before closing the reliability issue.
+NetworkManager autoconnect retries. The latest failures reached the WPA four-way
+handshake and disconnected; NetworkManager then reported no secrets agent. Even with the
+saved system PSK intact, association retries initially failed. A temporary BSSID test
+mistakenly targeted nearby networks rather than the configured SSID; after restoring
+automatic selection, Wi-Fi reconnected through the configured network and stayed up for
+at least five minutes. Continue observing before closing the reliability issue.
+
+The Pi 2 also had a Wi-Fi outage on 2026-10-10 despite these retry settings. Over
+Ethernet, logs showed repeated `ssid-not-found` failures and scans returned no networks;
+the Edimax RTL8188CUS remained enumerated on the USB bus. A user-approved reboot
+restored scanning and Wi-Fi reconnected to `HomeNET` at `192.168.0.250`, remaining
+connected for at least five minutes. Root cause is unknown; track recurrence separately.
 
 ## Build And Runtime
 
