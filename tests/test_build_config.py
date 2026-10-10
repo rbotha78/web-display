@@ -38,6 +38,32 @@ class BuildConfigTests(unittest.TestCase):
         ):
             self.assertIn("install-manifest", Path(script).read_text(encoding="utf-8"))
 
+    def test_update_services_are_wired(self):
+        files = Path("image/stage-web-display/01-install/files")
+        manifest = (files / "install-manifest").read_text(encoding="utf-8")
+        for destination in (
+            "/usr/lib/web-display/update-action",
+            "/etc/web-display/update-key.pub",
+            "/etc/systemd/system/web-display-update-guard.service",
+            "/etc/systemd/system/web-display-update-confirm.service",
+        ):
+            self.assertIn(destination, manifest)
+        for unit in ("web-display.service", "web-display-network.service", "web-display-kiosk.service"):
+            text = (files / unit).read_text(encoding="utf-8")
+            self.assertIn("PYTHONPATH=/var/lib/web-display-app/current", text, unit)
+        self.assertIn("update-action install", (files / "web-display-sudoers").read_text(encoding="utf-8"))
+        self.assertIn("PYTHONPATH", (files / "update-action").read_text(encoding="utf-8"))
+        run = Path("image/stage-web-display/01-install/00-run.sh").read_text(encoding="utf-8")
+        for unit in ("web-display-update-guard.service", "web-display-update-confirm.service"):
+            self.assertIn(f"systemctl enable {unit}", run)
+        self.assertIn("-----BEGIN PUBLIC KEY-----", (files / "update-key.pub").read_text(encoding="utf-8"))
+        self.assertNotIn("PRIVATE", (files / "update-key.pub").read_text(encoding="utf-8"))
+
+    def test_release_workflow_signs_and_verifies_update_bundle(self):
+        workflow = Path(".github/workflows/build-image.yml").read_text(encoding="utf-8")
+        self.assertIn("secrets.UPDATE_SIGNING_KEY", workflow)
+        self.assertIn("tools/verify_update_bundle.py", workflow)
+
     def test_image_workflow_is_release_only_and_pinned(self):
         workflow = Path(".github/workflows/build-image.yml").read_text(encoding="utf-8")
         self.assertIn("pull_request", Path(".github/workflows/ci.yml").read_text(encoding="utf-8"))
@@ -100,7 +126,7 @@ class BuildConfigTests(unittest.TestCase):
             "image/stage-web-display/01-install/files/web-display-release"
         ).read_text(encoding="utf-8")
         self.assertIn('IMG_SUFFIX="-milestone2"', export_image)
-        self.assertIn("MILESTONE=2", release)
+        self.assertIn("MILESTONE=3", release)
 
     def test_kiosk_hides_mouse_cursor(self):
         unit = Path(

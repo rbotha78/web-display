@@ -14,6 +14,7 @@ WorkingDirectory=/var/lib/web-display-kiosk
 RuntimeDirectory=web-display-kiosk
 RuntimeDirectoryMode=0750
 Environment=HOME=/var/lib/web-display-kiosk
+Environment=PYTHONPATH=/var/lib/web-display-app/current
 ExecStart=/usr/bin/xinit /usr/lib/web-display/kiosk-session -- :0 vt7 -nolisten tcp -nocursor -s 0 -dpms
 Restart=always
 RestartSec=5

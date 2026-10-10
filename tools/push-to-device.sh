@@ -37,7 +37,9 @@ rm -rf /usr/lib/python3/dist-packages/webdisplay
 cp -a ${stage}/webdisplay /usr/lib/python3/dist-packages/webdisplay
 ${sudoers}${install_commands}rm -rf ${stage}
 systemctl daemon-reload
-systemctl enable web-display-network.service
+systemctl enable web-display-network.service web-display-update-guard.service web-display-update-confirm.service
+# A development push replaces the base copy, so drop any installed update bundle.
+rm -rf /var/lib/web-display-app/current /var/lib/web-display-app/current.tmp /var/lib/web-display-app/versions /var/lib/web-display-app/state.json
 systemctl restart web-display.service
 systemctl restart web-display-network.service
 if [ "${restart_kiosk}" = 1 ]; then

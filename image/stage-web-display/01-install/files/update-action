@@ -1,0 +1,5 @@
+#!/bin/sh
+set -eu
+# Always run the base-image copy of the updater, never an installed bundle.
+unset PYTHONPATH
+exec /usr/bin/python3 -I -m webdisplay.updater "$@"

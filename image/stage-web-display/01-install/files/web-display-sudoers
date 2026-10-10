@@ -1,3 +1,4 @@
 webdisplay ALL=(root) NOPASSWD: /usr/lib/web-display/system-action reboot
 webdisplay ALL=(root) NOPASSWD: /usr/lib/web-display/wifi-action ""
 webdisplay ALL=(root) NOPASSWD: /usr/lib/web-display/hostname-action ""
+webdisplay ALL=(root) NOPASSWD: /usr/lib/web-display/update-action install

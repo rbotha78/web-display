@@ -130,6 +130,16 @@ connected for at least five minutes. Root cause is unknown; track recurrence sep
 - Signed remote updates, boot-slot/rollback design, appliance hardening and
   release acceptance are not implemented.
 
+## Milestone 3 Status
+
+Phase A (signed app-bundle updates, see `PLAN.md`) is implemented in code and
+unit tests: `updater.py`, `releases.py`, bundle tools, units, UI card and a CI
+`update-bundle` job. It is NOT yet validated on hardware. Next: dev-push 0.5.0 to
+the Pis, sign a 0.5.1 bundle with `~/.web-display-signing/update-signing.pem`,
+and test upload, bad signature, tamper, forced rollback and release pull.
+Local tests need an OpenSSL 3 `openssl` first on PATH. Phase B (A/B root images)
+is deferred.
+
 ## Next Work
 
 The next planned milestone is signed remote firmware updates. Before coding,

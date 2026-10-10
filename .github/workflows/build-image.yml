@@ -112,3 +112,54 @@ jobs:
           TAG: ${{ github.event.release.tag_name }}
         run: |
           gh release upload "${TAG}" deploy/*.img.xz deploy/SHA256SUMS --clobber
+
+  update-bundle:
+    if: github.event_name == 'release'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write # upload release assets
+      id-token: write # build provenance attestation
+      attestations: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Check the release tag matches the firmware version
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          version="$(sed -n 's/^WEB_DISPLAY_VERSION=//p' image/stage-web-display/01-install/files/web-display-release)"
+          if [ "${TAG#v}" != "${version}" ]; then
+            echo "::error::Release tag ${TAG} does not match firmware version ${version}"
+            exit 1
+          fi
+
+      - name: Install test dependencies
+        run: sudo apt-get install --yes python3-segno
+
+      - name: Run unit tests
+        run: PYTHONPATH=src python3 -m unittest discover -s tests
+
+      - name: Build and sign the update bundle
+        env:
+          UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
+        run: python3 tools/make_update_bundle.py --output-dir bundle
+
+      - name: Verify the bundle against the committed public key
+        run: python3 tools/verify_update_bundle.py bundle/*.wdupdate
+
+      - name: Checksum the bundle
+        working-directory: bundle
+        run: sha256sum *.wdupdate | tee SHA256SUMS-update
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: bundle/*.wdupdate
+
+      - name: Attach the bundle to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          gh release upload "${TAG}" bundle/*.wdupdate bundle/SHA256SUMS-update --clobber

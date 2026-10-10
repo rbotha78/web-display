@@ -5,11 +5,15 @@
 0755 wifi-action /usr/lib/web-display/wifi-action
 0755 hostname-action /usr/lib/web-display/hostname-action
 0755 kiosk-session /usr/lib/web-display/kiosk-session
+0755 update-action /usr/lib/web-display/update-action
 0644 web-display.service /etc/systemd/system/web-display.service
 0644 web-display-certificate.service /etc/systemd/system/web-display-certificate.service
 0644 web-display-network.service /etc/systemd/system/web-display-network.service
 0644 web-display-kiosk.service /etc/systemd/system/web-display-kiosk.service
+0644 web-display-update-guard.service /etc/systemd/system/web-display-update-guard.service
+0644 web-display-update-confirm.service /etc/systemd/system/web-display-update-confirm.service
 0440 web-display-sudoers /etc/sudoers.d/web-display
 0644 Xwrapper.config /etc/X11/Xwrapper.config
 0644 20-web-display-fbdev.conf /etc/X11/xorg.conf.d/20-web-display-fbdev.conf
 0644 web-display-release /etc/web-display-release
+0644 update-key.pub /etc/web-display/update-key.pub

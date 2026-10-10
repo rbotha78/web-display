@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import hashlib
 import hmac
 import ipaddress
@@ -19,10 +20,13 @@ from http import HTTPStatus
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from typing import BinaryIO
 from urllib.parse import urlparse
 
+from . import releases
 from .hostname_helper import validate_hostname
 from .network import default_route_interface, internet_status, website_status
+from .updater import MAX_BUNDLE_BYTES, UpdateError, Updater, parse_version
 
 LOG = logging.getLogger("web-display")
 SESSION_TTL_SECONDS = 8 * 60 * 60
@@ -219,7 +223,12 @@ class Application:
         action_helper: Path,
         wifi_helper: Path | None = None,
         hostname_helper: Path | None = None,
+        update_helper: Path | None = None,
+        updater: Updater | None = None,
     ):
+        self.update_helper = update_helper
+        self.updater = updater or Updater()
+        self.update_lock = threading.Lock()
         self.wifi_helper = wifi_helper
         self.hostname_helper = hostname_helper
         self.config = ConfigStore(state_path)
@@ -300,6 +309,80 @@ class Application:
             raise ValueError(str(message or "Hostname helper failed"))
         return payload
 
+    def update_status(self) -> dict[str, object]:
+        status = self.updater.status()
+        status["repository"] = releases.REPOSITORY
+        return status
+
+    def newer_than_installed(self, version: str) -> bool:
+        status = self.updater.status()
+        newest = parse_version(str(status["installed_version"]))
+        if status["floor"]:
+            newest = max(newest, parse_version(str(status["floor"])))
+        return parse_version(version) > newest and version not in status["failed"]  # type: ignore[operator]
+
+    def check_update(self) -> dict[str, object]:
+        latest = releases.latest_bundle()
+        available = bool(latest) and self.newer_than_installed(str(latest["version"]))  # type: ignore[index]
+        return {
+            "available": available,
+            "latest": {"version": latest["version"], "size": latest["size"]} if latest else None,
+        }
+
+    def install_release_update(self) -> dict[str, object]:
+        latest = releases.latest_bundle()
+        if not latest or not self.newer_than_installed(str(latest["version"])):
+            raise UpdateError("No newer update is available")
+        with releases.open_download(str(latest["url"])) as download:
+            return self.install_update(download, int(latest["size"]))  # type: ignore[call-overload]
+
+    def install_update(self, source: BinaryIO, limit: int = MAX_BUNDLE_BYTES) -> dict[str, object]:
+        """Stream a bundle to the root updater, which performs all verification."""
+        if self.update_helper is None:
+            raise ValueError("Updates are not available")
+        if not self.update_lock.acquire(blocking=False):
+            raise UpdateError("An update is already in progress")
+        try:
+            process = subprocess.Popen(
+                ["sudo", "--non-interactive", str(self.update_helper), "install"],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+            )
+            assert process.stdin is not None and process.stdout is not None
+            sent = 0
+            try:
+                while True:
+                    chunk = source.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    sent += len(chunk)
+                    if sent > limit:
+                        raise UpdateError("Update file is too large")
+                    process.stdin.write(chunk)
+            except BrokenPipeError:
+                pass
+            except BaseException:
+                process.kill()
+                process.wait()
+                raise
+            finally:
+                with contextlib.suppress(OSError):
+                    process.stdin.close()
+            output = process.stdout.read(65536)
+            process.stdout.close()
+            process.wait(timeout=300)
+        finally:
+            self.update_lock.release()
+        try:
+            payload = json.loads(output)
+        except ValueError:
+            LOG.error("Update helper returned invalid output (exit %d)", process.returncode)
+            raise ValueError("Update helper failed") from None
+        if process.returncode != 0 or not isinstance(payload, dict):
+            message = payload.get("error") if isinstance(payload, dict) else None
+            raise UpdateError(str(message or "Update failed"))
+        return payload
+
     def network_status(self) -> dict[str, object]:
         status: dict[str, object] = {
             "internet": internet_status(),
@@ -339,6 +422,24 @@ def static_file(url_path: str, root: Path = STATIC_DIR) -> tuple[bytes, str] | N
         return target.read_bytes(), content_type
     except OSError:
         return None
+
+
+class BoundedReader:
+    """Read at most `length` bytes from a request body."""
+
+    def __init__(self, stream: BinaryIO, length: int):
+        self.stream = stream
+        self.remaining = length
+
+    def read(self, size: int = -1) -> bytes:
+        if self.remaining <= 0:
+            return b""
+        size = self.remaining if size < 0 else min(size, self.remaining)
+        data = self.stream.read(size)
+        self.remaining -= len(data)
+        if not data:
+            raise ValueError("Upload ended early")
+        return data
 
 
 def make_handler(app: Application) -> type[BaseHTTPRequestHandler]:
@@ -452,10 +553,37 @@ def make_handler(app: Application) -> type[BaseHTTPRequestHandler]:
                     return
                 self._json(HTTPStatus.OK, app.network_status())
                 return
+            if self.path == "/api/update/status":
+                if not self._require_session():
+                    return
+                self._json(HTTPStatus.OK, app.update_status())
+                return
             self._json(HTTPStatus.NOT_FOUND, {"error": "not found"})
+
+        def _upload_update(self) -> None:
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+            except ValueError as error:
+                raise ValueError("Invalid Content-Length") from error
+            if length <= 0 or length > MAX_BUNDLE_BYTES:
+                raise ValueError("Invalid update size")
+            self.connection.settimeout(60)
+            upload = BoundedReader(self.rfile, length)
+            try:
+                result = app.install_update(upload, length)
+            finally:
+                # Read the rest of the body so a client sending a rejected upload can see the error.
+                with contextlib.suppress(OSError, ValueError):
+                    while upload.read(1024 * 1024):
+                        pass
+            self._json(HTTPStatus.OK, result)
 
         def do_POST(self) -> None:
             try:
+                if self.path == "/api/update/upload":
+                    if self._require_session(csrf=True):
+                        self._upload_update()
+                    return
                 body = self._body()
                 if self.path == "/api/pair":
                     self._pair(body)
@@ -475,6 +603,14 @@ def make_handler(app: Application) -> type[BaseHTTPRequestHandler]:
                         return
                     app.run_action("reboot")
                     self._json(HTTPStatus.ACCEPTED, {"ok": True})
+                elif self.path == "/api/update/check":
+                    if not self._require_session(csrf=True):
+                        return
+                    self._json(HTTPStatus.OK, app.check_update())
+                elif self.path == "/api/update/install":
+                    if not self._require_session(csrf=True):
+                        return
+                    self._json(HTTPStatus.OK, app.install_release_update())
                 elif self.path == "/api/hostname":
                     if not self._require_session(csrf=True):
                         return
@@ -600,6 +736,7 @@ def serve(args: argparse.Namespace) -> None:
         Path(args.action_helper),
         Path(args.wifi_helper),
         Path(args.hostname_helper),
+        Path(args.update_helper),
     )
     server = ThreadingHTTPServer((args.bind, args.port), make_handler(app))
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
@@ -626,6 +763,7 @@ def main() -> None:
     parser.add_argument(
         "--hostname-helper", default="/usr/lib/web-display/hostname-action"
     )
+    parser.add_argument("--update-helper", default="/usr/lib/web-display/update-action")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     serve(args)

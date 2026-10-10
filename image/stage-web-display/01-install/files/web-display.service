@@ -1,7 +1,7 @@
 [Unit]
 Description=Web Display administration service
-After=NetworkManager.service web-display-certificate.service
-Wants=NetworkManager.service
+After=NetworkManager.service web-display-certificate.service web-display-update-guard.service
+Wants=NetworkManager.service web-display-update-guard.service
 Requires=web-display-certificate.service
 
 [Service]
@@ -13,13 +13,14 @@ StateDirectory=web-display
 StateDirectoryMode=0750
 RuntimeDirectory=web-display
 RuntimeDirectoryMode=0750
+Environment=PYTHONPATH=/var/lib/web-display-app/current
 ExecStart=/usr/bin/python3 -m webdisplay
 Restart=on-failure
 RestartSec=3
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/var/lib/web-display /run/web-display /etc/NetworkManager/system-connections /etc/modprobe.d
+ReadWritePaths=/var/lib/web-display /run/web-display /etc/NetworkManager/system-connections /etc/modprobe.d -/var/lib/web-display-app
 RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
 LockPersonality=true
 MemoryDenyWriteExecute=true

@@ -71,6 +71,44 @@ is not production-ready until the later security and recovery gates pass.
 4. Release acceptance: both Pi models, prolonged operation, network flapping,
    full storage, interrupted updates, rollback and factory-reset testing.
 
+## Milestone 3: Signed Remote Updates (Approved Design)
+
+Decisions: app bundles first, full A/B images later; Ed25519 signing key held as a
+GitHub Actions secret; updates delivered by admin-page upload and by pulling GitHub
+Releases; failed updates roll back automatically.
+
+### Phase A: signed app bundles
+
+- A bundle (`.wdupdate`, a tar file) holds `manifest.json`, `manifest.sig` and a
+  `payload/` tree (the `webdisplay` Python package including the built UI).
+- The manifest lists `format`, `version`, `base_compat`, and the SHA-256 of every
+  payload file. The signature is Ed25519 over the exact manifest bytes, verified with
+  `openssl` against the public key baked into the image (`/etc/web-display/update-key.pub`).
+- Installation is performed by a root helper that runs the frozen base-image
+  copy of the updater, never the updated code: it copies the upload into root-owned
+  staging, verifies signature, hashes, tar safety, size limits, `base_compat` and
+  anti-downgrade, unpacks to `/var/lib/web-display-app/versions/<version>` and atomically
+  switches the `current` symlink. Services load the package via
+  `PYTHONPATH=/var/lib/web-display-app/current`; no symlink means the factory copy.
+- Anti-downgrade: a bundle must be newer than the running version and than the
+  persisted version floor. Versions that failed health checks are recorded and not retried.
+- Rollback: an install writes `pending.json`. A boot guard counts boot attempts and
+  reverts to the previous version after repeated failures. A health confirmation
+  service waits for the admin service, kiosk and network supervisor, then confirms;
+  on failure it reverts and restarts the services.
+- Delivery: upload through the admin page, or check/install from the latest GitHub
+  Release. Both use the same verifier, so TLS trust is not relied upon.
+- Not updatable by bundles (require an image): the updater, root helpers, systemd
+  units, sudoers, the public key and the base OS. `base_compat` gates incompatibility.
+- Release CI signs bundles with the `UPDATE_SIGNING_KEY` secret (protected by a
+  required-reviewer environment) and attaches them to the release. Keep an offline
+  backup of the key; rotation needs a new image carrying the new public key.
+
+### Phase B: A/B root images (not started)
+
+Needs a boot-selection design that works on Pi 2/3 (no `tryboot`), shared boot-file
+power-loss protection, a persistent data partition and streamed image writes.
+
 ## Architecture Direction
 
 - NetworkManager owns both client and access-point networking.
@@ -96,7 +134,7 @@ is not production-ready until the later security and recovery gates pass.
 - Specify setup credential rotation and reconnection behaviour before AP implementation.
 - Specify boot selection, retry counters and shared boot-file protection before
   promising power-loss-safe A/B updates.
-- Choose update signing-key custody and physical recovery behaviour before release.
+- Choose update signing-key custody and physical recovery behaviour before release (custody decided in milestone 3).
 
 ## Current Status
 

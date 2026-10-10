@@ -120,3 +120,121 @@ test("renaming the device posts the validated hostname", async () => {
   const post = calls.find((call) => call.path === "/api/hostname")!;
   expect(JSON.parse(post.init.body as string)).toEqual({ hostname: "lobby" });
 });
+
+const updateStatus = {
+  base_version: "0.5.0",
+  running_version: "0.5.0",
+  installed_version: "0.5.0",
+  previous_version: null,
+  pending: null,
+  failed: [],
+  repository: "rbotha78/web-display",
+};
+
+function dashboardRoutes(extra: Record<string, Handler>): Record<string, Handler> {
+  return {
+    "GET /api/session": () => ({ body: { csrf: "token-1" } }),
+    "GET /api/status": () => ({ body: { hostname: "web-display", addresses: [], paired: true } }),
+    "GET /api/network": () => ({
+      body: {
+        internet: { online: true, reachable_endpoints: 3, total_endpoints: 3 },
+        website: { reachable: true },
+        default_route: "eth0",
+        wifi: {},
+      },
+    }),
+    "GET /api/config": () => ({ body: { url: "https://example.com", auto_ap: false } }),
+    "GET /api/update/status": () => ({ body: updateStatus }),
+    ...extra,
+  };
+}
+
+test("checking for updates offers and installs a newer release", async () => {
+  let installedVersion = "0.5.0";
+  const calls = mockFetch(
+    dashboardRoutes({
+      "GET /api/update/status": () => ({
+        body: { ...updateStatus, installed_version: installedVersion },
+      }),
+      "POST /api/update/check": () => ({
+        body: { available: true, latest: { version: "0.5.1", size: 2 * 1024 * 1024 } },
+      }),
+      "POST /api/update/install": () => {
+        installedVersion = "0.5.1";
+        return { body: { ok: true, version: "0.5.1", restart_required: true } };
+      },
+    }),
+  );
+  render(<App />);
+  fireEvent.click(await screen.findByText("Check for updates"));
+  expect(await screen.findByText(/Version 0\.5\.1 is available \(2\.0 MB\)/)).toBeTruthy();
+  fireEvent.click(screen.getByText("Install update"));
+  expect(await screen.findByText(/Update 0\.5\.1 installed/)).toBeTruthy();
+  expect(await screen.findByText("Restart now")).toBeTruthy();
+  const install = calls.find((call) => call.path === "/api/update/install")!;
+  expect((install.init.headers as Record<string, string>)["X-CSRF-Token"]).toBe("token-1");
+});
+
+test("shows when no newer update exists", async () => {
+  mockFetch(
+    dashboardRoutes({
+      "POST /api/update/check": () => ({ body: { available: false, latest: null } }),
+    }),
+  );
+  render(<App />);
+  fireEvent.click(await screen.findByText("Check for updates"));
+  expect(await screen.findByText("No newer update is available.")).toBeTruthy();
+  expect(screen.queryByText("Install update")).toBeNull();
+});
+
+test("uploading an update file sends the raw bytes with the CSRF token", async () => {
+  const calls = mockFetch(
+    dashboardRoutes({
+      "POST /api/update/upload": () => ({
+        body: { ok: true, version: "0.5.2", restart_required: true },
+      }),
+    }),
+  );
+  render(<App />);
+  const input = (await screen.findByLabelText("Signed update file")) as HTMLInputElement;
+  const file = new File(["bundle"], "web-display-update-0.5.2.wdupdate");
+  fireEvent.change(input, { target: { files: [file] } });
+  fireEvent.click(screen.getByText("Upload and install"));
+  expect(await screen.findByText(/Update 0\.5\.2 installed/)).toBeTruthy();
+  const upload = calls.find((call) => call.path === "/api/update/upload")!;
+  expect(upload.init.body).toBe(file);
+  expect((upload.init.headers as Record<string, string>)["X-CSRF-Token"]).toBe("token-1");
+});
+
+test("a rejected update shows the device's reason", async () => {
+  mockFetch(
+    dashboardRoutes({
+      "POST /api/update/upload": () => ({
+        status: 400,
+        body: { error: "Signature verification failed" },
+      }),
+    }),
+  );
+  render(<App />);
+  const input = (await screen.findByLabelText("Signed update file")) as HTMLInputElement;
+  fireEvent.change(input, { target: { files: [new File(["x"], "bad.wdupdate")] } });
+  fireEvent.click(screen.getByText("Upload and install"));
+  expect(await screen.findByText("Signature verification failed")).toBeTruthy();
+});
+
+test("an installed but not yet running update asks for a restart", async () => {
+  mockFetch(
+    dashboardRoutes({
+      "GET /api/update/status": () => ({
+        body: {
+          ...updateStatus,
+          installed_version: "0.5.1",
+          pending: { version: "0.5.1", previous: null, attempts: 0 },
+        },
+      }),
+    }),
+  );
+  render(<App />);
+  expect(await screen.findByText(/Version 0\.5\.1 is installed and starts after a restart/)).toBeTruthy();
+  expect(screen.getByText("Restart now")).toBeTruthy();
+});

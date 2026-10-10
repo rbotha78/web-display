@@ -32,6 +32,26 @@ export interface NetworkStatus {
   };
 }
 
+export interface UpdateStatus {
+  base_version: string;
+  running_version: string;
+  installed_version: string;
+  previous_version: string | null;
+  pending: { version: string; previous: string | null; attempts: number } | null;
+  failed: string[];
+  repository: string;
+}
+
+export interface UpdateCheck {
+  available: boolean;
+  latest: { version: string; size: number } | null;
+}
+
+export interface UpdateResult {
+  version: string;
+  restart_required: boolean;
+}
+
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -68,6 +88,27 @@ export async function request<T>(path: string, method = "GET", body?: unknown): 
   return payload as T;
 }
 
+async function readError(response: Response): Promise<ApiError> {
+  let payload: { error?: string } = {};
+  try {
+    payload = await response.json();
+  } catch {
+    // Non-JSON error bodies fall through to the generic message.
+  }
+  return new ApiError(payload.error || `Request failed (${response.status})`, response.status);
+}
+
+async function uploadUpdate(file: File): Promise<UpdateResult> {
+  const response = await fetch("/api/update/upload", {
+    method: "POST",
+    headers: { "Content-Type": "application/octet-stream", "X-CSRF-Token": csrf },
+    body: file,
+    credentials: "same-origin",
+  });
+  if (!response.ok) throw await readError(response);
+  return (await response.json()) as UpdateResult;
+}
+
 export const api = {
   health: () => request<{ paired: boolean }>("/health"),
   session: () => request<Session>("/api/session"),
@@ -88,4 +129,8 @@ export const api = {
   connect: (ssid: string, password: string) =>
     request<object>("/api/wifi/connect", "POST", { ssid, password }),
   forget: () => request<object>("/api/wifi/forget", "POST", {}),
+  updateStatus: () => request<UpdateStatus>("/api/update/status"),
+  checkUpdate: () => request<UpdateCheck>("/api/update/check", "POST"),
+  installUpdate: () => request<UpdateResult>("/api/update/install", "POST"),
+  uploadUpdate,
 };

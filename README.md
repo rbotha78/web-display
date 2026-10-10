@@ -201,6 +201,26 @@ and commit the regenerated `src/webdisplay/static/`. `npm run dev` runs a hot-re
 server that proxies `/api` to a service on `https://localhost:8443`. The page is
 served with a strict Content-Security-Policy (no inline scripts or styles).
 
+## Signed updates (milestone 3, staged)
+
+Application updates are signed `.wdupdate` bundles installed by a root helper
+(`update-action`) into `/var/lib/web-display-app/versions/<version>`. The helper,
+units, sudoers rules, public key and OS are part of the base image and are not
+updatable by a bundle. Bundles are Ed25519-signed; the device verifies the
+signature, every file hash, the version (no downgrades) and compatibility.
+
+- Admin page, **Updates**: check GitHub Releases and install, or upload a file.
+- Updates apply after a restart. The boot guard rolls back automatically if the
+  new version does not start three times or the services are not healthy for 20
+  seconds within 180 seconds; failed versions are never retried.
+- CI signs a bundle on each release with the `UPDATE_SIGNING_KEY` secret and
+  verifies it against `image/stage-web-display/01-install/files/update-key.pub`.
+  Keep an offline backup of the private key; never commit it.
+- Local build: `python3 tools/make_update_bundle.py --version 0.5.1 --key-file KEY`
+  (needs OpenSSL 3). Check with `tools/verify_update_bundle.py`.
+- Devices need a base image of 0.5.0 or later (or a `tools/push-to-device.sh`
+  push) before they can accept bundles. Hardware validation is still pending.
+
 ## Development checks
 
 ```sh

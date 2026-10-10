@@ -6,6 +6,7 @@ Requires=web-display.service
 
 [Service]
 Type=simple
+Environment=PYTHONPATH=/var/lib/web-display-app/current
 ExecStart=/usr/bin/python3 -m webdisplay.netmonitor
 Restart=always
 RestartSec=5

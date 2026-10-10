@@ -58,6 +58,8 @@ systemctl enable web-display-certificate.service
 systemctl enable web-display.service
 systemctl enable web-display-network.service
 systemctl enable web-display-kiosk.service
+systemctl enable web-display-update-guard.service
+systemctl enable web-display-update-confirm.service
 
 rm -f /etc/systemd/system/getty@tty1.service.d/autologin.conf
 EOF
