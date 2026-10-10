@@ -46,6 +46,9 @@ jobs:
             exit 1
           fi
 
+      - name: Install test dependencies
+        run: sudo apt-get install --yes python3-segno
+
       - name: Run unit tests
         run: PYTHONPATH=src python3 -m unittest discover -s tests
 

@@ -18,6 +18,9 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install test dependencies
+        run: sudo apt-get install --yes python3-segno
+
       - name: Run unit tests
         run: PYTHONPATH=src python3 -m unittest discover -s tests
       - name: Check shell scripts parse
