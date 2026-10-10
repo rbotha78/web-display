@@ -87,6 +87,7 @@ def fallback_html(
     address = addresses[0] if addresses else socket.gethostname()
     setup_ap = read_setup_ap(setup_ap_path)
     ap_section = ""
+    qr_section = ""
     if setup_ap:
         address = setup_ap["address"]
         ap_section = (
@@ -96,7 +97,7 @@ def fallback_html(
         )
         qr = wifi_qr_svg(setup_ap["ssid"], setup_ap["password"])
         if qr:
-            ap_section += f'<div class="qr">{qr}</div><p>Or scan this code to join.</p>'
+            qr_section = f'<aside><div class="qr">{qr}</div><p>Scan to join</p></aside>'
     admin_url = f"https://{address}:{port}/"
     pairing = ""
     if pairing_path.exists():
@@ -105,13 +106,17 @@ def fallback_html(
     fingerprint = certificate_fingerprint(certificate_path)
     return f"""<!doctype html><html><head><meta charset="utf-8">
 <meta http-equiv="refresh" content="5"><style>
-body{{margin:0;background:#111;color:#eee;font:3vw system-ui,sans-serif;
-display:grid;place-items:center;min-height:100vh;text-align:center}}
-main{{max-width:85vw}} .qr svg{{width:30vh;height:30vh}} strong{{font-size:2em;letter-spacing:.2em}}
-</style></head><body><main><h1>Web display setup</h1>
+html,body{{height:100%}}
+body{{margin:0;background:#111;color:#eee;font:2.2vw/1.25 system-ui,sans-serif;
+display:grid;place-items:center;overflow:hidden;text-align:center}}
+.wrap{{display:flex;align-items:center;justify-content:center;gap:4vw;max-width:96vw;max-height:96vh}}
+main{{flex:1 1 auto;min-width:0}} h1{{font-size:1.6em;margin:.2em 0}} p{{margin:.4em 0}}
+strong{{font-size:1.5em;letter-spacing:.15em}} small{{font-size:.7em;word-break:break-all}}
+aside{{flex:0 0 auto}} .qr svg{{display:block;width:min(40vh,30vw);height:min(40vh,30vw)}}
+</style></head><body><div class="wrap"><main><h1>Web display setup</h1>
 {ap_section}<p>Administration: {html.escape(admin_url)}</p>{pairing}
 <p>TLS certificate SHA-256:<br><small>{html.escape(fingerprint)}</small></p>
-<p>No configured web page is currently reachable.</p></main></body></html>"""
+<p>No configured web page is currently reachable.</p></main>{qr_section}</div></body></html>"""
 
 
 def write_fallback(
