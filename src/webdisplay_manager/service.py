@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import concurrent.futures
+import ipaddress
 import re
 
 from . import client as device_client
 from .client import DeviceClient, DeviceError
 from .discovery import discover
-from .store import DeviceStore
+from .store import DeviceStore, addresses
 
 HOST_RE = re.compile(r"^[A-Za-z0-9]([A-Za-z0-9.\-]{0,251}[A-Za-z0-9])?$")
 
@@ -38,11 +39,41 @@ class Manager:
         self.store = store
         self.discover_fn = discover_fn
 
-    def client(self, identifier: str) -> DeviceClient:
+    def connect(self, identifier: str) -> tuple[DeviceClient, dict[str, object]]:
+        """Return a client for the first known address that answers, and its /health reply."""
         entry = self.store.get(identifier)
         if entry is None:
             raise LookupError("Unknown device")
-        return DeviceClient(str(entry["host"]), int(entry["port"]), str(entry["fingerprint"]), str(entry["key"]))
+        failure: DeviceError | None = None
+        for host, port in addresses(entry):
+            device = DeviceClient(host, port, str(entry["fingerprint"]), str(entry["key"]))
+            try:
+                health = device.call("GET", "/health", timeout=5)
+            except device_client.CertificateMismatch as error:
+                failure = error
+                continue
+            except device_client.Unreachable as error:
+                failure = failure or error
+                continue
+            if (host, port) != (str(entry["host"]), int(entry["port"])):  # type: ignore[arg-type]
+                self.store.promote(identifier, host, port)
+            return device, health
+        raise failure or DeviceError("No known address")
+
+    def client(self, identifier: str) -> DeviceClient:
+        return self.connect(identifier)[0]
+
+    def learn_addresses(self, identifier: str, device: DeviceClient, status: dict[str, object]) -> None:
+        found: list[str] = []
+        for value in status.get("addresses") or []:  # type: ignore[union-attr]
+            try:
+                address = ipaddress.ip_address(str(value))
+            except ValueError:
+                continue
+            if address.version == 4 and not (address.is_loopback or address.is_link_local):
+                found.append(str(address))
+        hostname = status.get("hostname")
+        self.store.learn(identifier, found, device.port, hostname if isinstance(hostname, str) else None)
 
     def summary(self, identifier: str, entry: dict[str, object]) -> dict[str, object]:
         result: dict[str, object] = {
@@ -52,13 +83,15 @@ class Manager:
             "port": entry["port"],
             "online": False,
         }
-        device = DeviceClient(str(entry["host"]), int(entry["port"]), str(entry["fingerprint"]), str(entry["key"]))
         try:
-            result["version"] = device.call("GET", "/health", timeout=5).get("version")
+            device, health = self.connect(identifier)
+            result["host"], result["port"] = device.host, device.port
+            result["version"] = health.get("version")
             result["online"] = True
             status = device.call("GET", "/api/status")
             result["hostname"] = status.get("hostname")
             result["addresses"] = status.get("addresses")
+            self.learn_addresses(identifier, device, status)
             result["url"] = device.call("GET", "/api/config").get("url")
             network = device.call("GET", "/api/network")
             internet = network.get("internet") or {}
@@ -92,10 +125,16 @@ class Manager:
         return sorted(summaries, key=lambda d: str(d["name"]).lower())
 
     def discovered(self) -> list[dict[str, object]]:
-        known = {(str(e["host"]), int(e["port"])) for e in self.store.all().values()}
+        entries = list(self.store.all().values())
+        known = {(a, p) for e in entries for a, p in addresses(e)}
+        hostnames = {str(e["hostname"]) for e in entries if e.get("hostname")}
+        unique: dict[object, dict[str, object]] = {}
+        for item in self.discover_fn():
+            unique.setdefault(item["name"], item)  # one row per device, not per interface
+        found = list(unique.values())
         return [
-            {**d, "enrolled": (d["host"], d["port"]) in known}
-            for d in self.discover_fn()
+            {**d, "enrolled": (d["host"], d["port"]) in known or d["name"] in hostnames}
+            for d in found
         ]
 
     def fingerprint(self, host: object, port: object) -> dict[str, object]:

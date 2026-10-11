@@ -255,6 +255,57 @@ class ServerTests(ManagerCase):
         self.assertEqual(status, 400)
 
 
+class MultiAddressTests(ManagerCase):
+    def test_falls_back_to_another_address_and_promotes_it(self):
+        identifier = self.enroll()
+        self.store.learn(identifier, [], self.device.port, None)
+        entry = self.store.get(identifier)
+        entry_addresses = [{"host": "127.0.0.2", "port": 1}, {"host": "127.0.0.1", "port": self.device.port}]
+        data = self.store.all()
+        data[identifier]["addresses"] = entry_addresses
+        data[identifier].update(host="127.0.0.2", port=1)
+        self.store._write(data)
+        [summary] = self.manager.devices()
+        self.assertTrue(summary["online"])
+        self.assertEqual(summary["host"], "127.0.0.1")
+        self.assertEqual(self.store.get(identifier)["host"], "127.0.0.1")
+        self.assertIsNotNone(entry)
+
+    def test_enrolling_a_second_address_merges_into_one_device(self):
+        first = self.enroll()
+        second = self.manager.enroll({
+            "host": "localhost", "port": self.device.port, "fingerprint": self.device.fingerprint,
+            "password": "device password", "name": "Lobby",
+        })["id"]
+        self.assertEqual(first, second)
+        self.assertEqual(len(self.manager.devices()), 1)
+        hosts = [item["host"] for item in self.store.get(first)["addresses"]]
+        self.assertEqual(hosts, ["localhost", "127.0.0.1"])
+
+    def test_discovery_matches_any_known_address_or_hostname(self):
+        identifier = self.enroll()
+        self.store.learn(identifier, ["10.0.0.9"], self.device.port, "pi-one")
+        self.manager.discover_fn = lambda: [
+            {"name": "pi-one", "host": "10.9.9.9", "port": self.device.port},
+            {"name": "pi-one", "host": "10.0.0.9", "port": self.device.port},
+            {"name": "other", "host": "10.0.0.50", "port": 8443},
+        ]
+        found = self.manager.discovered()
+        self.assertEqual([(d["name"], d["enrolled"]) for d in found], [("pi-one", True), ("other", False)])
+
+    def test_device_reported_addresses_are_learned(self):
+        identifier = self.enroll()
+        device = self.manager.client(identifier)
+        self.manager.learn_addresses(
+            identifier, device,
+            {"hostname": "pi-one", "addresses": ["192.168.0.5", "::1", "127.0.0.1", "169.254.1.1"]},
+        )
+        entry = self.store.get(identifier)
+        self.assertEqual(entry["hostname"], "pi-one")
+        self.assertIn("192.168.0.5", [a["host"] for a in entry["addresses"]])
+        self.assertNotIn("169.254.1.1", [a["host"] for a in entry["addresses"]])
+
+
 class DiscoveryTests(unittest.TestCase):
     def packet(self, flags=0x8400, port=8443):
         service = discovery.encode_name(discovery.SERVICE)

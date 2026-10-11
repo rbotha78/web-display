@@ -15,6 +15,21 @@ def default_path() -> Path:
     return base / "web-display-manager" / "devices.json"
 
 
+MAX_ADDRESSES = 8
+
+
+def addresses(entry: dict[str, object]) -> list[tuple[str, int]]:
+    """Known (host, port) pairs for a device, most recently working first."""
+    result: list[tuple[str, int]] = []
+    for item in entry.get("addresses") or []:
+        if isinstance(item, dict) and isinstance(item.get("host"), str) and isinstance(item.get("port"), int):
+            result.append((item["host"], item["port"]))
+    primary = (str(entry["host"]), int(entry["port"]))  # type: ignore[arg-type]
+    if primary not in result:
+        result.insert(0, primary)
+    return result
+
+
 def device_id(fingerprint: str) -> str:
     return re.sub(r"[^0-9A-F]", "", fingerprint)[:12].lower()
 
@@ -55,22 +70,48 @@ class DeviceStore:
         identifier = device_id(fingerprint)
         with self._lock:
             devices = self._read()
+            known = [(a, p) for a, p in addresses(devices[identifier]) if (a, p) != (host, port)] if identifier in devices else []
             devices[identifier] = {
                 "host": host,
                 "port": port,
                 "fingerprint": fingerprint,
                 "key": api_key,
                 "name": name,
+                "addresses": [{"host": a, "port": p} for a, p in [(host, port), *known][:MAX_ADDRESSES]],
             }
             self._write(devices)
         return identifier
 
-    def update_host(self, identifier: str, host: str, port: int) -> None:
+    def promote(self, identifier: str, host: str, port: int) -> None:
+        """Make (host, port) the first address to try."""
         with self._lock:
             devices = self._read()
-            if identifier in devices:
-                devices[identifier].update(host=host, port=port)
-                self._write(devices)
+            entry = devices.get(identifier)
+            if entry is None:
+                return
+            rest = [(a, p) for a, p in addresses(entry) if (a, p) != (host, port)]
+            entry.update(host=host, port=port)
+            entry["addresses"] = [{"host": a, "port": p} for a, p in [(host, port), *rest][:MAX_ADDRESSES]]
+            self._write(devices)
+
+    def learn(self, identifier: str, hosts: list[str], port: int, hostname: str | None) -> None:
+        """Remember extra addresses and the hostname the device itself reported."""
+        with self._lock:
+            devices = self._read()
+            entry = devices.get(identifier)
+            if entry is None:
+                return
+            known = addresses(entry)
+            merged = list(known)
+            for host in hosts:
+                if (host, port) not in merged and len(merged) < MAX_ADDRESSES:
+                    merged.append((host, port))
+            if merged == known and entry.get("hostname") == hostname:
+                return
+            entry["addresses"] = [{"host": a, "port": p} for a, p in merged]
+            if hostname:
+                entry["hostname"] = hostname
+            self._write(devices)
 
     def remove(self, identifier: str) -> bool:
         with self._lock:

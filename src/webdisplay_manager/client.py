@@ -19,6 +19,10 @@ class DeviceError(Exception):
         self.status = status
 
 
+class Unreachable(DeviceError):
+    """The address did not answer; another address of the same device may."""
+
+
 class CertificateMismatch(DeviceError):
     def __init__(self) -> None:
         super().__init__("The device certificate changed; it must be trusted again", 495)
@@ -102,7 +106,7 @@ class DeviceClient:
         except DeviceError:
             raise
         except (OSError, http.client.HTTPException) as error:
-            raise DeviceError(f"Cannot reach {self.host}:{self.port} ({error})") from None
+            raise Unreachable(f"Cannot reach {self.host}:{self.port} ({error})") from None
         finally:
             connection.close()
         try:
