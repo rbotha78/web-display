@@ -109,6 +109,30 @@ Releases; failed updates roll back automatically.
 Needs a boot-selection design that works on Pi 2/3 (no `tryboot`), shared boot-file
 power-loss protection, a persistent data partition and streamed image writes.
 
+## Milestone 4: Central Device Management (Approved Design)
+
+Decisions: a Python service on the user's PC serves a React UI on localhost; devices are
+found by mDNS and by manual add; each PC authenticates with its own API key enrolled
+once per device; v1 covers status, display URL, updates and reboot.
+
+- **Device API keys:** an admin session (password login) can mint a named key
+  (`POST /api/keys`, returned once; only a SHA-256 hash is stored in `config.json`),
+  list keys and revoke them. A key is sent as `Authorization: Bearer wdk_...` and
+  grants the same API as a session, except it cannot mint, list or revoke keys.
+  Failed key attempts are throttled like logins. At most 10 keys per device.
+- **Enrolment:** the manager logs in with the admin password once, mints a key, then
+  discards the password. The device's TLS certificate fingerprint is shown for the user
+  to compare with the device screen before it is trusted, then pinned.
+- **Trust on the PC:** keys and pinned fingerprints are kept in a 0600 file in the user's
+  config directory (keys must persist to be useful; passwords are never stored).
+- **Discovery:** devices advertise `_web-display._tcp` on port 8443 via avahi. The
+  manager lists them and also accepts manual hostnames/IPs.
+- **Manager service:** `python3 -m webdisplay_manager` binds to 127.0.0.1 only, with a
+  per-run token in the URL it opens, Host/Origin checks and a CSRF header on writes. It
+  connects to devices with a pinned-fingerprint TLS check, not CA validation.
+- **Functions (v1):** list with status, version and online/Wi-Fi state; change display
+  URL; check and install updates on one or all devices; reboot.
+
 ## Architecture Direction
 
 - NetworkManager owns both client and access-point networking.

@@ -8,6 +8,7 @@ import ipaddress
 import json
 import logging
 import os
+import re
 import secrets
 import socket
 import ssl
@@ -81,6 +82,28 @@ def validate_flag(value: object) -> bool:
     return value
 
 
+MAX_API_KEYS = 10
+KEY_PREFIX = "wdk_"
+
+
+def valid_keys(value: object) -> list[dict[str, object]]:
+    keys = []
+    for item in value if isinstance(value, list) else []:
+        if isinstance(item, dict) and all(isinstance(item.get(f), str) for f in ("id", "name", "hash")):
+            keys.append(item)
+    return keys
+
+
+def hash_key(key: str) -> str:
+    return hashlib.sha256(key.encode("utf-8")).hexdigest()
+
+
+def validate_key_name(value: object) -> str:
+    if not isinstance(value, str) or not re.fullmatch(r"[A-Za-z0-9 ._@-]{1,40}", value.strip()):
+        raise ValueError("Key name must be 1-40 letters, digits, spaces or . _ @ -")
+    return value.strip()
+
+
 class ConfigStore:
     def __init__(self, path: Path):
         self.path = path
@@ -96,6 +119,7 @@ class ConfigStore:
                 "url": validate_url(data.get("url", "")),
                 "password": data.get("password"),
                 "auto_ap": data.get("auto_ap") is True,
+                "api_keys": valid_keys(data.get("api_keys")),
             }
 
     def update(self, **changes: object) -> dict[str, object]:
@@ -229,6 +253,7 @@ class Application:
         self.update_helper = update_helper
         self.updater = updater or Updater()
         self.update_lock = threading.Lock()
+        self.keys_lock = threading.Lock()
         self.wifi_helper = wifi_helper
         self.hostname_helper = hostname_helper
         self.config = ConfigStore(state_path)
@@ -249,6 +274,38 @@ class Application:
         code = f"{secrets.randbelow(1_000_000):06d}"
         atomic_write(self.pairing_path, code + "\n", mode=0o640)
         return code
+
+    def create_key(self, name: str) -> dict[str, object]:
+        with self.keys_lock:
+            keys = self.config.load()["api_keys"]
+            if len(keys) >= MAX_API_KEYS:  # type: ignore[arg-type]
+                raise ValueError("Too many API keys; revoke one first")
+            key = KEY_PREFIX + secrets.token_urlsafe(32)
+            entry = {"id": secrets.token_hex(4), "name": name, "hash": hash_key(key), "created": int(time.time())}
+            self.config.update(api_keys=[*keys, entry])  # type: ignore[list-item]
+        return {"id": entry["id"], "name": name, "key": key}
+
+    def list_keys(self) -> list[dict[str, object]]:
+        return [
+            {"id": k["id"], "name": k["name"], "created": k.get("created")}
+            for k in self.config.load()["api_keys"]  # type: ignore[union-attr]
+        ]
+
+    def revoke_key(self, key_id: str) -> None:
+        with self.keys_lock:
+            keys = self.config.load()["api_keys"]
+            remaining = [k for k in keys if k["id"] != key_id]  # type: ignore[union-attr]
+            if len(remaining) == len(keys):  # type: ignore[arg-type]
+                raise ValueError("No such API key")
+            self.config.update(api_keys=remaining)
+
+    def key_valid(self, key: str) -> bool:
+        digest = hash_key(key)
+        found = False
+        for entry in self.config.load()["api_keys"]:  # type: ignore[union-attr]
+            if hmac.compare_digest(str(entry["hash"]), digest):
+                found = True
+        return found
 
     def paired(self) -> bool:
         return bool(self.config.load()["password"])
@@ -473,8 +530,10 @@ def make_handler(app: Application) -> type[BaseHTTPRequestHandler]:
             if self.command != "HEAD":
                 self.wfile.write(body)
 
-        def _json(self, status: HTTPStatus, value: object) -> None:
-            self._send(status, json.dumps(value).encode())
+        def _json(
+            self, status: HTTPStatus, value: object, headers: dict[str, str] | None = None
+        ) -> None:
+            self._send(status, json.dumps(value).encode(), headers=headers)
 
         def _body(self) -> dict[str, object]:
             try:
@@ -499,7 +558,23 @@ def make_handler(app: Application) -> type[BaseHTTPRequestHandler]:
         def _session(self) -> Session | None:
             return app.sessions.get(self._session_token())
 
-        def _require_session(self, csrf: bool = False) -> Session | None:
+        def _bearer_key(self) -> str | None:
+            header = self.headers.get("Authorization", "")
+            return header[7:].strip() if header.startswith("Bearer ") else None
+
+        def _require_session(self, csrf: bool = False, allow_key: bool = True) -> Session | None:
+            key = self._bearer_key() if allow_key else None
+            if key is not None:
+                client = self.client_address[0]
+                if not app.throttle.allowed(client):
+                    self._json(HTTPStatus.TOO_MANY_REQUESTS, {"error": "try again later"})
+                    return None
+                if not app.key_valid(key):
+                    app.throttle.failure(client)
+                    self._json(HTTPStatus.UNAUTHORIZED, {"error": "invalid API key"})
+                    return None
+                # Bearer keys are not ambient credentials, so no CSRF token is needed.
+                return Session(csrf="", expires_at=0)
             session = self._session()
             if not session:
                 self._json(HTTPStatus.UNAUTHORIZED, {"error": "authentication required"})
@@ -526,6 +601,10 @@ def make_handler(app: Application) -> type[BaseHTTPRequestHandler]:
                 session = self._require_session()
                 if session:
                     self._json(HTTPStatus.OK, {"csrf": session.csrf})
+                return
+            if self.path == "/api/keys":
+                if self._require_session(allow_key=False):
+                    self._json(HTTPStatus.OK, {"keys": app.list_keys()})
                 return
             if self.path == "/api/config":
                 if not self._require_session():
@@ -598,6 +677,10 @@ def make_handler(app: Application) -> type[BaseHTTPRequestHandler]:
                         {"ok": True},
                         headers={"Set-Cookie": expired_cookie()},
                     )
+                elif self.path == "/api/keys":
+                    if not self._require_session(csrf=True, allow_key=False):
+                        return
+                    self._json(HTTPStatus.CREATED, app.create_key(validate_key_name(body.get("name"))))
                 elif self.path == "/api/reboot":
                     if not self._require_session(csrf=True):
                         return
@@ -634,6 +717,19 @@ def make_handler(app: Application) -> type[BaseHTTPRequestHandler]:
                     HTTPStatus.INTERNAL_SERVER_ERROR,
                     {"error": "system action failed"},
                 )
+
+        def do_DELETE(self) -> None:
+            try:
+                prefix = "/api/keys/"
+                if not self.path.startswith(prefix):
+                    self._json(HTTPStatus.NOT_FOUND, {"error": "not found"})
+                    return
+                if not self._require_session(csrf=True, allow_key=False):
+                    return
+                app.revoke_key(self.path[len(prefix):])
+                self._json(HTTPStatus.OK, {"ok": True})
+            except ValueError as error:
+                self._json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
 
         def do_PUT(self) -> None:
             try:

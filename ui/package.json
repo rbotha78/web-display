@@ -8,7 +8,7 @@
     "dev": "vite",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "build": "tsc --noEmit && vite build"
+    "build": "tsc --noEmit && vite build && vite build -c vite.manager.config.ts"
   },
   "dependencies": {
     "react": "^19.0.0",

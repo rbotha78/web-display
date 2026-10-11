@@ -259,3 +259,20 @@ sudo reboot
 Copyright (C) 2026 Robert Botha. Licensed under the GNU General Public License,
 version 3 or (at your option) any later version. See `LICENSE`. The firmware image
 also contains Raspberry Pi OS, Debian and Chromium, which keep their own licenses.
+
+## Central device manager
+
+A Python app on your PC manages several displays from one page (needs only the repository; the UI is prebuilt):
+
+```sh
+PYTHONPATH=src python3 -m webdisplay_manager     # or `webdisplay-manager` once installed
+```
+
+It serves a UI on `127.0.0.1:8765` and opens the browser. Devices are found via mDNS
+(`_web-display._tcp`) or added by address. On adding, the manager shows the device's TLS
+fingerprint (compare it with the device screen), then uses the administrator password once to
+create an API key for this PC. Only the key and pinned fingerprint are stored, in
+`~/.config/web-display-manager/devices.json` (mode 0600); passwords are never stored.
+Functions: status, change display address, check/install updates (one or all), restart.
+Keys can be listed/revoked on a device via `GET /api/keys` and `DELETE /api/keys/<id>`.
+Rebuild the manager UI with `cd ui && npm run build`.

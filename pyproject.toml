@@ -17,3 +17,7 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 webdisplay = ["static/**/*"]
+webdisplay_manager = ["static/**/*"]
+
+[project.scripts]
+webdisplay-manager = "webdisplay_manager.server:main"
