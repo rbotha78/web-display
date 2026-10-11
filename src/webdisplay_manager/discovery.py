@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import select
 import socket
 import struct
 import time
@@ -78,29 +79,64 @@ def parse_response(data: bytes) -> list[dict[str, object]]:
     return found
 
 
-def discover(duration: float = 2.0) -> list[dict[str, object]]:
-    """Browse for devices; each result is {name, host, port}. The sender is the device."""
-    found: dict[tuple[str, int], dict[str, object]] = {}
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+def local_addresses() -> list[str]:
+    """IPv4 addresses of this PC, so each network adapter gets its own query (Windows picks one otherwise)."""
+    addresses: set[str] = set()
     try:
-        sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 255)
-        sock.settimeout(0.3)
-        deadline = time.monotonic() + duration
-        next_query = 0.0
-        while time.monotonic() < deadline:
-            if time.monotonic() >= next_query:
-                sock.sendto(build_query(), MDNS_GROUP)
-                next_query = time.monotonic() + 0.7
-            try:
-                data, (host, _) = sock.recvfrom(9000)
-            except socket.timeout:
-                continue
-            except OSError:
-                break
-            for item in parse_response(data):
-                found[(host, int(item["port"]))] = {"name": item["name"], "host": host, "port": item["port"]}
+        for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
+            addresses.add(str(info[4][0]))
     except OSError:
         pass
+    try:
+        probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        probe.connect(("192.0.2.1", 9))
+        addresses.add(probe.getsockname()[0])
+        probe.close()
+    except OSError:
+        pass
+    return sorted(a for a in addresses if not a.startswith(("127.", "169.254.", "0.")))
+
+
+def open_sockets(addresses: list[str]) -> list[socket.socket]:
+    sockets: list[socket.socket] = []
+    for address in addresses or [""]:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 255)
+            if address:
+                sock.bind((address, 0))
+                sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF, socket.inet_aton(address))
+            sock.setblocking(False)
+            sockets.append(sock)
+        except OSError:
+            sock.close()
+    return sockets
+
+
+def discover(duration: float = 3.0) -> list[dict[str, object]]:
+    """Browse for devices; each result is {name, host, port}. The sender is the device."""
+    found: dict[tuple[str, int], dict[str, object]] = {}
+    sockets = open_sockets(local_addresses())
+    try:
+        deadline = time.monotonic() + duration
+        next_query = 0.0
+        while sockets and time.monotonic() < deadline:
+            if time.monotonic() >= next_query:
+                for sock in sockets:
+                    try:
+                        sock.sendto(build_query(), MDNS_GROUP)
+                    except OSError:
+                        pass
+                next_query = time.monotonic() + 0.7
+            ready, _, _ = select.select(sockets, [], [], 0.2)
+            for sock in ready:
+                try:
+                    data, (host, _) = sock.recvfrom(9000)
+                except OSError:
+                    continue
+                for item in parse_response(data):
+                    found[(host, int(item["port"]))] = {"name": item["name"], "host": host, "port": item["port"]}
     finally:
-        sock.close()
+        for sock in sockets:
+            sock.close()
     return sorted(found.values(), key=lambda d: (str(d["name"]), str(d["host"])))
