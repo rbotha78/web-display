@@ -4,6 +4,7 @@ import { DisplayCard } from "./DisplayCard";
 import { HostnameCard } from "./HostnameCard";
 import { StatusCard } from "./StatusCard";
 import type { Notice } from "./Toast";
+import { ManagerKeysCard } from "./ManagerKeysCard";
 import { UpdatesCard } from "./UpdatesCard";
 import { WifiCard } from "./WifiCard";
 
@@ -50,6 +51,7 @@ export function Dashboard({ notify, onExpired }: Props) {
       <HostnameCard current={status?.hostname ?? null} notify={notify} fail={fail} />
       <WifiCard network={network} notify={notify} fail={fail} refresh={refreshNetwork} />
       <UpdatesCard notify={notify} fail={fail} />
+      <ManagerKeysCard notify={notify} fail={fail} />
     </div>
   );
 }

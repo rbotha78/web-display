@@ -238,3 +238,25 @@ test("an installed but not yet running update asks for a restart", async () => {
   expect(await screen.findByText(/Version 0\.5\.1 is installed and starts after a restart/)).toBeTruthy();
   expect(screen.getByText("Restart now")).toBeTruthy();
 });
+
+test("lists and revokes manager keys", async () => {
+  let keys = [
+    { id: "k1", name: "Web Display Manager", created: 1791731873 },
+    { id: "k2", name: "Web Display Manager", created: 1791731900 },
+  ];
+  const calls = mockFetch({
+    "GET /api/session": () => ({ body: { csrf: "t" } }),
+    "GET /health": () => ({ body: { paired: true } }),
+    "GET /api/keys": () => ({ body: { keys } }),
+    "DELETE /api/keys/k1": () => {
+      keys = keys.filter((k) => k.id !== "k1");
+      return { body: { ok: true } };
+    },
+  });
+  render(<App />);
+  const revokes = await screen.findAllByText("Revoke");
+  expect(revokes).toHaveLength(2);
+  fireEvent.click(revokes[0]);
+  await waitFor(() => expect(screen.getAllByText("Revoke")).toHaveLength(1));
+  expect(calls.some((c) => c.path === "/api/keys/k1" && c.init.method === "DELETE")).toBe(true);
+});

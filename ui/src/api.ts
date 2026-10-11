@@ -52,6 +52,12 @@ export interface UpdateResult {
   restart_required: boolean;
 }
 
+export interface ApiKey {
+  id: string;
+  name: string;
+  created: number | null;
+}
+
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -131,6 +137,8 @@ export const api = {
   forget: () => request<object>("/api/wifi/forget", "POST", {}),
   updateStatus: () => request<UpdateStatus>("/api/update/status"),
   checkUpdate: () => request<UpdateCheck>("/api/update/check", "POST"),
+  apiKeys: () => request<{ keys: ApiKey[] }>("/api/keys"),
+  revokeApiKey: (id: string) => request<object>("/api/keys/" + id, "DELETE"),
   installUpdate: () => request<UpdateResult>("/api/update/install", "POST"),
   uploadUpdate,
 };

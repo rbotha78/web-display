@@ -274,7 +274,7 @@ fingerprint (compare it with the device screen), then uses the administrator pas
 create an API key for this PC. Only the key and pinned fingerprint are stored, in
 `~/.config/web-display-manager/devices.json` (mode 0600); passwords are never stored.
 Functions: status, change display address, check/install updates (one or all), restart.
-Keys can be listed/revoked on a device via `GET /api/keys` and `DELETE /api/keys/<id>`.
+Keys are listed and revoked in the device admin page's "Manager access" card (API: `GET /api/keys`, `DELETE /api/keys/<id>`, session login only).
 Rebuild the manager UI with `cd ui && npm run build`.
 
 The manager shares the firmware version (`WEB_DISPLAY_VERSION`; `--version` prints it). When releasing, bump

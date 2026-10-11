@@ -150,4 +150,4 @@ disable it only in the final hardened release.
 ## Milestone 4: central device management (implemented, hardware validation pending)
 - Device: Bearer API keys (`wdk_...`, SHA-256 hashed, max 10) in `app.py`; `/api/keys` endpoints (session only); avahi advert `web-display-avahi.service` (base-image file, needs dev-push/reflash).
 - PC: `src/webdisplay_manager/` (client with fingerprint pinning, store, mDNS discovery, service, localhost server with token/Host/Origin checks); UI source `ui/src/manager`, built into `src/webdisplay_manager/static`.
-- Not yet tested on real Pis: mDNS scan, enrolment, actions. "Remove" only forgets locally; revoke the key on the device.
+- Not yet tested on real Pis: mDNS scan, enrolment, actions. "Remove" only forgets locally; revoke the key in the device admin page's "Manager access" card.
