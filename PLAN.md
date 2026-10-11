@@ -162,12 +162,23 @@ once per device; v1 covers status, display URL, updates and reboot.
 
 ## Current Status
 
-Milestone 1 is implemented and validated on Raspberry Pi 2. Milestone 2 is
-implemented and validated on Raspberry Pi 2, including WPA2 client/AP operation,
-Ethernet route preference, outage recovery and on-screen AP credentials. Raspberry
-Pi 3 built-in Wi-Fi client mode works. Its WPA2 AP previously failed under Trixie
-with a kernel key-validation error; explicitly disabling protected management
-frames now allows the generated WPA2 AP profile to activate, but tested Android and
-iPhone clients both fail WPA2 authentication. Do not use an open AP as a workaround.
-The development image is version 0.4.3. Signed remote updates, production hardening
-and release acceptance remain future milestones.
+Milestone 1 is implemented and validated on Raspberry Pi 2. Milestone 2's network
+features are implemented; Pi 2 WPA2 client/AP operation, Ethernet preference and
+outage recovery were validated. Two longer-term Wi-Fi reliability investigations
+remain open: Pi 2 scan/dropout recurrence and Pi 3 client reliability. Pi 3
+built-in Wi-Fi works as a client, but its WPA2 setup AP does not authenticate
+tested Android or iPhone clients. A compatible USB Edimax EW-7811Un was validated
+as an AP-capable adapter on Pi 3; do not use an open AP as a workaround.
+
+Milestone 3 Phase A (signed application bundles) is implemented. Hardware checks
+of valid installation, invalid signature, tampering, rollback and anti-retry are
+recorded on Pi 2 and Pi 3. Manager-driven release updates to 0.5.7 and 0.5.8 were
+also tested on both devices. Phase B (A/B root images) remains deferred.
+Milestone 4 (central device management) is implemented and hardware-tested,
+including discovery/enrolment, multi-address reporting, management actions and
+device-side API-key revocation. The latest application/manager release is 0.5.8;
+see `HANDOFF.md` for current device, test and remaining-work details.
+
+Production hardening, full release acceptance and the two Wi-Fi reliability
+investigations remain outstanding. App bundles do not update base-image files or
+the operating system; changes to those require a development push or new image.

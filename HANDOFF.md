@@ -1,153 +1,136 @@
 # Copilot Session Handoff
 
-Last updated: 2026-10-10.
+Last updated: 2026-10-11.
 
-## Current Status
+## Start Here
 
-Milestone 1 and the Pi 2 scope of milestone 2 are implemented. Read `PLAN.md`
-for agreed product requirements. The Pi 3 built-in WPA2 AP now starts on Trixie with
-a PMF-disabled profile, but tested Android and iPhone clients both fail WPA2
-authentication. Do not claim Pi 3 WPA2 AP validation, and do not use an open AP.
+Read `.github/copilot-instructions.md` for repository commands and conventions,
+then `PLAN.md` for approved scope. This handoff records the latest implementation
+and hardware status; distinguish user-reported hardware checks from local tests.
 
-The latest development firmware is
-`deploy/image_2026-10-10-web-display-development-milestone2.img.gz`,
-version 0.4.3, SHA-256
-`54b48a6f8318f1d23435607df78035a4bf73cf7790827d4383cfec53cc8f5bb2`
-(passes `gzip -t`), with saved-client reconnection retries. This full build used
-the HTTPS mirrorservice Raspbian mirror instead of the unstable redirector and
-completed successfully.
-It was flashed to a clean SD card and cold-booted on a Pi 3 (Ethernet): the full
-first-use setup (pairing, password, display URL) worked. The user also tested the
-release image from the `v0.4.2` release on a Pi 2; the full setup worked as expected.
-The Pi 3 AP `pmf=1` fix below is in local source and the installed Pi 3 service, but
-has not yet been built into a new SD-card image.
+## Current Repository And Release
 
-The `v0.4.2` pre-release was built by the GitHub workflow (release variant); its
-checksum and build attestation were verified, and it has now been boot-tested on a
-Pi 2. The release workflow no longer forces releases to be marked as pre-releases.
+- Branch `main`, latest recorded commit `ef66d11` (`Add repository Copilot
+  instructions`), following the `v0.5.8` release. The worktree was clean.
+- This handoff refresh also updates `PLAN.md` and the signed-update status in
+  `README.md`; these documentation changes are currently uncommitted.
+- The current application/manager release is **0.5.8**. Both the Pi 2 and Pi 3
+  were updated to 0.5.8 through the central manager and reported that version.
+- The manager UI, device-side key-revocation UI, and firmware-version alignment
+  are committed and pushed. No newer full SD-card image build is recorded for
+  this release; signed bundles update the Python application, not base-image
+  files or the OS.
 
-The Pi 3 now has Ethernet connected for Wi-Fi investigation. Its Wi-Fi initially
-connected, then NetworkManager lost the association during a WPA handshake and failed
-the profile because no interactive secrets agent is available. The saved system
-profile still has its PSK. With automatic AP disabled, the supervisor previously did
-not retry an inactive client profile; 0.4.3 adds a 60-second retry and unlimited
-NetworkManager autoconnect retries. The latest failures reached the WPA four-way
-handshake and disconnected; NetworkManager then reported no secrets agent. Even with the
-saved system PSK intact, association retries initially failed. A temporary BSSID test
-mistakenly targeted nearby networks rather than the configured SSID; after restoring
-automatic selection, Wi-Fi reconnected through the configured network and stayed up for
-at least five minutes. Continue observing before closing the reliability issue.
+## Milestone Status
 
-The Pi 2 also had a Wi-Fi outage on 2026-10-10 despite these retry settings. Over
-Ethernet, logs showed repeated `ssid-not-found` failures and scans returned no networks;
-the Edimax RTL8188CUS remained enumerated on the USB bus. A user-approved reboot
-restored scanning and Wi-Fi reconnected to the configured network, remaining
-connected for at least five minutes. Root cause is unknown; track recurrence separately.
+- **Milestone 1:** implemented and validated on Pi 2.
+- **Milestone 2:** networking, Wi-Fi setup/recovery, Ethernet preference, and
+  setup AP functions are implemented. Pi 2 WPA2 client/AP operation and real
+  outage recovery were validated. Pi 3 built-in Wi-Fi works as a client, but its
+  built-in WPA2 setup AP does **not** authenticate Android or iPhone clients.
+  Do not use an open AP as a workaround. A compatible USB Edimax EW-7811Un has
+  been tested as an AP-capable adapter on Pi 3; secured AP, DHCP and HTTPS
+  administration worked with it.
+- **Milestone 3, Phase A:** signed application bundles, verification, staged
+  install, rollback/boot guard, admin UI/API, GitHub release assets and manager
+  update operations are implemented. Hardware checks of valid upload, invalid
+  signature, tampering, rollback and anti-retry are recorded for Pi 2 and Pi 3.
+  Manager-driven release updates to 0.5.7 and 0.5.8 were also tested on both
+  Pis. Phase B (A/B root images) remains deferred. Do not treat an app bundle
+  as updating the base image.
+- **Milestone 4:** central PC manager is implemented and tested. It discovers
+  and enrolls devices, pins TLS fingerprints, stores per-device API keys, lists
+  multiple interface addresses, changes display URL, checks/installs updates,
+  updates all devices and restarts devices. The device-side **Manager access**
+  card lists and revokes keys; the user confirmed it works on Pi 3.
 
-## Build And Runtime
+## Active Work
 
-- Pinned image base: Raspberry Pi OS Trixie armhf, pi-gen commit
-  `c4f875735c109c658cd5ee99eaaaf70886a853b5`.
-- Build with `./build-image.sh`; default `VARIANT=development`. Use
-  `VARIANT=release` for the final hardened firmware. Development rebuilds reuse
-  the preserved container `web_display_pigen_development` (stages 0-2) and emit
-  `.img.gz`; `FRESH=1` forces a full build. Remove the container with
-  `docker rm -v web_display_pigen_development` to reclaim disk space.
-- The admin UI is React + TypeScript in `ui/`; the built bundle is committed in
-  `src/webdisplay/static/` (rebuild with `cd ui && npm run build`). No Node is
-  needed on the device or for the image build. CSP forbids inline script/style.
-- Development SSH uses the public key at `~/.ssh/id_rsa.pub` by default;
-  override with `DEBUG_SSH_PUBLIC_KEY`. The release variant has no debug user
-  and masks SSH.
-- Use `tools/push-to-device.sh webdebug@DEVICE_IP` for source/service deployment
-  without reflashing.
-- Raspbian packages default to
-  `https://mirrorservice.org/sites/archive.raspbian.org/raspbian`; override with
-  `RASPBIAN_MIRROR` when building. The selected mirror is part of the cached
-  development-base identity.
-- The image runs a Python HTTPS management service on port 8443 and Chromium
-  under Xorg. The Pi 2 requires Xorg's fbdev driver.
-- NetworkManager owns Wi-Fi client and setup AP connections. Ethernet route
-  metric is 100; Wi-Fi client profiles use metric 600. The saved Wi-Fi client now
-  retries indefinitely, and the supervisor retries an inactive profile every 60
-  seconds when no setup AP is active.
-- Automatic AP start is opt-in (`auto_ap` in config.json, default off; toggle in
-  the admin page). When enabled, the supervisor starts a WPA2 AP after 120 seconds of internet outage, retries
-  the saved client every 10 minutes, and restores client/AP state after
-  transitions and failed connections. AP credentials rotate and appear on the
-  kiosk fallback screen.
-- A configured website stays visible through brief outages; an offline icon is
-  overlaid after two failed reachability checks.
+Two tracked todos remain `in_progress`:
 
-## Hardware Validation
+- `m2-pi2-wifi-dropout`: Pi 2 previously stopped finding networks (`ssid-not-found`
+  and empty scans); a user-approved reboot restored scanning and connection to
+  the configured network. A later short observation showed a connected interface and clean
+  gateway pings, but does not establish long-term reliability.
+- `m2-pi3-wifi-client-reliability`: Pi 3 previously lost association during a
+  WPA handshake and NetworkManager reported that no interactive secrets agent
+  was available. The saved profile later reconnected and a short observation
+  was clean; long-term and cold-boot reliability remain unproven.
 
-- **Pi 2 + Edimax EW-7811Un:** WPA2 client and AP mode work. The user joined the
-  AP, obtained an address and loaded the administration page. The user also
-  tested a real switch-port outage; the AP came up after the grace period.
-- **Pi 3 Model B:** built-in WPA2 client works, and Ethernet remains preferred.
-  WPA2 AP activation fails in both the generated profile and a standard
-  NetworkManager hotspot with `nl80211: kernel reports: key setting validation
-  failed` / `802.1X supplicant took too long to authenticate`. On 2026-10-10,
-  reproduced the generated-profile failure on kernel 6.18.50 and the current
-  BCM43430/1 firmware. A runtime-only brcmfmac MFP feature-disable attempt did not
-  fix it. A temporary WPA2/RSN/CCMP NetworkManager AP with `wifi-sec.pmf=disable`
-  activated, then was removed. Added `pmf=1` to the appliance AP profile and pushed
-  it to the Pi 3; `Supervisor.start_ap()` then succeeded with the stock driver
-  defaults, reporting `AP_PMF=1`. A production AP stayed up with DHCP and HTTPS
-  administration service ready, but Android and iPhone clients both reported
-  “incorrect password.” Debug logging shows association and receipt of WPA2
-  handshake message 2, then client disassociation after the AP sent message 3;
-  no DHCP requests arrived. Replacing the passphrase with its valid 64-hex PSK
-  derivation did not resolve it. The test AP was stopped, debug logging reset to
-  INFO, supervisor restarted, and the configured Wi-Fi restored.
-  Built-in AP clients still fail, but a USB Edimax EW-7811Un on the Pi 3 serves a
-  secured AP correctly. The supervisor now prefers an AP-capable USB adapter
-  (`ap_device()`); verified on the Pi 3 with an authorized phone, DHCP and HTTP 200.
-  Pi 3 setup AP therefore requires a compatible USB adapter; built-in is unsupported.
-- **Pi 3 Wi-Fi client reliability:** observed on the current device: it connected at
-  boot, then lost association during a WPA handshake. NetworkManager requested secrets
-  and failed because no interactive agent exists; later traces repeatedly failed at
-  the WPA four-way handshake. The 0.4.3 client retry improvements were deployed, and
-  Wi-Fi reconnected automatically after the saved profile was restored and remained
-  connected for at least five minutes. Keep Ethernet attached and observe longer/cold
-  boot before marking the issue resolved.
-- Pi 2 was unreachable from WSL at the end of the session. The Pi 3 remained
-  reachable and its appliance services were active.
-- Report hardware checks separately from unit tests. The v0.4.2 development image
-  was clean-booted on Pi 3; its release image was boot-tested on Pi 2. Do not claim
-  Pi 3 WPA2 AP works.
+The last recorded short checks were on 2026-10-10. Both Pis' Ethernet ports were
+re-enabled for manager multi-address testing, so Ethernet reachability alone is
+not evidence that Wi-Fi is healthy. Confirm the present device/link state before
+starting an observation; for Wi-Fi-only testing, disable the Ethernet switch
+ports and verify the Wi-Fi address directly. Capture relevant journal output
+before rebooting because the journal is not persistent. Do not close either
+todo without adequate observation or a documented recurrence/fix.
 
-- The setup AP screen shows an offline-generated Wi-Fi join QR code (`python3-segno`,
-  `kiosk.wifi_qr_svg`). New package: images need a rebuild; existing devices need
-  `apt install python3-segno` (the page omits the QR if it is missing).
+Other useful but not yet hardware-verified cases: manager address fallback when
+one interface is actually down; the old-firmware warning on a real device; and
+the device-side key-revocation card on Pi 2. These are not blockers for the
+completed manager milestone.
 
-## Validation
+## Device And Network Notes
 
-- `PYTHONPATH=src python3 -m unittest discover -s tests`: 60 tests pass.
-- Shell syntax and Python compilation checks pass.
-- The latest compressed image passes `gzip -t`; its package manifest includes
-  NetworkManager, dnsmasq-base, python3-xlib and openssh-server.
-- Signed remote updates, boot-slot/rollback design, appliance hardening and
-  release acceptance are not implemented.
+- Both Pis can be on Ethernet and Wi-Fi at once with different DHCP addresses.
+  Confirm current addresses (mDNS or the router) rather than relying on notes.
+- SSH account in development images: `webdebug`. Release images disable SSH.
+- Pi 2 Wi-Fi adapter is an Edimax RTL8188CUS. **Do not `modprobe -r` its
+  driver**; that previously hung the Pi.
+- WSL2 mDNS multicast does not discover LAN devices reliably. Run the manager
+  natively on Windows when using discovery:
 
-## Milestone 3 Status
+  ```powershell
+  $env:PYTHONPATH="src"; python -m webdisplay_manager
+  ```
 
-Phase A (signed app-bundle updates, see `PLAN.md`) is implemented in code and
-unit tests: `updater.py`, `releases.py`, bundle tools, units, UI card and a CI
-`update-bundle` job. It is NOT yet validated on hardware. Next: dev-push 0.5.0 to
-the Pis, sign a 0.5.1 bundle with `~/.web-display-signing/update-signing.pem`,
-and test upload, bad signature, tamper, forced rollback and release pull.
-Local tests need an OpenSSL 3 `openssl` first on PATH. Phase B (A/B root images)
-is deferred.
+  The manager is cross-platform. Image and device-push shell scripts require
+  Linux/WSL.
 
-## Next Work
+## Development And Validation
 
-The next planned milestone is signed remote firmware updates. Before coding,
-define the Pi boot/partition design, signing-key custody, configuration
-migrations and physical recovery behaviour. Preserve SSH in development images;
-disable it only in the final hardened release.
+Run from the repository root. Full Python tests require Python 3.10+, `segno`,
+and OpenSSL 3 with `pkeyutl -rawin` support on `PATH`:
 
-## Milestone 4: central device management (implemented, hardware validation pending)
-- Device: Bearer API keys (`wdk_...`, SHA-256 hashed, max 10) in `app.py`; `/api/keys` endpoints (session only); avahi advert `web-display-avahi.service` (base-image file, needs dev-push/reflash).
-- PC: `src/webdisplay_manager/` (client with fingerprint pinning, store, mDNS discovery, service, localhost server with token/Host/Origin checks); UI source `ui/src/manager`, built into `src/webdisplay_manager/static`.
-- Not yet tested on real Pis: mDNS scan, enrolment, actions. "Remove" only forgets locally; revoke the key in the device admin page's "Manager access" card.
+```sh
+PYTHONPATH=src python3 -m unittest discover -s tests
+(cd ui && npm ci && npm run typecheck && npm test && npm run build)
+python3 -m compileall -q src tests
+```
+
+The last recorded run passed 164 Python tests and 14 UI tests. Building the UI
+updates both committed bundles: `src/webdisplay/static/` and
+`src/webdisplay_manager/static/`. CI checks bundle freshness.
+
+Image/device operations:
+
+```sh
+./build-image.sh
+VARIANT=release ./build-image.sh
+tools/push-to-device.sh webdebug@DEVICE_IP
+```
+
+Image builds need Docker, privileged-container support, about 30 GB free, and a
+native Linux filesystem. A development push replaces the factory Python package
+and clears installed update versions/state; it is not equivalent to installing
+a signed bundle. Files such as the updater, helper programs, systemd units,
+sudoers rules, Avahi configuration and NetworkManager configuration are base
+image content and need a development push or image rebuild.
+
+When preparing a release, bump `WEB_DISPLAY_VERSION` in
+`image/stage-web-display/01-install/files/web-display-release` and `version` in
+`pyproject.toml` together; tests enforce alignment. The release tag must match.
+The signing private key is not in the repository; never commit or casually
+transfer it. See `README.md` and CI workflow for release details.
+
+## Architecture Pointers
+
+- Device service/API and address reporting: `src/webdisplay/app.py`.
+- Network supervisor and Wi-Fi recovery: `src/webdisplay/netmonitor.py`,
+  `src/webdisplay/network.py`, and `src/webdisplay/wifi_helper.py`.
+- Signed updates: `src/webdisplay/updater.py`, `src/webdisplay/releases.py`,
+  `tools/`, and `image/stage-web-display/01-install/`.
+- Manager backend: `src/webdisplay_manager/`; manager React UI:
+  `ui/src/manager/`; device key UI: `ui/src/components/ManagerKeysCard.tsx`.
+- Hardware tests are not represented by unit tests. Preserve the distinction
+  between automated test results and checks performed on physical Pis.

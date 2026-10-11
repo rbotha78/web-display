@@ -201,7 +201,7 @@ and commit the regenerated `src/webdisplay/static/`. `npm run dev` runs a hot-re
 server that proxies `/api` to a service on `https://localhost:8443`. The page is
 served with a strict Content-Security-Policy (no inline scripts or styles).
 
-## Signed updates (milestone 3, staged)
+## Signed updates (milestone 3, Phase A implemented)
 
 Application updates are signed `.wdupdate` bundles installed by a root helper
 (`update-action`) into `/var/lib/web-display-app/versions/<version>`. The helper,
@@ -219,7 +219,11 @@ signature, every file hash, the version (no downgrades) and compatibility.
 - Local build: `python3 tools/make_update_bundle.py --version 0.5.1 --key-file KEY`
   (needs OpenSSL 3). Check with `tools/verify_update_bundle.py`.
 - Devices need a base image of 0.5.0 or later (or a `tools/push-to-device.sh`
-  push) before they can accept bundles. Hardware validation is still pending.
+  push) before they can accept bundles. Valid installation, invalid signatures,
+  tampering, rollback and anti-retry were hardware-tested on Pi 2 and Pi 3.
+  Manager-driven GitHub release updates to 0.5.7 and 0.5.8 were also tested on
+  both Pis. The device admin page's direct upload/release-pull workflow still
+  needs separate hardware validation. See `HANDOFF.md` for current status.
 
 ## Development checks
 
