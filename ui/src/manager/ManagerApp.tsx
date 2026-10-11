@@ -13,6 +13,7 @@ export function ManagerApp() {
   const [ready, setReady] = useState(false);
   const [devices, setDevices] = useState<Device[] | null>(null);
   const [adding, setAdding] = useState<{ host: string; port: number; name?: string } | null>(null);
+  const [managerVersion, setManagerVersion] = useState("");
   const [found, setFound] = useState<Found[]>([]);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [busy, setBusy] = useState(false);
@@ -28,7 +29,9 @@ export function ManagerApp() {
 
   const refresh = useCallback(async () => {
     try {
-      setDevices((await api.devices()).devices);
+      const reply = await api.devices();
+      setDevices(reply.devices);
+      setManagerVersion(reply.manager_version ?? "");
     } catch (error) {
       notify(error instanceof Error ? error.message : "Could not load devices", "error");
     }
@@ -135,6 +138,7 @@ export function ManagerApp() {
           <p className="muted">No devices yet. Choose Add device to find or add one.</p>
         )}
       </div>
+      {managerVersion && <footer className="muted">Web Display Manager {managerVersion}</footer>}
       <Toast notice={notice} />
     </div>
   );

@@ -117,6 +117,12 @@ export function DeviceCard({ device, notify, refresh, readd }: Props) {
           </button>
         </p>
       )}
+      {device.firmware_outdated && (
+        <p className="error">
+          Firmware {device.version} is older than the {device.min_firmware} the manager needs. Update
+          this device from its own admin page.
+        </p>
+      )}
       {device.error && !device.certificate_changed && !device.key_rejected && (
         <p className="error">{device.error}</p>
       )}

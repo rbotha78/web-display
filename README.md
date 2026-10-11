@@ -276,3 +276,7 @@ create an API key for this PC. Only the key and pinned fingerprint are stored, i
 Functions: status, change display address, check/install updates (one or all), restart.
 Keys can be listed/revoked on a device via `GET /api/keys` and `DELETE /api/keys/<id>`.
 Rebuild the manager UI with `cd ui && npm run build`.
+
+The manager shares the firmware version (`WEB_DISPLAY_VERSION`; `--version` prints it). When releasing, bump
+`WEB_DISPLAY_VERSION` and `version` in `pyproject.toml` together (a test enforces this). The manager refuses to
+enrol, and warns about, devices older than `MIN_FIRMWARE` in `src/webdisplay_manager/version.py` (0.5.7).

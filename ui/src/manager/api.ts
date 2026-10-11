@@ -16,6 +16,8 @@ export interface Device {
   error?: string;
   certificate_changed?: boolean;
   key_rejected?: boolean;
+  firmware_outdated?: boolean;
+  min_firmware?: string;
 }
 
 export interface Found {
@@ -60,7 +62,7 @@ async function request<T>(path: string, method = "GET", body?: unknown): Promise
 }
 
 export const api = {
-  devices: () => request<{ devices: Device[] }>("/api/devices"),
+  devices: () => request<{ devices: Device[]; manager_version?: string }>("/api/devices"),
   discover: () => request<{ found: Found[] }>("/api/discover"),
   fingerprint: (host: string, port: number) =>
     request<{ host: string; port: number; fingerprint: string }>("/api/fingerprint", "POST", {

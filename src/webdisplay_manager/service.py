@@ -9,6 +9,7 @@ import re
 from . import client as device_client
 from .client import DeviceClient, DeviceError
 from .discovery import discover
+from .version import MIN_FIRMWARE, firmware_too_old
 from .store import DeviceStore, addresses
 
 HOST_RE = re.compile(r"^[A-Za-z0-9]([A-Za-z0-9.\-]{0,251}[A-Za-z0-9])?$")
@@ -87,6 +88,9 @@ class Manager:
             device, health = self.connect(identifier)
             result["host"], result["port"] = device.host, device.port
             result["version"] = health.get("version")
+            if firmware_too_old(health.get("version")):
+                result["firmware_outdated"] = True
+                result["min_firmware"] = MIN_FIRMWARE
             result["online"] = True
             status = device.call("GET", "/api/status")
             result["hostname"] = status.get("hostname")
@@ -154,6 +158,11 @@ class Manager:
         if not isinstance(password, str) or not password:
             raise ValueError("Enter the device's administrator password")
         name = validate_name(body.get("name"), host)
+        version = DeviceClient(host, port, confirmed).call("GET", "/health", timeout=10).get("version")
+        if firmware_too_old(version):
+            raise DeviceError(
+                f"This device runs firmware {version}; the manager needs {MIN_FIRMWARE} or newer. Update the device first.", 409
+            )
         key = device_client.enroll(host, port, confirmed, password, "Web Display Manager")
         return {"id": self.store.save(host, port, confirmed, key, name)}
 

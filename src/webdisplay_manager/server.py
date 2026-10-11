@@ -17,6 +17,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from .client import DeviceError
+from .version import manager_version
 from .service import Manager
 from .store import DeviceStore
 
@@ -122,7 +123,7 @@ def make_handler(manager: Manager, token: str, port_getter) -> type[BaseHTTPRequ
             if not self._authorised():
                 return
             if self.path == "/api/devices":
-                self._json(HTTPStatus.OK, {"devices": manager.devices()})
+                self._json(HTTPStatus.OK, {"devices": manager.devices(), "manager_version": manager_version()})
             elif self.path == "/api/discover":
                 self._json(HTTPStatus.OK, {"found": manager.discovered()})
             else:
@@ -161,6 +162,7 @@ def make_handler(manager: Manager, token: str, port_getter) -> type[BaseHTTPRequ
 def main() -> None:
     parser = argparse.ArgumentParser(prog="webdisplay_manager", description=__doc__)
     parser.add_argument("--port", type=int, default=8765)
+    parser.add_argument("--version", action="version", version=f"web-display-manager {manager_version()}")
     parser.add_argument("--no-browser", action="store_true")
     parser.add_argument("--store", type=Path, help="devices file (default ~/.config/web-display-manager/devices.json)")
     args = parser.parse_args()

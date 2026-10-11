@@ -10,7 +10,7 @@ from http.server import ThreadingHTTPServer
 from pathlib import Path
 
 from webdisplay.app import Application, make_handler
-from webdisplay_manager import client, discovery
+from webdisplay_manager import client, discovery, version
 from webdisplay_manager.client import CertificateMismatch, DeviceClient, DeviceError
 from webdisplay_manager.server import make_handler as manager_handler
 from webdisplay_manager.service import Manager
@@ -37,6 +37,7 @@ class FakeDevice:
         self.app = Application(root / "config.json", root / "pairing", root / "target", Path("/bin/true"))
         self.app.run_action = lambda action: self.actions.append(action)
         self.actions: list[str] = []
+        self.app.updater.running_version = lambda: "0.5.7"
         self.app.config.update(password=__import__("webdisplay.app", fromlist=["x"]).hash_password("device password"))
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(self.app))
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
@@ -253,6 +254,33 @@ class ServerTests(ManagerCase):
     def test_bad_enrol_is_a_client_error(self):
         status, _ = self.call("POST", "/api/enroll", {"host": "bad host"})
         self.assertEqual(status, 400)
+
+
+class VersionTests(ManagerCase):
+    def test_old_firmware_cannot_be_enrolled(self):
+        self.device.app.updater.running_version = lambda: "0.5.6"
+        with self.assertRaisesRegex(DeviceError, "needs 0.5.7"):
+            self.enroll()
+        self.assertEqual(self.store.all(), {})
+
+    def test_old_firmware_is_flagged_for_enrolled_device(self):
+        self.enroll()
+        self.device.app.updater.running_version = lambda: "0.5.6"
+        [summary] = self.manager.devices()
+        self.assertTrue(summary["firmware_outdated"])
+        self.assertEqual(summary["min_firmware"], version.MIN_FIRMWARE)
+
+    def test_current_firmware_is_not_flagged(self):
+        self.enroll()
+        [summary] = self.manager.devices()
+        self.assertNotIn("firmware_outdated", summary)
+
+    def test_manager_version_follows_release_file_and_package(self):
+        release = version.manager_version()
+        self.assertRegex(release, r"^\d+\.\d+\.\d+$")
+        pyproject = (Path(__file__).resolve().parents[1] / "pyproject.toml").read_text()
+        self.assertIn(f'version = "{release}"', pyproject)
+        self.assertFalse(version.firmware_too_old(release))
 
 
 class MultiAddressTests(ManagerCase):

@@ -57,3 +57,23 @@ test("shows discovered devices on the first screen", async () => {
   fireEvent.click(screen.getByText("Add"));
   expect(screen.getByText("Add a device")).toBeTruthy();
 });
+
+test("shows manager version and an outdated firmware warning", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (path: string) => ({
+      ok: true,
+      status: 200,
+      json: async () =>
+        path === "/api/discover"
+          ? { found: [] }
+          : {
+              manager_version: "0.5.7",
+              devices: [{ id: "aabbccddeeff", name: "Old", host: "h", port: 8443, online: true, version: "0.5.6", firmware_outdated: true, min_firmware: "0.5.7" }],
+            },
+    })),
+  );
+  render(<ManagerApp />);
+  expect(await screen.findByText(/Web Display Manager 0.5.7/)).toBeTruthy();
+  expect(screen.getByText(/older than the 0.5.7/)).toBeTruthy();
+});
