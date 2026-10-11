@@ -280,7 +280,7 @@ class MultiAddressTests(ManagerCase):
         self.assertEqual(first, second)
         self.assertEqual(len(self.manager.devices()), 1)
         hosts = [item["host"] for item in self.store.get(first)["addresses"]]
-        self.assertEqual(hosts, ["localhost", "127.0.0.1"])
+        self.assertEqual(hosts[:2], ["localhost", "127.0.0.1"])
 
     def test_discovery_matches_any_known_address_or_hostname(self):
         identifier = self.enroll()
@@ -292,6 +292,15 @@ class MultiAddressTests(ManagerCase):
         ]
         found = self.manager.discovered()
         self.assertEqual([(d["name"], d["enrolled"]) for d in found], [("pi-one", True), ("other", False)])
+
+    def test_scan_learns_extra_address_of_enrolled_device(self):
+        identifier = self.enroll()
+        self.store.learn(identifier, [], self.device.port, "pi-one")
+        self.manager.discover_fn = lambda: [
+            {"name": "pi-one", "host": "10.0.0.9", "port": self.device.port},
+        ]
+        self.manager.discovered()
+        self.assertIn("10.0.0.9", [a["host"] for a in self.store.get(identifier)["addresses"]])
 
     def test_device_reported_addresses_are_learned(self):
         identifier = self.enroll()

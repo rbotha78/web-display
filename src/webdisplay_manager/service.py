@@ -90,8 +90,8 @@ class Manager:
             result["online"] = True
             status = device.call("GET", "/api/status")
             result["hostname"] = status.get("hostname")
-            result["addresses"] = status.get("addresses")
             self.learn_addresses(identifier, device, status)
+            result["addresses"] = [a for a, _ in addresses(self.store.get(identifier) or entry)]
             result["url"] = device.call("GET", "/api/config").get("url")
             network = device.call("GET", "/api/network")
             internet = network.get("internet") or {}
@@ -125,16 +125,22 @@ class Manager:
         return sorted(summaries, key=lambda d: str(d["name"]).lower())
 
     def discovered(self) -> list[dict[str, object]]:
+        raw = self.discover_fn()
+        # Scan replies name each device by hostname; use them to learn extra addresses of enrolled devices.
+        by_hostname = {str(e["hostname"]): i for i, e in self.store.all().items() if e.get("hostname")}
+        for item in raw:
+            identifier = by_hostname.get(str(item["name"]))
+            if identifier:
+                self.store.learn(identifier, [str(item["host"])], int(item["port"]), None)  # type: ignore[arg-type]
         entries = list(self.store.all().values())
         known = {(a, p) for e in entries for a, p in addresses(e)}
         hostnames = {str(e["hostname"]) for e in entries if e.get("hostname")}
         unique: dict[object, dict[str, object]] = {}
-        for item in self.discover_fn():
+        for item in raw:
             unique.setdefault(item["name"], item)  # one row per device, not per interface
-        found = list(unique.values())
         return [
             {**d, "enrolled": (d["host"], d["port"]) in known or d["name"] in hostnames}
-            for d in found
+            for d in unique.values()
         ]
 
     def fingerprint(self, host: object, port: object) -> dict[str, object]:

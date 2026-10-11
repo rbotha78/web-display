@@ -814,12 +814,25 @@ def expired_cookie() -> str:
 def local_addresses() -> list[str]:
     addresses: set[str] = set()
     try:
+        output = subprocess.run(
+            ["ip", "-o", "addr", "show", "scope", "global"],
+            capture_output=True, text=True, timeout=3, check=False,
+        ).stdout
+        for line in output.splitlines():
+            fields = line.split()
+            if "inet" in fields or "inet6" in fields:
+                addresses.add(fields[fields.index("inet" if "inet" in fields else "inet6") + 1].split("/", 1)[0])
+    except (OSError, subprocess.SubprocessError):
+        pass
+    if addresses:
+        return sorted(addresses)
+    try:
         for item in socket.getaddrinfo(socket.gethostname(), None):
             address = item[4][0].split("%", 1)[0]
             parsed = ipaddress.ip_address(address)
             if not parsed.is_loopback:
                 addresses.add(address)
-    except socket.gaierror:
+    except (socket.gaierror, ValueError):
         pass
     return sorted(addresses)
 

@@ -6,6 +6,7 @@ export interface Device {
   online: boolean;
   version?: string;
   hostname?: string;
+  addresses?: string[];
   url?: string;
   internet?: boolean | null;
   default_route?: string;

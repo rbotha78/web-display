@@ -95,7 +95,10 @@ export function DeviceCard({ device, notify, refresh, readd }: Props) {
         </span>
       </h2>
       <p className="muted">
-        {device.host}:{device.port}
+        {device.addresses && device.addresses.length > 1
+          ? device.addresses.join(", ")
+          : device.host}
+        :{device.port}
         {device.hostname ? " · " + device.hostname : ""}
       </p>
       {device.certificate_changed && (
