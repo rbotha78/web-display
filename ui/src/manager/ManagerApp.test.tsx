@@ -39,3 +39,21 @@ test("offers to trust a changed certificate", async () => {
   fireEvent.click(await screen.findByText("Trust again"));
   await waitFor(() => expect(screen.getByText("Add a device")).toBeTruthy());
 });
+
+test("shows discovered devices on the first screen", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (path: string) => ({
+      ok: true,
+      status: 200,
+      json: async () =>
+        path === "/api/discover"
+          ? { found: [{ name: "web-display-pi3", host: "10.0.0.7", port: 8443, enrolled: false }] }
+          : { devices: [] },
+    })),
+  );
+  render(<ManagerApp />);
+  expect(await screen.findByText(/web-display-pi3/)).toBeTruthy();
+  fireEvent.click(screen.getByText("Add"));
+  expect(screen.getByText("Add a device")).toBeTruthy();
+});

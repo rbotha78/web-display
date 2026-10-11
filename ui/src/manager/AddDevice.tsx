@@ -6,14 +6,15 @@ interface Props {
   done: () => void;
   initialHost?: string;
   initialPort?: number;
+  initialName?: string;
 }
 
-export function AddDevice({ notify, done, initialHost = "", initialPort = 8443 }: Props) {
+export function AddDevice({ notify, done, initialHost = "", initialPort = 8443, initialName = "" }: Props) {
   const [host, setHost] = useState(initialHost);
   const [port, setPort] = useState(String(initialPort));
   const [fingerprint, setFingerprint] = useState<string | null>(null);
   const [password, setPassword] = useState("");
-  const [name, setName] = useState("");
+  const [name, setName] = useState(initialName);
   const [found, setFound] = useState<Found[] | null>(null);
   const [busy, setBusy] = useState(false);
 
