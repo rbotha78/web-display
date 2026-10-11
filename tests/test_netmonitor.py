@@ -240,6 +240,50 @@ class ApDeviceTests(unittest.TestCase):
         self.assertEqual(self.pick(set()), "wlan0")
 
 
+class AdapterRecoveryTests(unittest.TestCase):
+    def setUp(self):
+        self.now = [10_000.0]
+        self.supervisor = netmonitor.Supervisor(clock=lambda: self.now[0], auto_ap=lambda: False)
+
+    def recover(self, failures, usb="1-1.3", sees=False, reset=True):
+        self.supervisor.client_failures = failures
+        with (
+            patch.object(netmonitor, "usb_device_id", return_value=usb),
+            patch.object(netmonitor, "sees_networks", return_value=sees),
+            patch.object(netmonitor, "reset_usb_adapter", return_value=reset) as resetter,
+        ):
+            self.supervisor.recover_adapter("wlan0")
+        return resetter
+
+    def test_resets_blind_usb_adapter_after_repeated_failures(self):
+        resetter = self.recover(5)
+        resetter.assert_called_once_with("1-1.3")
+        self.assertEqual(self.supervisor.client_failures, 0)
+
+    def test_waits_for_repeated_failures(self):
+        self.recover(4).assert_not_called()
+
+    def test_leaves_adapter_that_still_sees_networks(self):
+        self.recover(9, sees=True).assert_not_called()
+
+    def test_ignores_non_usb_radio(self):
+        self.recover(9, usb=None).assert_not_called()
+
+    def test_respects_cooldown(self):
+        self.recover(5)
+        self.now[0] += 60
+        self.recover(5).assert_not_called()
+        self.now[0] += netmonitor.ADAPTER_RESET_COOLDOWN
+        self.recover(5).assert_called_once()
+
+    def test_usb_id_only_for_usb_interfaces(self):
+        with patch.object(netmonitor.os.path, "realpath", return_value="/sys/devices/platform/soc/mmc/net/wlan0"):
+            self.assertIsNone(netmonitor.usb_device_id("wlan0"))
+        path = "/sys/devices/platform/usb/usb1/1-1/1-1.3/1-1.3:1.0"
+        with patch.object(netmonitor.os.path, "realpath", return_value=path):
+            self.assertEqual(netmonitor.usb_device_id("wlan0"), "1-1.3")
+
+
 class DestinationTests(unittest.TestCase):
     ARGS = ("file:///fallback", "file:///offline")
 

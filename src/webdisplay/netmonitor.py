@@ -40,6 +40,8 @@ OUTAGE_GRACE = 120
 RETRY_INTERVAL = 600
 CLIENT_RETRY_INTERVAL = 60
 TICK_SECONDS = 10
+ADAPTER_RESET_FAILURES = 5
+ADAPTER_RESET_COOLDOWN = 900
 PASSWORD_ALPHABET = "abcdefghjkmnpqrstuvwxyz23456789"
 
 
@@ -119,6 +121,35 @@ def ap_device() -> str | None:
     return candidates[0] if candidates else None
 
 
+def usb_device_id(device: str) -> str | None:
+    """The sysfs id (e.g. 1-1.3) of the USB device behind a network interface."""
+    try:
+        path = Path(os.path.realpath(f"/sys/class/net/{device}/device"))
+    except OSError:
+        return None
+    if "/usb" not in str(path):
+        return None
+    return path.parent.name if re.fullmatch(r"[0-9]+-[0-9.]+:[0-9.]+", path.name) else None
+
+
+def sees_networks(device: str) -> bool:
+    result = run(["nmcli", "-t", "-f", "SSID", "device", "wifi", "list", "ifname", device, "--rescan", "yes"], 30)
+    return any(line.strip() for line in result.stdout.splitlines())
+
+
+def reset_usb_adapter(usb_id: str) -> bool:
+    """Re-enumerate a wedged USB radio by unbinding and rebinding it from the USB core."""
+    base = Path("/sys/bus/usb/drivers/usb")
+    try:
+        (base / "unbind").write_text(usb_id, encoding="ascii")
+        time.sleep(2)
+        (base / "bind").write_text(usb_id, encoding="ascii")
+    except OSError as error:
+        LOG.warning("Could not reset USB Wi-Fi adapter %s: %s", usb_id, error)
+        return False
+    return True
+
+
 def write_private(path: Path, content: str, mode: int, group: str | None = None) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     descriptor, temporary = tempfile.mkstemp(dir=path.parent, prefix=".wd-")
@@ -152,6 +183,23 @@ class Supervisor:
         self.ap_active = False
         self.last_retry = 0.0
         self.last_client_retry = 0.0
+        self.client_failures = 0
+        self.last_adapter_reset = -ADAPTER_RESET_COOLDOWN
+
+    def recover_adapter(self, device: str) -> None:
+        """Some USB radios stop seeing any networks and never recover by themselves."""
+        if self.client_failures < ADAPTER_RESET_FAILURES:
+            return
+        now = self.clock()
+        if now - self.last_adapter_reset < ADAPTER_RESET_COOLDOWN:
+            return
+        usb_id = usb_device_id(device)
+        if usb_id is None or sees_networks(device):
+            return
+        self.last_adapter_reset = now
+        LOG.warning("Wi-Fi adapter %s sees no networks; resetting it", device)
+        if reset_usb_adapter(usb_id):
+            self.client_failures = 0
 
     def start_ap(self) -> bool:
         device = ap_device()
@@ -225,6 +273,10 @@ class Supervisor:
             )
             if result.returncode != 0:
                 LOG.warning("Could not restore the saved Wi-Fi connection")
+                self.client_failures += 1
+                self.recover_adapter(device)
+            else:
+                self.client_failures = 0
 
     def retry_client(self) -> bool:
         if not CLIENT_KEYFILE.exists():

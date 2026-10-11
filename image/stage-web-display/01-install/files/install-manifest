@@ -17,3 +17,4 @@
 0644 20-web-display-fbdev.conf /etc/X11/xorg.conf.d/20-web-display-fbdev.conf
 0644 web-display-release /etc/web-display-release
 0644 update-key.pub /etc/web-display/update-key.pub
+0644 web-display-wifi.conf /etc/NetworkManager/conf.d/web-display-wifi.conf

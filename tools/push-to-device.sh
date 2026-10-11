@@ -37,6 +37,7 @@ rm -rf /usr/lib/python3/dist-packages/webdisplay
 cp -a ${stage}/webdisplay /usr/lib/python3/dist-packages/webdisplay
 ${sudoers}${install_commands}rm -rf ${stage}
 systemctl daemon-reload
+nmcli general reload conf || true
 systemctl enable web-display-network.service web-display-update-guard.service web-display-update-confirm.service
 # A development push replaces the base copy, so drop any installed update bundle.
 rm -rf /var/lib/web-display-app/current /var/lib/web-display-app/current.tmp /var/lib/web-display-app/versions /var/lib/web-display-app/state.json
