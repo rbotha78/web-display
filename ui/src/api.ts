@@ -58,6 +58,18 @@ export interface ApiKey {
   created: number | null;
 }
 
+export interface SshKey {
+  id: string;
+  type: string;
+  comment: string;
+  fingerprint: string;
+}
+
+export interface SshKeys {
+  enabled: boolean;
+  keys: SshKey[];
+}
+
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -139,6 +151,10 @@ export const api = {
   checkUpdate: () => request<UpdateCheck>("/api/update/check", "POST"),
   apiKeys: () => request<{ keys: ApiKey[] }>("/api/keys"),
   revokeApiKey: (id: string) => request<object>("/api/keys/" + id, "DELETE"),
+  debugKeys: () => request<SshKeys>("/api/debug-keys"),
+  addDebugKey: (key: string, name: string) =>
+    request<SshKeys>("/api/debug-keys", "POST", name ? { key, name } : { key }),
+  removeDebugKey: (id: string) => request<SshKeys>("/api/debug-keys/" + id, "DELETE"),
   installUpdate: () => request<UpdateResult>("/api/update/install", "POST"),
   uploadUpdate,
 };

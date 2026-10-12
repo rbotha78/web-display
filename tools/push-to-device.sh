@@ -30,12 +30,18 @@ while read -r mode source destination; do
 		sudoers+="visudo -cf ${stage}/${source}"$'\n'
 	fi
 done <"${manifest}"
-scp -q "${sources[@]}" "${target}:${stage}/"
+scp -q "${sources[@]}" "${files}/debug-keys-action" "${files}/web-display-debug-sudoers" "${target}:${stage}/"
 
 ssh "${target}" "sudo sh -eu" <<EOF
 rm -rf /usr/lib/python3/dist-packages/webdisplay
 cp -a ${stage}/webdisplay /usr/lib/python3/dist-packages/webdisplay
-${sudoers}${install_commands}rm -rf ${stage}
+${sudoers}${install_commands}# The development SSH-key helper belongs only on devices that still have debug access enabled.
+if [ -e /etc/ssh/sshd_config.d/90-web-display-debug.conf ]; then
+visudo -cf ${stage}/web-display-debug-sudoers
+install -D -m 0755 ${stage}/debug-keys-action /usr/lib/web-display/debug-keys-action
+install -m 0440 ${stage}/web-display-debug-sudoers /etc/sudoers.d/web-display-debug
+fi
+rm -rf ${stage}
 systemctl daemon-reload
 nmcli general reload conf || true
 systemctl enable web-display-network.service web-display-update-guard.service web-display-update-confirm.service

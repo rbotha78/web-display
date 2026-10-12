@@ -249,8 +249,11 @@ class Application:
         hostname_helper: Path | None = None,
         update_helper: Path | None = None,
         updater: Updater | None = None,
+        debug_keys_helper: Path | None = None,
     ):
         self.update_helper = update_helper
+        self.debug_keys_helper = debug_keys_helper
+        self.debug_keys_lock = threading.Lock()
         self.updater = updater or Updater()
         self.update_lock = threading.Lock()
         self.keys_lock = threading.Lock()
@@ -364,6 +367,34 @@ class Application:
         if result.returncode != 0 or not isinstance(payload, dict):
             message = payload.get("error") if isinstance(payload, dict) else None
             raise ValueError(str(message or "Hostname helper failed"))
+        return payload
+
+    def debug_keys_available(self) -> bool:
+        # Only development images install this helper.
+        return self.debug_keys_helper is not None and self.debug_keys_helper.exists()
+
+    def run_debug_keys(self, request: dict[str, object]) -> dict[str, object]:
+        if not self.debug_keys_available():
+            if request.get("operation") == "list":
+                return {"enabled": False, "keys": []}
+            raise ValueError("Development SSH access is not available on this device")
+        with self.debug_keys_lock:
+            result = subprocess.run(
+                ["sudo", "--non-interactive", str(self.debug_keys_helper)],
+                input=json.dumps(request),
+                capture_output=True,
+                text=True,
+                timeout=60,
+                check=False,
+            )
+        try:
+            payload = json.loads(result.stdout)
+        except ValueError:
+            LOG.error("SSH key helper returned invalid output (exit %d)", result.returncode)
+            raise ValueError("SSH key helper failed") from None
+        if result.returncode != 0 or not isinstance(payload, dict):
+            message = payload.get("error") if isinstance(payload, dict) else None
+            raise ValueError(str(message or "SSH key helper failed"))
         return payload
 
     def update_status(self) -> dict[str, object]:
@@ -606,6 +637,14 @@ def make_handler(app: Application) -> type[BaseHTTPRequestHandler]:
                 if self._require_session(allow_key=False):
                     self._json(HTTPStatus.OK, {"keys": app.list_keys()})
                 return
+            if self.path == "/api/debug-keys":
+                if self._require_session():
+                    try:
+                        self._json(HTTPStatus.OK, app.run_debug_keys({"operation": "list"}))
+                    except (ValueError, subprocess.SubprocessError, OSError):
+                        LOG.exception("Listing SSH keys failed")
+                        self._json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": "system action failed"})
+                return
             if self.path == "/api/config":
                 if not self._require_session():
                     return
@@ -681,6 +720,13 @@ def make_handler(app: Application) -> type[BaseHTTPRequestHandler]:
                     if not self._require_session(csrf=True, allow_key=False):
                         return
                     self._json(HTTPStatus.CREATED, app.create_key(validate_key_name(body.get("name"))))
+                elif self.path == "/api/debug-keys":
+                    if not self._require_session(csrf=True):
+                        return
+                    request = {"operation": "add", "key": body.get("key")}
+                    if "name" in body:
+                        request["name"] = body["name"]
+                    self._json(HTTPStatus.CREATED, app.run_debug_keys(request))
                 elif self.path == "/api/reboot":
                     if not self._require_session(csrf=True):
                         return
@@ -720,6 +766,14 @@ def make_handler(app: Application) -> type[BaseHTTPRequestHandler]:
 
         def do_DELETE(self) -> None:
             try:
+                if self.path.startswith("/api/debug-keys/"):
+                    if not self._require_session(csrf=True):
+                        return
+                    result = app.run_debug_keys(
+                        {"operation": "remove", "id": self.path[len("/api/debug-keys/"):]}
+                    )
+                    self._json(HTTPStatus.OK, result)
+                    return
                 prefix = "/api/keys/"
                 if not self.path.startswith(prefix):
                     self._json(HTTPStatus.NOT_FOUND, {"error": "not found"})
@@ -730,6 +784,9 @@ def make_handler(app: Application) -> type[BaseHTTPRequestHandler]:
                 self._json(HTTPStatus.OK, {"ok": True})
             except ValueError as error:
                 self._json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
+            except (subprocess.SubprocessError, OSError):
+                LOG.exception("System action failed")
+                self._json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": "system action failed"})
 
         def do_PUT(self) -> None:
             try:
@@ -846,6 +903,7 @@ def serve(args: argparse.Namespace) -> None:
         Path(args.wifi_helper),
         Path(args.hostname_helper),
         Path(args.update_helper),
+        debug_keys_helper=Path(args.debug_keys_helper),
     )
     server = ThreadingHTTPServer((args.bind, args.port), make_handler(app))
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
@@ -873,6 +931,9 @@ def main() -> None:
         "--hostname-helper", default="/usr/lib/web-display/hostname-action"
     )
     parser.add_argument("--update-helper", default="/usr/lib/web-display/update-action")
+    parser.add_argument(
+        "--debug-keys-helper", default="/usr/lib/web-display/debug-keys-action"
+    )
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     serve(args)

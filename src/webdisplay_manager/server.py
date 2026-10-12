@@ -122,7 +122,10 @@ def make_handler(manager: Manager, token: str, port_getter) -> type[BaseHTTPRequ
                 return
             if not self._authorised():
                 return
-            if self.path == "/api/devices":
+            keys = re.fullmatch(r"/api/devices/([0-9a-f]{12})/debug-keys", self.path)
+            if keys:
+                self._json(HTTPStatus.OK, manager.debug_keys(keys.group(1), "list", {}))
+            elif self.path == "/api/devices":
                 self._json(HTTPStatus.OK, {"devices": manager.devices(), "manager_version": manager_version()})
             elif self.path == "/api/discover":
                 self._json(HTTPStatus.OK, {"found": manager.discovered()})
@@ -133,7 +136,10 @@ def make_handler(manager: Manager, token: str, port_getter) -> type[BaseHTTPRequ
             if not self._authorised():
                 return
             body = self._body()
-            if self.path == "/api/fingerprint":
+            keys = re.fullmatch(r"/api/devices/([0-9a-f]{12})/debug-keys", self.path)
+            if keys:
+                self._json(HTTPStatus.CREATED, manager.debug_keys(keys.group(1), "add", body))
+            elif self.path == "/api/fingerprint":
                 self._json(HTTPStatus.OK, manager.fingerprint(body.get("host"), body.get("port")))
             elif self.path == "/api/enroll":
                 self._json(HTTPStatus.CREATED, manager.enroll(body))
@@ -148,6 +154,10 @@ def make_handler(manager: Manager, token: str, port_getter) -> type[BaseHTTPRequ
 
         def _delete(self) -> None:
             if not self._authorised():
+                return
+            key = re.fullmatch(r"/api/devices/([0-9a-f]{12})/debug-keys/([0-9a-f]{12})", self.path)
+            if key:
+                self._json(HTTPStatus.OK, manager.debug_keys(key.group(1), "remove", {}, key.group(2)))
                 return
             match = re.fullmatch(r"/api/devices/([0-9a-f]{12})", self.path)
             if not match:

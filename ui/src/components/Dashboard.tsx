@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { ApiError, api, type NetworkStatus, type Status } from "../api";
+import { DebugKeysCard } from "./DebugKeysCard";
 import { DisplayCard } from "./DisplayCard";
 import { HostnameCard } from "./HostnameCard";
 import { StatusCard } from "./StatusCard";
@@ -52,6 +53,7 @@ export function Dashboard({ notify, onExpired }: Props) {
       <WifiCard network={network} notify={notify} fail={fail} refresh={refreshNetwork} />
       <UpdatesCard notify={notify} fail={fail} />
       <ManagerKeysCard notify={notify} fail={fail} />
+      <DebugKeysCard notify={notify} fail={fail} />
     </div>
   );
 }

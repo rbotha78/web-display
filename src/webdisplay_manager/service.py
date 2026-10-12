@@ -185,6 +185,19 @@ class Manager:
             return device.call("POST", "/api/update/install", {}, timeout=120)
         raise LookupError("Unknown action")
 
+    def debug_keys(self, identifier: str, operation: str, body: dict[str, object], key_id: str = "") -> dict[str, object]:
+        device = self.client(identifier)
+        if operation == "list":
+            return device.call("GET", "/api/debug-keys")
+        if operation == "add":
+            payload = {"key": body.get("key")}
+            if body.get("name"):
+                payload["name"] = body["name"]
+            return device.call("POST", "/api/debug-keys", payload, timeout=60)
+        if operation == "remove":
+            return device.call("DELETE", "/api/debug-keys/" + key_id, timeout=60)
+        raise LookupError("Unknown action")
+
     def update_all(self) -> list[dict[str, object]]:
         def one(identifier: str, entry: dict[str, object]) -> dict[str, object]:
             result: dict[str, object] = {"id": identifier, "name": entry["name"]}

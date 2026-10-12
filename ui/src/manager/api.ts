@@ -35,6 +35,18 @@ export interface UpdateOutcome {
   error?: string;
 }
 
+export interface SshKey {
+  id: string;
+  type: string;
+  comment: string;
+  fingerprint: string;
+}
+
+export interface SshKeys {
+  enabled: boolean;
+  keys: SshKey[];
+}
+
 export class ManagerError extends Error {}
 
 let token = "";
@@ -88,5 +100,10 @@ export const api = {
     ),
   installUpdate: (id: string) =>
     request<{ version: string }>("/api/devices/" + id + "/update-install", "POST", {}),
+  debugKeys: (id: string) => request<SshKeys>("/api/devices/" + id + "/debug-keys"),
+  addDebugKey: (id: string, key: string, name: string) =>
+    request<SshKeys>("/api/devices/" + id + "/debug-keys", "POST", name ? { key, name } : { key }),
+  removeDebugKey: (id: string, keyId: string) =>
+    request<SshKeys>("/api/devices/" + id + "/debug-keys/" + keyId, "DELETE"),
   updateAll: () => request<{ results: UpdateOutcome[] }>("/api/update-all", "POST", {}),
 };

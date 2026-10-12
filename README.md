@@ -39,6 +39,11 @@ and first-boot user renaming is explicitly disabled.
   `webdebug` account, authorised by `DEBUG_SSH_PUBLIC_KEY` (default
   `~/.ssh/id_rsa.pub`). Password login and root login are disabled. Use
   `sudo disable-web-display-debug` on the device to turn it off.
+  Development devices also show a **Development SSH keys** card in the admin
+  UI, and in each device card of the PC manager, to add or remove `webdebug`
+  keys. Anyone with the admin password or a manager key can thereby gain root
+  over SSH, so it exists only on development builds; devices built or pushed before this
+  feature need `tools/push-to-device.sh` once to gain it.
 - `VARIANT=release ./build-image.sh` is hardened: no debug account, SSH masked.
   Build this one as the final firmware. It always builds from scratch and
   compresses with `xz`.

@@ -12,6 +12,8 @@ if [ -f files/debug-authorized_keys ]; then
 	install -d -m 0755 "${ROOTFS_DIR}/usr/local/sbin"
 	install -m 0755 files/disable-web-display-debug \
 		"${ROOTFS_DIR}/usr/local/sbin/disable-web-display-debug"
+	install -D -m 0755 files/debug-keys-action \
+		"${ROOTFS_DIR}/usr/lib/web-display/debug-keys-action"
 	install -m 0440 files/web-display-debug-sudoers \
 		"${ROOTFS_DIR}/etc/sudoers.d/web-display-debug"
 	install -d -m 0755 "${ROOTFS_DIR}/etc/ssh/sshd_config.d"

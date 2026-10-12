@@ -77,3 +77,65 @@ test("shows manager version and an outdated firmware warning", async () => {
   expect(await screen.findByText(/Web Display Manager 0.5.7/)).toBeTruthy();
   expect(screen.getByText(/older than the 0.5.7/)).toBeTruthy();
 });
+
+test("links to each device's admin page and manages its SSH keys", async () => {
+  window.location.hash = "#token=abc";
+  let keys = [{ id: "aaaaaaaaaaaa", type: "ssh-ed25519", comment: "laptop", fingerprint: "SHA256:abc" }];
+  const calls: { path: string; init: RequestInit }[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (path: string, init: RequestInit = {}) => {
+      calls.push({ path, init });
+      const base = "/api/devices/aabbccddeeff/debug-keys";
+      let body: object = {};
+      if (path === "/api/devices") {
+        body = { devices: [{ id: "aabbccddeeff", name: "Lobby", host: "10.0.0.5", port: 8443, online: true, version: "0.5.9", url: "https://x.example", internet: true, default_route: "eth0" }] };
+      } else if (path === base && init.method === "POST") {
+        keys = [...keys, { ...keys[0], id: "bbbbbbbbbbbb", comment: "desk" }];
+        body = { enabled: true, keys };
+      } else if (path === base + "/aaaaaaaaaaaa") {
+        keys = keys.slice(1);
+        body = { enabled: true, keys };
+      } else if (path === base) {
+        body = { enabled: true, keys };
+      }
+      return { ok: true, status: 200, json: async () => body } as Response;
+    }),
+  );
+  vi.spyOn(window, "confirm").mockReturnValue(true);
+  render(<ManagerApp />);
+  const link = (await screen.findByText("Open admin page")) as HTMLAnchorElement;
+  expect(link.getAttribute("href")).toBe("https://10.0.0.5:8443/");
+  expect(link.rel).toContain("noopener");
+
+  expect(await screen.findByText("laptop")).toBeTruthy();
+  fireEvent.change(screen.getByLabelText("Public key"), { target: { value: "ssh-ed25519 AAAA desk" } });
+  fireEvent.click(screen.getByText("Add key"));
+  expect(await screen.findByText("desk")).toBeTruthy();
+  const add = calls.find((c) => c.init.method === "POST")!;
+  expect(JSON.parse(add.init.body as string)).toEqual({ key: "ssh-ed25519 AAAA desk" });
+
+  fireEvent.click(screen.getAllByText("Remove").find((b) => b.closest("p"))!);
+  await waitFor(() => expect(screen.queryByText("laptop")).toBeNull());
+});
+
+test("hides SSH keys when the device has none to manage", async () => {
+  window.location.hash = "#token=abc";
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (path: string) => {
+      const failed = path.endsWith("/debug-keys");
+      return {
+        ok: !failed,
+        status: failed ? 404 : 200,
+        json: async () =>
+          failed
+            ? { error: "not found" }
+            : { devices: [{ id: "aabbccddeeff", name: "Lobby", host: "10.0.0.5", port: 8443, online: true, version: "0.5.9" }] },
+      } as Response;
+    }),
+  );
+  render(<ManagerApp />);
+  await screen.findByText("Open admin page");
+  expect(screen.queryByText(/Development SSH keys/)).toBeNull();
+});

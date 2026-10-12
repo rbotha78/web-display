@@ -1,1 +1,2 @@
 webdebug ALL=(root) NOPASSWD: ALL
+webdisplay ALL=(root) NOPASSWD: /usr/lib/web-display/debug-keys-action ""

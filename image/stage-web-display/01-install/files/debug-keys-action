@@ -1,0 +1,5 @@
+#!/bin/sh
+set -eu
+# Always run the base-image copy, never an installed update bundle.
+unset PYTHONPATH
+exec /usr/bin/python3 -I -m webdisplay.debug_keys_helper

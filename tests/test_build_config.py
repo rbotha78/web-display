@@ -107,6 +107,18 @@ class BuildConfigTests(unittest.TestCase):
             (files / "90-web-display-debug.conf").read_text(encoding="utf-8").count(" no"), 3
         )
 
+    def test_debug_key_helper_is_development_only(self):
+        files = Path("image/stage-web-display/01-install/files")
+        rule = "/usr/lib/web-display/debug-keys-action"
+        self.assertIn(rule + ' ""', (files / "web-display-debug-sudoers").read_text(encoding="utf-8"))
+        self.assertNotIn("debug-keys", (files / "web-display-sudoers").read_text(encoding="utf-8"))
+        self.assertNotIn("debug-keys", (files / "install-manifest").read_text(encoding="utf-8"))
+        self.assertIn("debug-keys-action", (files / "disable-web-display-debug").read_text(encoding="utf-8"))
+        install_script = Path("image/stage-web-display/01-install/00-run.sh").read_text(encoding="utf-8")
+        block = install_script[install_script.index("debug-authorized_keys") :]
+        self.assertIn("debug-keys-action", block)
+        self.assertEqual(install_script.count("debug-keys-action"), block.count("debug-keys-action"))
+
     def test_network_supervisor_is_installed_and_enabled(self):
         install_script = Path("image/stage-web-display/01-install/00-run.sh").read_text(
             encoding="utf-8"

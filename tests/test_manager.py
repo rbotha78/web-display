@@ -171,6 +171,27 @@ class OperationTests(ManagerCase):
         self.manager.action(identifier, "reboot", {})
         self.assertEqual(self.device.actions, ["reboot"])
 
+    def test_debug_keys_are_managed_with_the_manager_key(self):
+        identifier = self.enroll()
+        requests = []
+
+        def fake(request):
+            requests.append(request)
+            return {"enabled": True, "keys": []}
+
+        self.device.app.run_debug_keys = fake
+        self.manager.debug_keys(identifier, "list", {})
+        self.manager.debug_keys(identifier, "add", {"key": "ssh-ed25519 AAAA", "name": "pc"})
+        self.manager.debug_keys(identifier, "remove", {}, "aaaaaaaaaaaa")
+        self.assertEqual(
+            requests,
+            [
+                {"operation": "list"},
+                {"operation": "add", "key": "ssh-ed25519 AAAA", "name": "pc"},
+                {"operation": "remove", "id": "aaaaaaaaaaaa"},
+            ],
+        )
+
     def test_update_all_reports_each_device(self):
         self.enroll()
         self.device.app.check_update = lambda: {"available": True, "latest": {"version": "9.9.9", "size": 1}}
@@ -248,6 +269,12 @@ class ServerTests(ManagerCase):
         self.assertNotIn("key", json.dumps(payload))
         self.assertEqual(self.call("POST", f"/api/devices/{identifier}/reboot", {})[0], 200)
         self.assertEqual(self.call("POST", f"/api/devices/{identifier}/format-disk", {})[0], 404)
+        self.device.app.run_debug_keys = lambda request: {"enabled": True, "keys": []}
+        keys = f"/api/devices/{identifier}/debug-keys"
+        self.assertEqual(self.call("GET", keys)[0], 200)
+        self.assertEqual(self.call("POST", keys, {"key": "k"})[0], 201)
+        self.assertEqual(self.call("DELETE", f"{keys}/aaaaaaaaaaaa")[0], 200)
+        self.assertEqual(self.call("DELETE", f"{keys}/not-an-id")[0], 404)
         self.assertEqual(self.call("DELETE", f"/api/devices/{identifier}")[0], 200)
         self.assertEqual(self.call("DELETE", f"/api/devices/{identifier}")[0], 404)
 

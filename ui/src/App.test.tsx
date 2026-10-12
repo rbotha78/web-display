@@ -260,3 +260,52 @@ test("lists and revokes manager keys", async () => {
   await waitFor(() => expect(screen.getAllByText("Revoke")).toHaveLength(1));
   expect(calls.some((c) => c.path === "/api/keys/k1" && c.init.method === "DELETE")).toBe(true);
 });
+
+const sshKey = {
+  id: "aaaaaaaaaaaa",
+  type: "ssh-ed25519",
+  comment: "laptop",
+  fingerprint: "SHA256:abc",
+};
+
+test("development devices list, add and remove SSH keys", async () => {
+  let keys = [sshKey];
+  const calls = mockFetch(
+    dashboardRoutes({
+      "GET /api/debug-keys": () => ({ body: { enabled: true, keys } }),
+      "POST /api/debug-keys": () => {
+        keys = [...keys, { ...sshKey, id: "bbbbbbbbbbbb", comment: "desk" }];
+        return { status: 201, body: { enabled: true, keys } };
+      },
+      "DELETE /api/debug-keys/aaaaaaaaaaaa": () => {
+        keys = keys.filter((k) => k.id !== "aaaaaaaaaaaa");
+        return { body: { enabled: true, keys } };
+      },
+    }),
+  );
+  render(<App />);
+  expect(await screen.findByText("laptop")).toBeTruthy();
+
+  fireEvent.change(screen.getByLabelText("Public key"), {
+    target: { value: "ssh-ed25519 AAAAC3 desk" },
+  });
+  fireEvent.click(screen.getByText("Add key"));
+  expect(await screen.findByText("desk")).toBeTruthy();
+  const add = calls.find((call) => call.path === "/api/debug-keys" && call.init.method === "POST")!;
+  expect(JSON.parse(add.init.body as string)).toEqual({ key: "ssh-ed25519 AAAAC3 desk" });
+  expect((add.init.headers as Record<string, string>)["X-CSRF-Token"]).toBe("token-1");
+
+  fireEvent.click(screen.getAllByText("Remove")[0]);
+  await waitFor(() => expect(screen.queryByText("laptop")).toBeNull());
+});
+
+test("hides the SSH key card on release firmware", async () => {
+  mockFetch(
+    dashboardRoutes({
+      "GET /api/debug-keys": () => ({ body: { enabled: false, keys: [] } }),
+    }),
+  );
+  render(<App />);
+  await screen.findByText("Check for updates");
+  expect(screen.queryByText("Development SSH keys")).toBeNull();
+});

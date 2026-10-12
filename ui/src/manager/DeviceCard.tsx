@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, type Device } from "./api";
+import { DeviceKeys } from "./DeviceKeys";
 
 interface Props {
   device: Device;
@@ -85,6 +86,7 @@ export function DeviceCard({ device, notify, refresh, readd }: Props) {
         ? "Wi-Fi"
         : device.default_route || "none";
   const healthy = device.online && !device.error;
+  const adminUrl = "https://" + (device.host.includes(":") ? "[" + device.host + "]" : device.host) + ":" + device.port + "/";
 
   return (
     <section className="card" aria-label={device.name}>
@@ -176,7 +178,11 @@ export function DeviceCard({ device, notify, refresh, readd }: Props) {
           </div>
         </>
       )}
+      {healthy && <DeviceKeys deviceId={device.id} deviceName={device.name} notify={notify} />}
       <div className="actions">
+        <a className="button" href={adminUrl} target="_blank" rel="noopener noreferrer">
+          Open admin page
+        </a>
         <button type="button" disabled={busy} onClick={forget}>
           Remove
         </button>
