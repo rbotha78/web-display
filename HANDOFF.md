@@ -57,7 +57,19 @@ Two tracked todos remain `in_progress`:
   was available. The saved profile later reconnected and a short observation
   was clean; long-term and cold-boot reliability remain unproven.
 
-The last recorded short checks were on 2026-10-10. Both Pis' Ethernet ports were
+Update 2026-10-12 (SSH now works on both Pis, ~26 h uptime, 60 pings each,
+Wi-Fi only): with Wi-Fi power saving off (`wifi.powersave = 2` in
+`web-display-wifi.conf`; `iw dev wlan0 get power_save` reports off) the links
+look much more stable, which the user confirmed. Pi 3 had 0 disconnects, 9 ms
+average latency and -35 dBm. Pi 2 (USB RTL8188CUS) is healthy at the radio level
+(-45 dBm, no retries, failures or beacon loss, 0% ping loss) but roamed 158 times
+in 26 h between two similarly strong APs of the same network (reason=4 locally generated) and averaged 64 ms latency with
+spikes to ~500 ms. Decision: keep roaming and do not pin a BSSID. If stalls
+become visible, move the displays to a dedicated Wi-Fi network. Note `iw` is in
+`/usr/sbin`, which is not on `webdebug`'s PATH. Still not a full observation
+window, so keep both todos open until a longer clean run or a recurrence.
+
+The previous short checks were on 2026-10-10. Both Pis' Ethernet ports were
 re-enabled for manager multi-address testing, so Ethernet reachability alone is
 not evidence that Wi-Fi is healthy. Confirm the present device/link state before
 starting an observation; for Wi-Fi-only testing, disable the Ethernet switch
