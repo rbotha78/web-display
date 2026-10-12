@@ -165,7 +165,10 @@ once per device; v1 covers status, display URL, updates and reboot.
 Milestone 1 is implemented and validated on Raspberry Pi 2. Milestone 2's network
 features are implemented; Pi 2 WPA2 client/AP operation, Ethernet preference and
 outage recovery were validated. Two longer-term Wi-Fi reliability investigations
-remain open: Pi 2 scan/dropout recurrence and Pi 3 client reliability. Pi 3
+remain open: Pi 2 scan/dropout recurrence and Pi 3 client reliability. With Wi-Fi
+power saving off both links looked much more stable on 2026-10-12; Pi 2 still
+roams between two similar access points, and a dedicated Wi-Fi network is the
+fallback if that becomes a problem. Pi 3
 built-in Wi-Fi works as a client, but its WPA2 setup AP does not authenticate
 tested Android or iPhone clients. A compatible USB Edimax EW-7811Un was validated
 as an AP-capable adapter on Pi 3; do not use an open AP as a workaround.
