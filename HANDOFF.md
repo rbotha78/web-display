@@ -181,4 +181,6 @@ transfer it. See `README.md` and CI workflow for release details.
 - Chromium idles under 5% CPU on the departures page. mpv with GPU output on the
   1440x1080 clip reached about 10-21 fps (x11 about 5 fps) using about 22% CPU.
   Re-measure Chromium video before raising the 480p guidance.
-- Pi 3 uses the same image config and has not been validated with modesetting.
+- Pi 3 was also deployed with the same modesetting config and CTM reset. The
+  configured page was visually confirmed after a kiosk restart and a reboot;
+  Xorg reported glamor acceleration on VC4 V3D 2.1.
