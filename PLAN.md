@@ -133,6 +133,108 @@ once per device; v1 covers status, display URL, updates and reboot.
 - **Functions (v1):** list with status, version and online/Wi-Fi state; change display
   URL; check and install updates on one or all devices; reboot.
 
+## Carousel and Widget Scenes (Agreed Direction, 2026-10-17)
+
+Start with a simple carousel of scenes, not persistent overlays. This is a
+record of the agreed direction; implementation has not started.
+
+### Initial Scope
+
+- An ordered playlist of web-page, image, video and widget-dashboard scenes.
+- Widgets occupy their own scene; they do not overlay websites or video.
+  Start with clock/date and text-notice widgets in a few fixed layouts, not a
+  drag-and-drop editor.
+- React provides the lightweight dashboard/scene UI. Chromium renders web
+  content; native mpv handles video under accelerated X.
+- Support both controlled websites and remote websites through direct Chromium
+  navigation, rather than requiring iframe embedding. Return to a local React
+  page for dashboard scenes.
+- Preserve the existing single configured-page workflow and the device's
+  setup/recovery behaviour while introducing the carousel.
+
+### Agreed First-Version Behaviour
+
+- Timing is configurable per slide. Page, image and dashboard scenes default
+  to one minute.
+- Streamed videos play to completion, subject to an optional cutoff that defaults
+  to five minutes: advance at the end of the video or the cutoff, whichever comes
+  first. Disabling the cutoff allows full-duration playback; an endless live
+  stream without a cutoff will not advance automatically.
+- Keep bounded startup/failure timeouts separate from slide playback durations.
+- Hard cuts between scenes, one active video at a time, and bounded browser
+  and media resources rather than preloading every scene.
+- Skip failed content with a retry cooldown rather than blocking the playlist.
+  When no scene is usable, show a local recovery screen without rapidly cycling.
+  Keep website failure distinct from internet failure and preserve the existing
+  outage behaviour in single-page mode.
+- Add playlist editing to device administration first, including adding,
+  reordering and configuring scenes; expose the same operations through the
+  manager afterward.
+- Use an explicit **Save and apply** action with atomic persistence, rather than
+  publishing partially edited playlists.
+- After a restart, start at the first enabled scene. Retain the saved playlist
+  and credentials.
+- Persistent overlays, animated transitions and scheduling are deferred.
+
+### Uploaded Images
+
+- Allow local uploads, limited to 10 MB per file and at most 10 stored files per
+  display.
+- Accept only image formats Chromium can display directly without conversion.
+  Video uploads and all other file types are out of scope; videos must always
+  be streamed.
+- Enforce both limits in the device service, not only in the administration UI.
+- When a successful upload would exceed 10 files, automatically remove the
+  oldest uploaded file and identify the removal in a message in the upload
+  dialog. Invalid or failed uploads must not evict an existing file.
+- Removing an uploaded image, including automatic eviction, also removes all
+  playlist entries referencing it. Keep image removal and playlist changes
+  consistent so no dangling references remain.
+- Remote image URLs are not yet included in this upload decision.
+
+### Video and Plex
+
+- Use mpv GPU output with V4L2 hardware decoding where supported. Pi 2 tests
+  favour 720p H.264 as an initial target: no output drops in the measured mpv
+  sample, versus stutter in screen-filling Chromium. This is not a guarantee
+  for other sources/codecs; 1080p remains experimental. See `HANDOFF.md`.
+- Include mpv in the base image for this feature. An application bundle alone
+  cannot install the player or other required system components.
+- Keep Plex credentials private in the local service, out of scene JavaScript,
+  playback URLs exposed to remote pages, logs and diagnostics.
+- Generate a unique `X-Plex-Client-Identifier` once per display and persist it
+  across restarts and application updates. Never bake a shared UUID into the
+  image or regenerate it for each playback.
+- Reuse that client identifier on all Plex requests from the display,
+  independently of Chromium/mpv. Send `X-Plex-Device-Name` as a friendly display
+  name, `X-Plex-Product` as `Web Display`, and `X-Plex-Version` as the app version.
+  Renaming the display must not replace its client identifier.
+- Use a separate new `session` identifier for each playback/transcode session
+  and stop the transcode when the scene ends.
+- The test harness incorrectly used changing client identifiers, consistent
+  with repeated new-device notifications. Verify repeated playback, restart
+  and update retain the same Plex device identity before declaring this fixed.
+- Start with private Plex server/token configuration and a media picker rather
+  than requiring manually entered internal media IDs.
+- Default video to muted. Audio output needs separate hardware validation before
+  claiming support.
+
+### Remaining Details
+
+- Specify allowed timing ranges and when scene timers start.
+- Validate the Plex configuration/media-picker flow and audio separately.
+
+### Implementation Gates
+
+- Prove reliable scene switching and native video layering under X without a
+  desktop window manager; restore the browser after completion or player failure.
+- Verify actual screen-filling geometry and obtain physical-display confirmation,
+  not just frame counters or screenshots.
+- Test playlist looping, unavailable content, player/browser crashes, restart
+  persistence and setup/offline recovery on both Pi models.
+- Run extended loops and measure memory, temperature and dropped frames before
+  treating the carousel as suitable for unattended use.
+
 ## Architecture Direction
 
 - NetworkManager owns both client and access-point networking.
