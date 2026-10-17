@@ -41,6 +41,7 @@ visudo -cf ${stage}/web-display-debug-sudoers
 install -D -m 0755 ${stage}/debug-keys-action /usr/lib/web-display/debug-keys-action
 install -m 0440 ${stage}/web-display-debug-sudoers /etc/sudoers.d/web-display-debug
 fi
+rm -f /etc/X11/xorg.conf.d/20-web-display-fbdev.conf
 rm -rf ${stage}
 systemctl daemon-reload
 nmcli general reload conf || true

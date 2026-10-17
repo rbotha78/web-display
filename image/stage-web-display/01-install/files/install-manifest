@@ -14,7 +14,7 @@
 0644 web-display-update-confirm.service /etc/systemd/system/web-display-update-confirm.service
 0440 web-display-sudoers /etc/sudoers.d/web-display
 0644 Xwrapper.config /etc/X11/Xwrapper.config
-0644 20-web-display-fbdev.conf /etc/X11/xorg.conf.d/20-web-display-fbdev.conf
+0644 20-web-display-modesetting.conf /etc/X11/xorg.conf.d/20-web-display-modesetting.conf
 0644 web-display-release /etc/web-display-release
 0644 update-key.pub /etc/web-display/update-key.pub
 0644 web-display-wifi.conf /etc/NetworkManager/conf.d/web-display-wifi.conf

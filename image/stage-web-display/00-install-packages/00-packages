@@ -21,4 +21,3 @@ x11-xserver-utils
 xinit
 xserver-xorg-core
 xserver-xorg-input-libinput
-xserver-xorg-video-fbdev

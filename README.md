@@ -185,9 +185,11 @@ this explicit local trust procedure.
 - Chromium switches to the local recovery page when the configured target
   cannot be fetched, while Ethernet status remains independently visible in
   administration.
-- Pi 2 uses Xorg's framebuffer driver to avoid a vc4 KMS black-screen
-  transition observed with the modesetting/glamor driver. Chromium is sized
-  from the active X resolution because no desktop window manager is installed.
+- Xorg uses the modesetting driver with glamor on vc4 KMS. On Pi 2, a fresh X
+  session left the HDMI output black because the CRTC colour matrix (CTM) was
+  zeroed; `kiosk-session` resets it to the identity matrix before starting
+  Chromium. Chromium is sized from the active X resolution because no desktop
+  window manager is installed.
 - The mouse cursor is permanently hidden: Xorg starts with `-nocursor`, since no
   pointing device is ever used on the kiosk.
 

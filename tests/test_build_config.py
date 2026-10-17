@@ -82,12 +82,16 @@ class BuildConfigTests(unittest.TestCase):
         self.assertIn("StateDirectory=web-display", certificate_service)
         self.assertIn("StateDirectoryMode=0750", certificate_service)
 
-    def test_pi2_uses_framebuffer_xorg_driver(self):
+    def test_xorg_uses_modesetting_driver(self):
         xorg_config = Path(
-            "image/stage-web-display/01-install/files/20-web-display-fbdev.conf"
+            "image/stage-web-display/01-install/files/20-web-display-modesetting.conf"
         ).read_text(encoding="utf-8")
-        self.assertIn('Driver "fbdev"', xorg_config)
-        self.assertIn('Option "fbdev" "/dev/fb0"', xorg_config)
+        self.assertIn('Driver "modesetting"', xorg_config)
+        self.assertIn('Option "kmsdev" "/dev/dri/card0"', xorg_config)
+        session = Path(
+            "image/stage-web-display/01-install/files/kiosk-session"
+        ).read_text(encoding="utf-8")
+        self.assertIn("--set CTM 1,0,0,0,1,0,0,0,1", session)
     def test_variants_and_wifi_helper_privileges(self):
         build_script = Path("build-image.sh").read_text(encoding="utf-8")
         self.assertIn("development", build_script)

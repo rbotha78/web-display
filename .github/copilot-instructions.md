@@ -146,6 +146,6 @@ have separate entry points and API clients.
   `HANDOFF.md` hardware observations. Milestone/version status in those notes
   can lag implemented code; use current source, release metadata, and CI for
   commands and capabilities. Report hardware validation separately from tests.
-  Preserve Pi 2's fbdev Xorg configuration. Pi 3 built-in secured AP client
+  Xorg uses modesetting/glamor; keep the CTM reset in `kiosk-session`, or Pi 2 shows a black screen. Pi 3 built-in secured AP client
   authentication remains unvalidated/unsupported; prefer a compatible USB
   adapter and never substitute an open AP.

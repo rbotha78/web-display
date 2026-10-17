@@ -113,15 +113,13 @@ not automated tests.
   hls.js is required. 720p and 1080p were not measured in Chromium; expect them
   to be too heavy for software decode.
 - Native `mpv` (0.40, Debian Trixie) does not help. The V4L2 stateful decoder
-  (`bcm2835-codec-decode`) works (`--hwdec=v4l2m2m-copy`), but Xorg uses the
-  fbdev driver, so output is CPU-bound. At 1440x1080 or 720p, `--vo=x11` ran at
+  (`bcm2835-codec-decode`) works (`--hwdec=v4l2m2m-copy`), but under the former
+  fbdev Xorg driver output was CPU-bound. At 1440x1080 or 720p, `--vo=x11` ran at
   about 88% CPU and played well under real time with hundreds of dropped
   frames; software decode was no better. `--vo=xv` is unsupported, `--vo=drm`
   crawled, and `--vo=gpu` (DRM or X11/EGL) dropped over half the frames.
 - Conclusion: on Pi 2 keep video slides in Chromium at about 480p or lower and
-  load one live video at a time. Higher resolutions need a faster board or a
-  GPU-accelerated X setup; do not change Pi 2's fbdev Xorg configuration for
-  this. A Plex token is a secret; keep it in private device config only.
+  load one live video at a time. A Plex token is a secret; keep it in private device config only.
 - `mpv` was installed by hand on the test Pi 2 and is not part of the image.
 
 ## Development And Validation
@@ -171,3 +169,16 @@ transfer it. See `README.md` and CI workflow for release details.
   `ui/src/manager/`; device key UI: `ui/src/components/ManagerKeysCard.tsx`.
 - Hardware tests are not represented by unit tests. Preserve the distinction
   between automated test results and checks performed on physical Pis.
+
+## GPU-Accelerated X on Pi 2 (2026-10-17, hardware)
+
+- Xorg with modesetting and glamor (`VC4 V3D 2.1`) replaced fbdev. A fresh X
+  session was black on HDMI although X rendered correctly and the DRM state
+  looked normal; the cause was a zeroed colour matrix (CTM) on the output.
+  Setting it to the identity matrix (`xrandr --output <out> --set CTM
+  1,0,0,0,1,0,0,0,1`) fixes it. `kiosk-session` does this at start, and a cold
+  boot was confirmed to show the page.
+- Chromium idles under 5% CPU on the departures page. mpv with GPU output on the
+  1440x1080 clip reached about 10-21 fps (x11 about 5 fps) using about 22% CPU.
+  Re-measure Chromium video before raising the 480p guidance.
+- Pi 3 uses the same image config and has not been validated with modesetting.

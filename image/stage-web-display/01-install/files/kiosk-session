@@ -4,5 +4,9 @@ set -eu
 xset s off
 xset -dpms
 xset s noblank
+# modesetting on vc4 can leave a zeroed colour matrix, giving a black screen
+for output in $(xrandr --prop 2>/dev/null | awk '/ connected/{o=$1} /CTM:/{print o}'); do
+    xrandr --output "$output" --set CTM 1,0,0,0,1,0,0,0,1 || true
+done
 exec dbus-run-session -- /usr/bin/python3 -m webdisplay.kiosk
 
