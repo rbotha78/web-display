@@ -99,6 +99,31 @@ completed manager milestone.
   The manager is cross-platform. Image and device-push shell scripts require
   Linux/WSL.
 
+## Video Playback Findings (Pi 2, 2026-10-17, hardware)
+
+Measured on a Pi 2 for a possible carousel/video feature, using a 3.6 minute
+H.264 clip served by a Plex server on the LAN. These are one-off measurements,
+not automated tests.
+
+- Chromium playing a Plex HLS transcode at about 404p and 2 Mbps (via hls.js)
+  was smooth: about 0.5% dropped frames, about 50% CPU (peaks near 90% at
+  start), peak 54 °C, no throttling, available memory down about 190 MB.
+- Chromium cannot play the original `.m2ts` (MPEG-TS) file directly
+  (`MEDIA_ERR_SRC_NOT_SUPPORTED`), and Chromium on Linux has no native HLS, so
+  hls.js is required. 720p and 1080p were not measured in Chromium; expect them
+  to be too heavy for software decode.
+- Native `mpv` (0.40, Debian Trixie) does not help. The V4L2 stateful decoder
+  (`bcm2835-codec-decode`) works (`--hwdec=v4l2m2m-copy`), but Xorg uses the
+  fbdev driver, so output is CPU-bound. At 1440x1080 or 720p, `--vo=x11` ran at
+  about 88% CPU and played well under real time with hundreds of dropped
+  frames; software decode was no better. `--vo=xv` is unsupported, `--vo=drm`
+  crawled, and `--vo=gpu` (DRM or X11/EGL) dropped over half the frames.
+- Conclusion: on Pi 2 keep video slides in Chromium at about 480p or lower and
+  load one live video at a time. Higher resolutions need a faster board or a
+  GPU-accelerated X setup; do not change Pi 2's fbdev Xorg configuration for
+  this. A Plex token is a secret; keep it in private device config only.
+- `mpv` was installed by hand on the test Pi 2 and is not part of the image.
+
 ## Development And Validation
 
 Run from the repository root. Full Python tests require Python 3.10+, `segno`,
