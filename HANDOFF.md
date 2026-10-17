@@ -105,14 +105,15 @@ Measured on a Pi 2 for a possible carousel/video feature, using a 3.6 minute
 H.264 clip served by a Plex server on the LAN. These are one-off measurements,
 not automated tests.
 
-- Chromium playing a Plex HLS transcode at about 404p and 2 Mbps (via hls.js)
+- Under the former fbdev X setup, Chromium playing a Plex HLS transcode at
+  about 404p and 2 Mbps (via hls.js)
   was smooth: about 0.5% dropped frames, about 50% CPU (peaks near 90% at
   start), peak 54 °C, no throttling, available memory down about 190 MB.
 - Chromium cannot play the original `.m2ts` (MPEG-TS) file directly
   (`MEDIA_ERR_SRC_NOT_SUPPORTED`), and Chromium on Linux has no native HLS, so
-  hls.js is required. 720p and 1080p were not measured in Chromium; expect them
-  to be too heavy for software decode.
-- Native `mpv` (0.40, Debian Trixie) does not help. The V4L2 stateful decoder
+  hls.js is required. The initial fbdev run did not measure 720p or 1080p;
+  accelerated-X results are recorded below.
+- Native `mpv` (0.40, Debian Trixie) did not help under fbdev. The V4L2 stateful decoder
   (`bcm2835-codec-decode`) works (`--hwdec=v4l2m2m-copy`), but under the former
   fbdev Xorg driver output was CPU-bound. At 1440x1080 or 720p, `--vo=x11` ran at
   about 88% CPU and played well under real time with hundreds of dropped
@@ -180,7 +181,89 @@ transfer it. See `README.md` and CI workflow for release details.
   boot was confirmed to show the page.
 - Chromium idles under 5% CPU on the departures page. mpv with GPU output on the
   1440x1080 clip reached about 10-21 fps (x11 about 5 fps) using about 22% CPU.
-  Re-measure Chromium video before raising the 480p guidance.
 - Pi 3 was also deployed with the same modesetting config and CTM reset. The
   configured page was visually confirmed after a kiosk restart and a reboot;
   Xorg reported glamor acceleration on VC4 V3D 2.1.
+
+### Chromium Video Retest
+
+The same Plex clip was played in kiosk-mode Chromium through hls.js 1.6.13 under
+modesetting/glamor; the viewport size was not recorded. Each measurement covered about one minute after playback
+started, with actual video dimensions checked. Chromium reported
+`V4L2VideoDecoder` and `kIsPlatformVideoDecoder=true` at all three resolutions.
+CPU below is whole-system utilization, normalized across all four cores.
+
+| Actual stream | Plex bitrate limit | Dropped frames | System CPU | End temperature |
+| --- | --- | --- | --- | --- |
+| 718x404, 25 fps | 1.5 Mbps | 22/1546 (1.4%) | 40% | 63 C |
+| 1280x720, 25 fps | 4 Mbps | 100/1589 (6.3%) | 54% | 63 C |
+| 1920x1080, 25 fps | 8 Mbps | 538/1592 (33.8%) | 69% | 65 C |
+
+No measured buffering stalls or throttling occurred. hls.js reported recovered,
+nonfatal `bufferFullError` events at every resolution. The low-resolution result
+was not visually confirmed because the timed run ended before the observer
+checked it; frame counters do not establish perceived smoothness. These runs
+used a temporary browser profile and a local forwarding proxy, so the earlier
+fbdev result is not a controlled before/after comparison.
+
+Keep roughly 480p as the conservative default. Hardware decoding works in
+Chromium, but 720p still drops some frames and 1080p is unsuitable in this
+configuration. The normal kiosk was restored after testing.
+
+### mpv Video Retest
+
+With accelerated X, mpv 0.40 played the same three Plex HLS transcodes
+fullscreen using `--no-config --vo=gpu --gpu-context=x11egl --hwdec=v4l2m2m`.
+mpv confirmed hardware decoding and `drm_prime` video frames at each verified
+resolution. The normal Chromium kiosk stayed running underneath the video.
+Each sample covered about one minute after the first five seconds of playback.
+CPU is whole-system utilization across all four cores, as in the Chromium test.
+
+| Actual stream | Plex bitrate limit | Output frame drops | System CPU | End temperature |
+| --- | --- | --- | --- | --- |
+| 718x404, 25 fps | 1.5 Mbps | 0 | 18% | 57 C |
+| 1280x720, 25 fps | 4 Mbps | 0 | 27% | 60 C |
+| 1920x1080, 25 fps | 8 Mbps | 77 (about 5% of expected frames) | 53% | 64 C |
+
+Playback advanced in real time at all three resolutions, with no decoder drops
+or sampled cache pauses. No throttling was recorded after the runs. The observer
+confirmed video was visible and smooth, without a separate per-resolution
+visual assessment. Audio was not validated: muted playback was requested, but
+the audio backends failed to open an output device.
+
+These results supersede the earlier fbdev conclusion for native playback:
+720p H.264 through mpv is a promising option on Pi 2, while 1080p still loses
+frames. They do not establish direct playback performance for the original
+interlaced clip or other codecs. Temperature differences from Chromium are
+not a controlled thermal comparison. mpv exited after each run, and the normal
+kiosk remained active; temporary playback files and forwarding were removed.
+
+### Chromium Screen-Filling Retest
+
+The observer reported that the earlier Chromium video initially did not fill
+the screen, unlike mpv. A repeat explicitly set the browser size and fullscreen
+window state. Browser measurements confirmed the video element covered the
+entire 1919x1079 viewport on a 1920x1080 output (a one-pixel window margin).
+The observer confirmed screen-filling playback at all three resolutions.
+The same bitrate limits and hardware decoder were used as above; successful
+samples lasted about two minutes.
+
+| Actual stream | Dropped frames | System CPU | End temperature | Visual result |
+| --- | --- | --- | --- | --- |
+| 718x404, 25 fps | 131/3061 (4.3%) | 49% | 64 C | Screen-filling, stutters |
+| 1280x720, 25 fps | 488/3052 (16.0%) | 58% | 66 C | Screen-filling, stutters |
+| 1920x1080, 25 fps | No complete sample | Not measured | Not measured | Stutter, then black picture |
+
+No buffering stalls or throttling were recorded in the completed samples;
+recovered hls.js buffer-full events still occurred. During 1080p playback the
+kernel logged vc4 GEM DMA allocation failures, followed by Chromium reporting
+that its GPU process exited unexpectedly with exit code 11. The observer saw a
+black picture with scroll bars. This is a playback failure, not a valid
+frame-drop measurement. Restarting the normal kiosk restored the configured
+page, visually confirmed by the observer.
+
+These visually verified results supersede the earlier Chromium smoothness
+assessment: even the low-resolution stream stutters when screen-filling.
+mpv remains the better candidate for fullscreen video on Pi 2. The earlier
+Chromium viewport was not recorded, so its performance cannot be directly
+attributed to a particular window size.
