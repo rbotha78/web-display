@@ -14,24 +14,13 @@ import subprocess
 import tempfile
 import threading
 import time
-import urllib.error
-import urllib.request
 from pathlib import Path
 
 from .app import local_addresses
+from .carousel import Carousel, Playlist, validate_playlist
+from .scene_player import SceneRenderer, reachable, stop_process
 
 LOG = logging.getLogger(__name__)
-
-
-def reachable(url: str) -> bool:
-    if not url:
-        return False
-    request = urllib.request.Request(url, headers={"User-Agent": "WebDisplay/1"})
-    try:
-        with urllib.request.urlopen(request, timeout=8) as response:
-            return response.status < 500
-    except (urllib.error.URLError, TimeoutError, OSError):
-        return False
 
 
 def certificate_fingerprint(certificate_path: Path) -> str:
@@ -152,6 +141,53 @@ def screen_size() -> str | None:
 PROFILE_DIR = Path("/var/lib/web-display-kiosk/chromium")
 
 
+class DisplayRecovery:
+    """Recover outputs X leaves disabled after a monitor power cycle."""
+
+    def __init__(self) -> None:
+        self.next_check = 0.0
+        self.outputs: dict[str, bool] = {}
+
+    def check(self, now: float) -> bool:
+        if now < self.next_check:
+            return False
+        self.next_check = now + 5
+        recovered = False
+        try:
+            result = subprocess.run(
+                ["xrandr", "--prop"], check=True, capture_output=True, text=True, timeout=5,
+            )
+            sections = re.split(r"(?m)^(?=\S+ (?:connected|disconnected)\b)", result.stdout)
+            for section in sections:
+                match = re.match(r"(\S+) (connected|disconnected)\b([^\n]*)", section)
+                if not match:
+                    continue
+                output, status, geometry = match.groups()
+                if status == "disconnected":
+                    self.outputs[output] = False
+                    continue
+                active = re.search(r"\b\d+x\d+\+\d+\+\d+\b", geometry) is not None
+                if active and self.outputs.get(output, True):
+                    continue
+                # Mark pending before changing modes so a failed CTM reset is retried.
+                self.outputs[output] = False
+                subprocess.run(
+                    ["xrandr", "--output", output, "--auto"],
+                    check=True, capture_output=True, text=True, timeout=5,
+                )
+                if re.search(r"(?m)^\s+CTM:", section):
+                    subprocess.run(
+                        ["xrandr", "--output", output, "--set", "CTM", "1,0,0,0,1,0,0,0,1"],
+                        check=True, capture_output=True, text=True, timeout=5,
+                    )
+                self.outputs[output] = True
+                recovered = True
+                LOG.warning("Recovered display output %s", output)
+        except (OSError, subprocess.SubprocessError) as error:
+            LOG.error("Display recovery failed: %s", error)
+        return recovered
+
+
 def clear_stale_profile_locks(profile: Path = PROFILE_DIR) -> None:
     """Chromium locks its profile as hostname-pid; a renamed host sees a stale foreign lock."""
     for name in ("SingletonLock", "SingletonCookie", "SingletonSocket"):
@@ -180,7 +216,7 @@ def launch(browser: str, destination: str) -> subprocess.Popen[bytes]:
     if size:
         arguments.append(f"--window-size={size}")
     arguments.append(destination)
-    return subprocess.Popen(arguments)
+    return subprocess.Popen(arguments, start_new_session=True)
 
 
 OFFLINE_HTML = (
@@ -298,6 +334,8 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--browser", default="/usr/bin/chromium")
     parser.add_argument("--target", default="/run/web-display/target-url")
+    parser.add_argument("--playlist", default="/run/web-display/playlist.json")
+    parser.add_argument("--mpv", default="/usr/bin/mpv")
     parser.add_argument("--pairing-code", default="/run/web-display/pairing-code")
     parser.add_argument("--certificate", default="/var/lib/web-display/tls/cert.pem")
     parser.add_argument("--setup-ap", default="/run/web-display/setup-ap.json")
@@ -318,45 +356,92 @@ def main() -> None:
     monitor.start()
     monitor.checked.wait(timeout=args.interval)
     last_fallback = ""
+    renderer: SceneRenderer | None = None
+    carousel: Carousel | None = None
+    previous_playlist: Playlist | None = None
+    previous_revision = ""
+    playlist_error = False
+    display_recovery = DisplayRecovery()
 
     def stop(*_: object) -> None:
-        if process and process.poll() is None:
-            process.terminate()
         raise SystemExit
 
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
 
-    while True:
-        target = target_path.read_text(encoding="utf-8").strip() if target_path.exists() else ""
-        fallback = fallback_html(pairing_path, certificate_path, args.admin_port, setup_ap_path)
-        if fallback != last_fallback:
-            write_fallback(
-                fallback_path, pairing_path, certificate_path, args.admin_port, setup_ap_path
+    try:
+        while True:
+            if display_recovery.check(time.monotonic()):
+                stop_process(process)
+                process = None
+                # Keep destination so single-page outage recovery preserves its semantics.
+                if carousel is not None:
+                    carousel.stop()
+                    carousel = None
+            revision = ""
+            try:
+                published = json.loads(Path(args.playlist).read_text(encoding="utf-8"))
+                playlist = validate_playlist(published)
+                revision = published.get("revision", "")
+                playlist_error = False
+            except FileNotFoundError:
+                playlist = Playlist(enabled=False, scenes=[])
+            except (OSError, ValueError):
+                if not playlist_error:
+                    LOG.error("Could not read published playlist; showing carousel recovery")
+                playlist_error = True
+                playlist = Playlist(enabled=True, scenes=[])
+            ap_active = read_setup_ap(setup_ap_path) is not None
+            if playlist["enabled"] and not ap_active:
+                if renderer is None:
+                    stop_process(process)
+                    process = None
+                    destination = ""
+                    renderer = SceneRenderer(
+                        lambda url: launch(args.browser, url), fallback_path.parent, args.mpv
+                    )
+                if carousel is None or playlist != previous_playlist or revision != previous_revision:
+                    if carousel:
+                        carousel.stop()
+                    carousel = Carousel(playlist, renderer)
+                    previous_playlist = playlist
+                    previous_revision = revision
+                icon.set_visible(False)
+                carousel.tick(time.monotonic())
+                time.sleep(1)
+                continue
+            if renderer is not None:
+                renderer.close()
+                renderer = None
+                carousel = None
+                previous_playlist = None
+            target = target_path.read_text(encoding="utf-8").strip() if target_path.exists() else ""
+            fallback = fallback_html(pairing_path, certificate_path, args.admin_port, setup_ap_path)
+            if fallback != last_fallback:
+                write_fallback(
+                    fallback_path, pairing_path, certificate_path, args.admin_port, setup_ap_path
+                )
+                offline_path.write_text(OFFLINE_HTML, encoding="utf-8")
+                last_fallback = fallback
+            desired, show_icon = choose_destination(
+                target,
+                monitor.ok,
+                monitor.failures,
+                ap_active,
+                destination,
+                fallback_path.as_uri(),
+                offline_path.as_uri(),
             )
-            offline_path.write_text(OFFLINE_HTML, encoding="utf-8")
-            last_fallback = fallback
-        desired, show_icon = choose_destination(
-            target,
-            monitor.ok,
-            monitor.failures,
-            read_setup_ap(setup_ap_path) is not None,
-            destination,
-            fallback_path.as_uri(),
-            offline_path.as_uri(),
-        )
-        if desired != destination or process is None or process.poll() is not None:
-            if process and process.poll() is None:
-                process.terminate()
-                try:
-                    process.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    process.kill()
-                    process.wait()
-            process = launch(args.browser, desired)
-            destination = desired
-        icon.set_visible(show_icon)
-        time.sleep(1)
+            if desired != destination or process is None or process.poll() is not None:
+                stop_process(process)
+                process = launch(args.browser, desired)
+                destination = desired
+            icon.set_visible(show_icon)
+            time.sleep(1)
+    finally:
+        stop_process(process)
+        if renderer is not None:
+            renderer.close()
 
 
 if __name__ == "__main__":

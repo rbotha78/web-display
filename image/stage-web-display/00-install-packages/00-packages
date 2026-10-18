@@ -9,6 +9,7 @@ ethtool
 firmware-realtek
 iproute2
 iw
+mpv
 network-manager
 openssl
 python3

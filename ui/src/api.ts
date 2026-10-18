@@ -7,6 +7,27 @@ export interface Config {
   auto_ap: boolean;
 }
 
+export interface Scene {
+  id: string;
+  kind: "web" | "dashboard" | "video";
+  title: string;
+  enabled: boolean;
+  duration: number | null;
+  url: string;
+  layout: "clock" | "notice" | "clock-notice";
+  text: string;
+}
+
+export interface Playlist {
+  enabled: boolean;
+  scenes: Scene[];
+}
+
+export interface PlaybackStatus {
+  failures: Record<string, { message: string; time: number }>;
+  updated: number | null;
+}
+
 export interface Network {
   ssid: string;
   signal: number;
@@ -136,6 +157,9 @@ export const api = {
   logout: () => request<object>("/api/logout", "POST"),
   config: () => request<Config>("/api/config"),
   saveConfig: (config: Partial<Config>) => request<Config>("/api/config", "PUT", config),
+  playlist: () => request<Playlist>("/api/playlist"),
+  playlistStatus: () => request<PlaybackStatus>("/api/playlist/status"),
+  savePlaylist: (playlist: Playlist) => request<Playlist>("/api/playlist", "PUT", playlist),
   status: () => request<Status>("/api/status"),
   network: () => request<NetworkStatus>("/api/network"),
   setHostname: (hostname: string) =>

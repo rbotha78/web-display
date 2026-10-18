@@ -136,7 +136,11 @@ once per device; v1 covers status, display URL, updates and reboot.
 ## Carousel and Widget Scenes (Agreed Direction, 2026-10-17)
 
 Start with a simple carousel of scenes, not persistent overlays. This is a
-record of the agreed direction; implementation has not started.
+record of the agreed direction. The experimental first slice now covers the
+device editor, web/dashboard scenes and direct mpv streams. Image uploads,
+private Plex integration and manager editing remain pending. See README.md for
+current behaviour and the initial Pi 2/Pi 3 hardware results. Longer unattended
+runs and physical screen power-cycle recovery remain to be confirmed.
 
 ### Initial Scope
 
@@ -221,7 +225,7 @@ record of the agreed direction; implementation has not started.
 
 ### Remaining Details
 
-- Specify allowed timing ranges and when scene timers start.
+- Validate the initial timing ranges and timer start points on hardware (see README.md).
 - Validate the Plex configuration/media-picker flow and audio separately.
 
 ### Implementation Gates

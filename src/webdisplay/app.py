@@ -22,9 +22,9 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import BinaryIO
-from urllib.parse import urlparse
 
 from . import releases
+from .carousel import validate_playlist, validate_url
 from .hostname_helper import validate_hostname
 from .network import default_route_interface, internet_status, website_status
 from .updater import MAX_BUNDLE_BYTES, UpdateError, Updater, parse_version
@@ -32,6 +32,7 @@ from .updater import MAX_BUNDLE_BYTES, UpdateError, Updater, parse_version
 LOG = logging.getLogger("web-display")
 SESSION_TTL_SECONDS = 8 * 60 * 60
 MAX_BODY_BYTES = 16 * 1024
+PLAYBACK_STATUS_PATH = Path("/run/web-display-kiosk/carousel-status.json")
 WIFI_OPERATIONS = {
     "/api/wifi/scan": "scan",
     "/api/wifi/country": "country",
@@ -58,22 +59,6 @@ def atomic_write(path: Path, content: str, mode: int = 0o600) -> None:
             os.close(directory_fd)
     finally:
         temporary_path.unlink(missing_ok=True)
-
-
-def validate_url(value: object) -> str:
-    if not isinstance(value, str):
-        raise ValueError("URL must be a string")
-    value = value.strip()
-    if not value:
-        return ""
-    parsed = urlparse(value)
-    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
-        raise ValueError("URL must use http:// or https:// and include a host")
-    if parsed.username or parsed.password:
-        raise ValueError("URLs containing credentials are not allowed")
-    if len(value) > 2048:
-        raise ValueError("URL is too long")
-    return value
 
 
 def validate_flag(value: object) -> bool:
@@ -112,7 +97,8 @@ class ConfigStore:
     def load(self) -> dict[str, object]:
         with self._lock:
             if not self.path.exists():
-                return {"url": "", "password": None, "auto_ap": False}
+                return {"url": "", "password": None, "auto_ap": False,
+                        "api_keys": [], "playlist": {"enabled": False, "scenes": []}}
             with self.path.open(encoding="utf-8") as stream:
                 data = json.load(stream)
             return {
@@ -120,6 +106,8 @@ class ConfigStore:
                 "password": data.get("password"),
                 "auto_ap": data.get("auto_ap") is True,
                 "api_keys": valid_keys(data.get("api_keys")),
+                "playlist": validate_playlist(data.get("playlist", {"enabled": False, "scenes": []})),
+                "playlist_revision": data.get("playlist_revision", ""),
             }
 
     def update(self, **changes: object) -> dict[str, object]:
@@ -132,6 +120,7 @@ class ConfigStore:
             data.update(changes)
             data["url"] = validate_url(data.get("url", ""))
             data["auto_ap"] = validate_flag(data.get("auto_ap", False))
+            data["playlist"] = validate_playlist(data.get("playlist", {"enabled": False, "scenes": []}))
             atomic_write(self.path, json.dumps(data, sort_keys=True) + "\n")
             return data
 
@@ -257,6 +246,8 @@ class Application:
         self.updater = updater or Updater()
         self.update_lock = threading.Lock()
         self.keys_lock = threading.Lock()
+        self.playlist_lock = threading.Lock()
+        self.publish_lock = threading.Lock()
         self.wifi_helper = wifi_helper
         self.hostname_helper = hostname_helper
         self.config = ConfigStore(state_path)
@@ -314,11 +305,26 @@ class Application:
         return bool(self.config.load()["password"])
 
     def publish_target(self) -> None:
-        atomic_write(
-            self.target_path,
-            str(self.config.load()["url"]) + "\n",
-            mode=0o640,
-        )
+        with self.publish_lock:
+            config = self.config.load()
+            playlist = validate_playlist(config["playlist"])
+            atomic_write(
+                self.target_path,
+                str(config["url"]) + "\n",
+                mode=0o640,
+            )
+            atomic_write(
+                self.target_path.with_name("playlist.json"),
+                json.dumps({**playlist, "revision": config.get("playlist_revision", "")}) + "\n",
+                mode=0o640,
+            )
+
+    def save_playlist(self, value: object) -> dict[str, object]:
+        playlist = validate_playlist(value)
+        with self.playlist_lock:
+            self.config.update(playlist=playlist, playlist_revision=secrets.token_hex(16))
+            self.publish_target()
+        return dict(playlist)
 
     def run_action(self, action: str) -> None:
         subprocess.run(
@@ -566,12 +572,12 @@ def make_handler(app: Application) -> type[BaseHTTPRequestHandler]:
         ) -> None:
             self._send(status, json.dumps(value).encode(), headers=headers)
 
-        def _body(self) -> dict[str, object]:
+        def _body(self, limit: int = MAX_BODY_BYTES) -> dict[str, object]:
             try:
                 length = int(self.headers.get("Content-Length", "0"))
             except ValueError as error:
                 raise ValueError("Invalid Content-Length") from error
-            if length <= 0 or length > MAX_BODY_BYTES:
+            if length <= 0 or length > limit:
                 raise ValueError("Invalid request body size")
             try:
                 value = json.loads(self.rfile.read(length))
@@ -653,6 +659,23 @@ def make_handler(app: Application) -> type[BaseHTTPRequestHandler]:
                     HTTPStatus.OK,
                     {"url": config["url"], "auto_ap": config["auto_ap"]},
                 )
+                return
+            if self.path == "/api/playlist":
+                if self._require_session():
+                    self._json(HTTPStatus.OK, app.config.load()["playlist"])
+                return
+            if self.path == "/api/playlist/status":
+                if not self._require_session():
+                    return
+                try:
+                    status = json.loads(PLAYBACK_STATUS_PATH.read_text(encoding="utf-8"))
+                except FileNotFoundError:
+                    status = {"failures": {}, "updated": None}
+                except (OSError, ValueError):
+                    LOG.exception("Reading carousel status failed")
+                    self._json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": "Could not read carousel playback status"})
+                    return
+                self._json(HTTPStatus.OK, status)
                 return
             if self.path == "/api/status":
                 if not self._require_session():
@@ -790,6 +813,10 @@ def make_handler(app: Application) -> type[BaseHTTPRequestHandler]:
 
         def do_PUT(self) -> None:
             try:
+                if self.path == "/api/playlist":
+                    if self._require_session(csrf=True):
+                        self._json(HTTPStatus.OK, app.save_playlist(self._body(512 * 1024)))
+                    return
                 if self.path != "/api/config":
                     self._json(HTTPStatus.NOT_FOUND, {"error": "not found"})
                     return
@@ -811,6 +838,9 @@ def make_handler(app: Application) -> type[BaseHTTPRequestHandler]:
                 )
             except ValueError as error:
                 self._json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
+            except OSError:
+                LOG.exception("Saving display configuration failed")
+                self._json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": "Could not save display configuration"})
 
         def _pair(self, body: dict[str, object]) -> None:
             client = self.client_address[0]

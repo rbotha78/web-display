@@ -80,6 +80,62 @@ body {
   grid-column: 1 / -1;
 }
 
+.playlist-fields {
+  display: grid;
+  gap: 1rem;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+
+.scene-editor {
+  display: grid;
+  gap: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1rem;
+  min-width: 0;
+}
+
+.scene-screen {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 4vh;
+  overflow: hidden;
+  padding: 4vh 4vw;
+  background: #101820;
+  color: #f3f6f9;
+  text-align: center;
+}
+
+.scene-clock time {
+  font-size: 14vw;
+  line-height: 1.1;
+}
+
+.clock-notice .scene-clock time {
+  font-size: 8vw;
+}
+
+.scene-clock p, .scene-screen > div > p {
+  font-size: 2.5vw;
+}
+
+.scene-notice {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-width: 100%;
+}
+
+.scene-notice.large { font-size: 3.5vw; }
+.scene-notice.medium { font-size: 2vw; }
+.scene-notice.small { font-size: 1.3vw; }
+
 .card.narrow {
   max-width: 26rem;
   margin: 2rem auto;

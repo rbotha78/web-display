@@ -199,6 +199,81 @@ class ApiTests(unittest.TestCase):
             "https://example.com",
         )
 
+    def test_playlist_auth_validation_and_atomic_publication(self):
+        response, _ = self.request("GET", "/api/playlist")
+        self.assertEqual(response.status, 401)
+        token, session = self.app.sessions.create()
+        headers = {"Cookie": f"session={token}", "X-CSRF-Token": session.csrf}
+        playlist = {"enabled": True, "scenes": [
+            {"id": "clock", "kind": "dashboard", "layout": "clock"},
+            {"id": "page", "kind": "web", "url": "https://example.com/"},
+        ]}
+        response, _ = self.request("PUT", "/api/playlist", playlist)
+        self.assertEqual(response.status, 401)
+        response, _ = self.request("PUT", "/api/playlist", playlist, {"Cookie": headers["Cookie"]})
+        self.assertEqual(response.status, 403)
+        response, saved = self.request("PUT", "/api/playlist", playlist, headers)
+        self.assertEqual(response.status, 200)
+        self.assertEqual(saved["scenes"][0]["duration"], 60)
+        path = Path(self.directory.name) / "playlist.json"
+        published = json.loads(path.read_text())
+        self.assertEqual(published, {**saved, "revision": published["revision"]})
+        self.assertTrue(published["revision"])
+        self.assertEqual(path.stat().st_mode & 0o777, 0o640)
+        private = Path(self.directory.name) / "config.json"
+        self.assertEqual(private.stat().st_mode & 0o777, 0o600)
+        response, _ = self.request("PUT", "/api/playlist", {"enabled": True, "scenes": []}, headers)
+        self.assertEqual(response.status, 400)
+        self.assertEqual(json.loads(path.read_text()), published)
+        self.assertEqual(self.app.config.load()["playlist"], saved)
+        self.request("PUT", "/api/config", {"url": "https://example.com/legacy"}, headers)
+        self.assertEqual(self.app.config.load()["playlist"], saved)
+        response, loaded = self.request("GET", "/api/playlist", headers=headers)
+        self.assertEqual(response.status, 200)
+        self.assertEqual(loaded, saved)
+        self.assertNotIn("password", path.read_text())
+        self.request("PUT", "/api/playlist", saved, headers)
+        self.assertNotEqual(json.loads(path.read_text())["revision"], published["revision"])
+        restarted = Application(
+            private, Path(self.directory.name) / "pairing-code",
+            Path(self.directory.name) / "target-url", Path("/bin/true"),
+        )
+        self.assertEqual(restarted.config.load()["playlist"], saved)
+
+    def test_playlist_supports_bearer_keys_and_large_notices(self):
+        key = self.app.create_key("manager")["key"]
+        playlist = {"enabled": True, "scenes": [
+            {"id": str(index), "kind": "dashboard", "text": "\u2603" * 2000}
+            for index in range(30)
+        ]}
+        headers = {"Authorization": f"Bearer {key}"}
+        response, saved = self.request("PUT", "/api/playlist", playlist, headers)
+        self.assertEqual(response.status, 200)
+        self.assertEqual(len(saved["scenes"]), 30)
+        response, loaded = self.request("GET", "/api/playlist", headers=headers)
+        self.assertEqual(response.status, 200)
+        self.assertEqual(loaded, saved)
+
+    def test_playback_status_requires_authentication_and_reports_read_errors(self):
+        response, _ = self.request("GET", "/api/playlist/status")
+        self.assertEqual(response.status, 401)
+        key = self.app.create_key("manager")["key"]
+        headers = {"Authorization": f"Bearer {key}"}
+        path = Path(self.directory.name) / "status.json"
+        with patch.object(webdisplay_app, "PLAYBACK_STATUS_PATH", path):
+            response, payload = self.request("GET", "/api/playlist/status", headers=headers)
+            self.assertEqual(response.status, 200)
+            self.assertEqual(payload, {"failures": {}, "updated": None})
+            status = {"failures": {"scene": {"message": "Website could not be reached.", "time": 1}}, "updated": 1}
+            path.write_text(json.dumps(status))
+            response, payload = self.request("GET", "/api/playlist/status", headers=headers)
+            self.assertEqual(payload, status)
+            path.write_text("invalid")
+            with self.assertLogs("web-display", level="ERROR"):
+                response, payload = self.request("GET", "/api/playlist/status", headers=headers)
+            self.assertEqual(response.status, 500)
+            self.assertIn("Could not read", payload["error"])
+
 
 class StaticUiTests(unittest.TestCase):
     def test_static_file_serves_index_and_assets_only_inside_the_bundle(self):

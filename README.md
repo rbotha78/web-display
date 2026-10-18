@@ -96,6 +96,76 @@ when no URL is configured (or, at boot, a minimal "Waiting for network connectio
 before the site has ever loaded). When the setup AP starts its SSID and password replace
 the page within about one second of the AP being created (the kiosk polls once per second
 and relaunches the browser, a few seconds on a Pi 2).
+The kiosk checks HDMI output state every five seconds. When a screen reconnects,
+or is connected without an active mode, it enables the preferred mode and
+reapplies the VC4 colour-matrix reset. The active renderer is then restarted at
+the recovered resolution (carousel playback restarts at its first enabled
+scene). No reboot is required; normal connected playback is left untouched.
+
+### Experimental carousel
+
+The device administration page has a **Carousel** editor for up to 30 ordered
+web-page, widget-dashboard and streamed-video scenes. Add scenes, move them up
+or down, choose which to include, enable the carousel, then select **Save and
+apply**. Draft edits are not published. Each apply or kiosk restart starts at
+the first enabled scene. Disabling the carousel restores the existing single
+URL and its offline behaviour; it does not delete the playlist or URL.
+Select **Check playback status** to show the last failure beside each affected
+scene. These URL-free diagnostics clear when the scene successfully starts
+again, and reset when the carousel renderer restarts. The authenticated
+`GET /api/playlist/status` endpoint exposes the same report.
+
+Dashboard scenes have clock/date, plain-text notice, or combined fixed layouts.
+They are rendered by the bundled React UI on a read-only loopback server, with
+no administrator credentials exposed. Web pages use direct navigation, not
+iframes. This initial implementation stops the previous renderer before
+starting the next: Chromium relaunches between browser scenes, so changes are
+hard cuts with a loading gap, not seamless transitions.
+
+Page/dashboard scenes default to 60 seconds. Video scenes finish at end of
+stream or their cutoff (default 300 seconds), whichever comes first; disabling
+the cutoff allows full-length playback, including endless live streams.
+Configurable durations are whole seconds from 5 to 86400. Web timers begin
+when Chromium launches after a reachability check (page-loading time counts);
+dashboard timers begin after React renders, and video timers after mpv reports
+playback. Startup has a separate 30-second timeout. Failed/unreachable scenes,
+renderer exits and video stalls are skipped with a 60-second retry cooldown.
+If all scenes fail, a local recovery screen remains visible between retries.
+Starting the setup access point interrupts the carousel for the existing setup
+screen; after it stops, the playlist starts again from its first enabled scene.
+
+Videos must be direct HTTP(S) streams/files supported by mpv, not web-player
+pages. Audio output is disabled, with the tested X11/EGL and V4L2 decoding options.
+For `.m3u8` master playlists the kiosk selects a rendition before starting mpv:
+at most 1280x720 and 4 Mbps where advertised, excluding explicitly advertised
+HEVC/AV1/VP9 codecs. This avoids opening every rendition (including 4K) during
+startup. Masters with no compatible rendition are skipped; direct media
+playlists and non-HLS files are not transcoded or downscaled by this selection.
+The base-image package list now includes **mpv**. Existing devices need it
+installed separately or a rebuilt base image: an application update or
+development source push cannot install system packages. Missing mpv causes
+video scenes to fail and be skipped; browser/dashboard scenes still work.
+Do not place private Plex tokens in scene URLs. Image uploads and private Plex
+configuration/media picking are deferred to the next slice, as is manager-side
+playlist editing.
+
+The authenticated API is `GET /api/playlist` and `PUT /api/playlist`, using the
+same session/CSRF or bearer-key rules as other device settings. PUT replaces the
+whole playlist with `{"enabled": boolean, "scenes": [...]}`. Each scene has a
+unique `id`, `kind` (`web`, `dashboard`, `video`), optional `title` and `enabled`,
+and `duration` in seconds (`null` disables a video cutoff). Web/video scenes
+require `url`; dashboards accept `layout` (`clock`, `notice`, `clock-notice`) and
+`text` (at most 2000 characters). Omitting timing uses the defaults above.
+Private configuration is atomically saved; only validated scene data is
+published for the separate unprivileged kiosk.
+
+This remains an experimental first slice. Video playback has been physically
+confirmed on Pi 2 and Pi 3. Both passed unavailable-content, browser/player-crash
+and single-URL restoration checks, plus simulated inactive-HDMI recovery.
+An approximately three-hour endurance comparison showed stable available memory,
+no automatic service restarts and no current throttling; sampled video playback
+used hardware decoding with no reported dropped frames. Longer unattended runs
+and actual screen power-off/on recovery still need confirmation.
 
 ### Hostname
 

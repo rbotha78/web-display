@@ -5,6 +5,10 @@ import { App } from "./App";
 type Handler = (init: RequestInit) => { status?: number; body: unknown };
 
 function mockFetch(routes: Record<string, Handler>) {
+  routes = {
+    "GET /api/playlist": () => ({ body: { enabled: false, scenes: [] } }),
+    ...routes,
+  };
   const calls: { path: string; init: RequestInit }[] = [];
   vi.stubGlobal(
     "fetch",
@@ -80,7 +84,7 @@ test("dashboard loads settings and saves them with the CSRF token", async () => 
   await waitFor(() => expect(url.value).toBe("https://example.com"));
   expect(await screen.findByText("Online (3/3)")).toBeTruthy();
 
-  const checkbox = screen.getByRole("checkbox") as HTMLInputElement;
+  const checkbox = screen.getByLabelText(/Start the setup access point automatically/) as HTMLInputElement;
   expect(checkbox.checked).toBe(false);
   fireEvent.click(checkbox);
   fireEvent.click(screen.getByText("Save settings"));
