@@ -18,6 +18,10 @@ class Scene(TypedDict):
     enabled: bool
     duration: int | None
     url: str
+    source: str
+    plex_rating_key: str
+    plex_playback_url: str
+    plex_stop_url: str
     layout: str
     text: str
 
@@ -47,7 +51,7 @@ def validate_url(value: object) -> str:
     return value
 
 
-def validate_playlist(value: object) -> Playlist:
+def validate_playlist(value: object, *, allow_runtime: bool = False) -> Playlist:
     if not isinstance(value, dict) or not isinstance(value.get("enabled"), bool):
         raise ValueError("Playlist enabled must be true or false")
     items = value.get("scenes")
@@ -77,8 +81,17 @@ def validate_playlist(value: object) -> Playlist:
         if not (kind == "video" and duration is None):
             if type(duration) is not int or not 5 <= duration <= 86400:
                 raise ValueError("Scene duration must be 5-86400 seconds (or null for video)")
+        source = item.get("source", "url") if kind == "video" else "url"
+        if source not in ("url", "plex"):
+            raise ValueError("Video source must be a URL or Plex")
         url = validate_url(item.get("url", "")) if kind != "dashboard" else ""
-        if kind != "dashboard" and not url:
+        plex_rating_key = item.get("plex_rating_key", "") if source == "plex" else ""
+        if source == "plex":
+            if kind != "video" or not isinstance(plex_rating_key, str) or not re.fullmatch(r"[0-9]{1,20}", plex_rating_key):
+                raise ValueError("Plex video scenes require a valid media selection")
+            if url:
+                raise ValueError("Plex video scenes must not contain a URL")
+        elif kind != "dashboard" and not url:
             raise ValueError("Web and video scenes require a URL")
         layout = item.get("layout", "clock-notice") if kind == "dashboard" else "clock-notice"
         if layout not in ("clock", "notice", "clock-notice"):
@@ -86,10 +99,30 @@ def validate_playlist(value: object) -> Playlist:
         text = item.get("text", "") if kind == "dashboard" else ""
         if not isinstance(text, str) or len(text) > 2000:
             raise ValueError("Notice text must be at most 2000 characters")
-        scenes.append(Scene(
+        scene = Scene(
             id=scene_id, kind=kind, title=title.strip(), enabled=enabled,
-            duration=duration, url=url, layout=layout, text=text,
-        ))
+            duration=duration, url=url, source=source, plex_rating_key=plex_rating_key,
+            layout=layout, text=text,
+        )
+        if allow_runtime and source == "plex":
+            playback_url = validate_url(item.get("plex_playback_url", ""))
+            stop_url = validate_url(item.get("plex_stop_url", ""))
+            playback = urlparse(playback_url)
+            stop = urlparse(stop_url)
+            play_match = re.fullmatch(r"/play/([A-Za-z0-9_-]+)/start\.m3u8", playback.path)
+            stop_match = re.fullmatch(r"/stop/([A-Za-z0-9_-]+)", stop.path)
+            if (
+                playback.scheme != "http" or stop.scheme != "http"
+                or playback.hostname != "127.0.0.1" or stop.hostname != "127.0.0.1"
+                or playback.netloc != stop.netloc
+                or playback.query or playback.fragment or stop.query or stop.fragment
+                or play_match is None or stop_match is None
+                or play_match.group(1) != stop_match.group(1)
+            ):
+                raise ValueError("Plex runtime playback URLs must be local")
+            scene["plex_playback_url"] = playback_url
+            scene["plex_stop_url"] = stop_url
+        scenes.append(scene)
     if value["enabled"] and not any(scene["enabled"] for scene in scenes):
         raise ValueError("Enable at least one scene before enabling the carousel")
     return Playlist(enabled=value["enabled"], scenes=scenes)

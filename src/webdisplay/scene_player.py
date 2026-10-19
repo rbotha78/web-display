@@ -190,8 +190,16 @@ class SceneRenderer:
                 self.server.show(scene)
                 self.process = self.launch_browser(self.server.url)
             else:
+                if scene["source"] == "plex":
+                    video_url = scene.get("plex_playback_url", "")
+                    if not video_url:
+                        self.error = "Plex playback is not available in the runtime playlist."
+                        self.video_state = "failed"
+                        return
+                else:
+                    video_url = scene["url"]
                 self.resolve_process = subprocess.Popen(
-                    [sys.executable, "-m", "webdisplay.scene_player", "--resolve-video", scene["url"]],
+                    [sys.executable, "-m", "webdisplay.scene_player", "--resolve-video", video_url],
                     stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, start_new_session=True,
                 )
         except (OSError, subprocess.SubprocessError):
@@ -341,8 +349,16 @@ class SceneRenderer:
             self._publish_status()
 
     def stop(self) -> None:
+        scene = self.scene
         stop_process(self.process)
         self.process = None
+        if scene is not None and scene["source"] == "plex" and scene.get("plex_stop_url"):
+            try:
+                request = urllib.request.Request(scene["plex_stop_url"], method="POST")
+                with urllib.request.urlopen(request, timeout=5):
+                    pass
+            except (OSError, urllib.error.URLError, ValueError):
+                LOG.warning("Could not stop Plex playback session for scene %s", scene["id"])
         self.scene = None
         self.recovering = False
         stop_process(self.probe_process)

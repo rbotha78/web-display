@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { api, type PlaybackStatus, type Playlist, type Scene } from "../api";
+import { api, type PlaybackStatus, type PlexBrowseItem, type Playlist, type Scene } from "../api";
 import type { Notice } from "./Toast";
 
 interface Props {
@@ -13,6 +13,11 @@ export function PlaylistCard({ notify, fail }: Props) {
   const [kind, setKind] = useState<Scene["kind"]>("web");
   const [status, setStatus] = useState<PlaybackStatus | null>(null);
   const [checking, setChecking] = useState(false);
+  const [plexConfigured, setPlexConfigured] = useState(false);
+  const [pickerScene, setPickerScene] = useState<string | null>(null);
+  const [pickerItems, setPickerItems] = useState<PlexBrowseItem[]>([]);
+  const [pickerPath, setPickerPath] = useState<{ title: string; key?: string }[]>([]);
+  const [pickerBusy, setPickerBusy] = useState(false);
 
   async function checkPlayback() {
     setChecking(true);
@@ -27,7 +32,59 @@ export function PlaylistCard({ notify, fail }: Props) {
 
   useEffect(() => {
     api.playlist().then(setPlaylist).catch(fail);
+    api.plexConfig().then((config) => setPlexConfigured(config.configured)).catch(fail);
   }, [fail]);
+
+  async function openPlexPicker(sceneId: string) {
+    setPickerScene(sceneId);
+    setPickerPath([{ title: "Libraries" }]);
+    setPickerBusy(true);
+    try {
+      setPickerItems((await api.plexBrowse()).items);
+    } catch (error) {
+      setPickerScene(null);
+      fail(error);
+    } finally {
+      setPickerBusy(false);
+    }
+  }
+
+  async function browsePlex(item: PlexBrowseItem) {
+    if (!item.container) {
+      if (pickerScene && item.id) {
+        update(pickerScene, {
+          source: "plex", plex_rating_key: item.id, url: "", title: item.title.slice(0, 80),
+        });
+        setPickerScene(null);
+      }
+      return;
+    }
+    const key = item.key ?? item.id;
+    if (!key) return;
+    setPickerBusy(true);
+    try {
+      setPickerItems((await api.plexBrowse(key)).items);
+      setPickerPath((current) => [...current, { title: item.title, key }]);
+    } catch (error) {
+      fail(error);
+    } finally {
+      setPickerBusy(false);
+    }
+  }
+
+  async function pickerBack() {
+    if (pickerPath.length <= 1) return;
+    const previous = pickerPath.slice(0, -1);
+    setPickerBusy(true);
+    try {
+      setPickerItems((await api.plexBrowse(previous[previous.length - 1]?.key)).items);
+      setPickerPath(previous);
+    } catch (error) {
+      fail(error);
+    } finally {
+      setPickerBusy(false);
+    }
+  }
 
   function update(id: string, changes: Partial<Scene>) {
     setPlaylist((current) => current && ({
@@ -83,8 +140,8 @@ export function PlaylistCard({ notify, fail }: Props) {
       </p>
       <p className="warn">
         Experimental: scene changes relaunch the browser. Streaming video is muted and
-        requires mpv on the base image. Image uploads and the Plex picker are not included yet.
-        Use direct HTTP(S) media URLs, without private tokens.
+        requires mpv on the base image. Image uploads are not included yet.
+        Plex playback uses the private server configuration above.
       </p>
       <fieldset className="playlist-fields" disabled={!playlist || busy}>
         <label className="check">
@@ -113,13 +170,36 @@ export function PlaylistCard({ notify, fail }: Props) {
                 onChange={(event) => update(scene.id, { enabled: event.target.checked })} />
               Include this scene
             </label>
-            {scene.kind !== "dashboard" ? (
+            {scene.kind === "video" && (
+              <label>
+                Video source
+                <select value={scene.source ?? "url"}
+                  onChange={(event) => update(scene.id, {
+                    source: event.target.value as Scene["source"],
+                    plex_rating_key: "",
+                    url: event.target.value === "plex" ? "" : scene.url,
+                  })}>
+                  <option value="url">Direct stream URL</option>
+                  <option value="plex">Plex library</option>
+                </select>
+              </label>
+            )}
+            {scene.kind !== "dashboard" && !(scene.kind === "video" && scene.source === "plex") ? (
               <label>
                 {scene.kind === "video" ? "Stream URL" : "Scene web page URL"}
                 <input type="url" required value={scene.url}
                   placeholder={scene.kind === "video" ? "https://example.com/stream.m3u8" : "https://example.com"}
                   onChange={(event) => update(scene.id, { url: event.target.value })} />
               </label>
+            ) : scene.kind === "video" ? (
+              <div className="actions">
+                <button type="button" disabled={!plexConfigured}
+                  onClick={() => void openPlexPicker(scene.id)}>
+                  Choose Plex media
+                </button>
+                {scene.plex_rating_key && <span className="muted">Selected from Plex: {scene.title}</span>}
+                {!plexConfigured && <span className="muted">Configure Plex above to browse media.</span>}
+              </div>
             ) : (
               <>
                 <label>
@@ -184,6 +264,31 @@ export function PlaylistCard({ notify, fail }: Props) {
         </p>
         <button className="primary">Save and apply</button>
       </fieldset>
+      {pickerScene && (
+        <div className="plex-picker-backdrop">
+          <section className="plex-picker" role="dialog" aria-modal="true" aria-labelledby="plex-picker-title">
+            <h2 id="plex-picker-title">Choose Plex media</h2>
+            <p className="muted">{pickerPath.map((part) => part.title).join(" / ")}</p>
+            <div className="actions">
+              <button type="button" disabled={pickerBusy || pickerPath.length <= 1}
+                onClick={() => void pickerBack()}>Back</button>
+              <button type="button" onClick={() => setPickerScene(null)}>Cancel</button>
+            </div>
+            {pickerBusy ? <p role="status">Loading Plex library…</p> : (
+              <ul>
+                {pickerItems.map((item) => (
+                  <li key={item.id ?? item.key ?? item.title}>
+                    <button type="button" onClick={() => void browsePlex(item)}>
+                      {item.title}{item.container ? " ›" : ""}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {!pickerBusy && pickerItems.length === 0 && <p>No media found in this location.</p>}
+          </section>
+        </div>
+      )}
     </form>
   );
 }

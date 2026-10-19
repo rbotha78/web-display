@@ -7,6 +7,7 @@ type Handler = (init: RequestInit) => { status?: number; body: unknown };
 function mockFetch(routes: Record<string, Handler>) {
   routes = {
     "GET /api/playlist": () => ({ body: { enabled: false, scenes: [] } }),
+    "GET /api/plex/config": () => ({ body: { server_url: "", configured: false } }),
     ...routes,
   };
   const calls: { path: string; init: RequestInit }[] = [];

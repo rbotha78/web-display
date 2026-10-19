@@ -136,11 +136,12 @@ once per device; v1 covers status, display URL, updates and reboot.
 ## Carousel and Widget Scenes (Agreed Direction, 2026-10-17)
 
 Start with a simple carousel of scenes, not persistent overlays. This is a
-record of the agreed direction. The experimental first slice now covers the
-device editor, web/dashboard scenes and direct mpv streams. Image uploads,
-private Plex integration and manager editing remain pending. See README.md for
-current behaviour and the initial Pi 2/Pi 3 hardware results. Longer unattended
-runs and physical screen power-cycle recovery remain to be confirmed.
+record of the agreed direction. Slice 1 covers the device editor,
+web/dashboard scenes and direct mpv streams. It was accepted on 2026-10-19
+after overnight endurance checks and physical screen power-cycle recovery
+confirmation. The current implementation slice is private Plex configuration,
+media browsing and native playback; image uploads and manager editing remain
+deferred. See README.md for current behaviour and hardware results.
 
 ### Initial Scope
 
@@ -205,7 +206,8 @@ runs and physical screen power-cycle recovery remain to be confirmed.
 - Include mpv in the base image for this feature. An application bundle alone
   cannot install the player or other required system components.
 - Keep Plex credentials private in the local service, out of scene JavaScript,
-  playback URLs exposed to remote pages, logs and diagnostics.
+  playback URLs exposed to remote pages, logs and diagnostics. The initial
+  implementation uses a loopback media proxy and token headers.
 - Generate a unique `X-Plex-Client-Identifier` once per display and persist it
   across restarts and application updates. Never bake a shared UUID into the
   image or regenerate it for each playback.
@@ -226,7 +228,7 @@ runs and physical screen power-cycle recovery remain to be confirmed.
 ### Remaining Details
 
 - Validate the initial timing ranges and timer start points on hardware (see README.md).
-- Validate the Plex configuration/media-picker flow and audio separately.
+- Validate Plex transcoding/session cleanup on both Pi models; validate audio separately.
 
 ### Implementation Gates
 

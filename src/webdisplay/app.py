@@ -16,17 +16,20 @@ import subprocess
 import tempfile
 import threading
 import time
+import uuid
 from dataclasses import dataclass
 from http import HTTPStatus
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import BinaryIO
+from urllib.parse import parse_qs, urlsplit
 
 from . import releases
 from .carousel import validate_playlist, validate_url
 from .hostname_helper import validate_hostname
 from .network import default_route_interface, internet_status, website_status
+from .plex import PlexClient, PlexPlaybackProxy, validate_server_url, validate_token
 from .updater import MAX_BUNDLE_BYTES, UpdateError, Updater, parse_version
 
 LOG = logging.getLogger("web-display")
@@ -98,7 +101,8 @@ class ConfigStore:
         with self._lock:
             if not self.path.exists():
                 return {"url": "", "password": None, "auto_ap": False,
-                        "api_keys": [], "playlist": {"enabled": False, "scenes": []}}
+                        "api_keys": [], "playlist": {"enabled": False, "scenes": []},
+                        "plex_server_url": "", "plex_token": "", "plex_client_identifier": ""}
             with self.path.open(encoding="utf-8") as stream:
                 data = json.load(stream)
             return {
@@ -108,6 +112,9 @@ class ConfigStore:
                 "api_keys": valid_keys(data.get("api_keys")),
                 "playlist": validate_playlist(data.get("playlist", {"enabled": False, "scenes": []})),
                 "playlist_revision": data.get("playlist_revision", ""),
+                "plex_server_url": validate_server_url(data["plex_server_url"]) if data.get("plex_server_url") else "",
+                "plex_token": data.get("plex_token", ""),
+                "plex_client_identifier": data.get("plex_client_identifier", ""),
             }
 
     def update(self, **changes: object) -> dict[str, object]:
@@ -121,8 +128,28 @@ class ConfigStore:
             data["url"] = validate_url(data.get("url", ""))
             data["auto_ap"] = validate_flag(data.get("auto_ap", False))
             data["playlist"] = validate_playlist(data.get("playlist", {"enabled": False, "scenes": []}))
+            data["plex_server_url"] = validate_server_url(data["plex_server_url"]) if data.get("plex_server_url") else ""
+            data["plex_token"] = validate_token(data["plex_token"]) if data.get("plex_token") else ""
+            identifier = data.get("plex_client_identifier", "")
+            if identifier and (not isinstance(identifier, str) or not re.fullmatch(r"[A-Za-z0-9_-]{16,128}", identifier)):
+                raise ValueError("Invalid Plex client identifier")
             atomic_write(self.path, json.dumps(data, sort_keys=True) + "\n")
             return data
+
+    def ensure_plex_client_identifier(self) -> str:
+        with self._lock:
+            if self.path.exists():
+                with self.path.open(encoding="utf-8") as stream:
+                    data = json.load(stream)
+            else:
+                data = {"url": "", "password": None, "auto_ap": False}
+            identifier = data.get("plex_client_identifier")
+            if isinstance(identifier, str) and re.fullmatch(r"[A-Za-z0-9_-]{16,128}", identifier):
+                return identifier
+            identifier = str(uuid.uuid4())
+            data["plex_client_identifier"] = identifier
+            atomic_write(self.path, json.dumps(data, sort_keys=True) + "\n")
+            return identifier
 
 
 def hash_password(password: str) -> dict[str, str | int]:
@@ -251,6 +278,8 @@ class Application:
         self.wifi_helper = wifi_helper
         self.hostname_helper = hostname_helper
         self.config = ConfigStore(state_path)
+        self.plex_client_identifier = self.config.ensure_plex_client_identifier()
+        self.plex_proxy = PlexPlaybackProxy(self.plex_client)
         self.sessions = SessionStore()
         self.throttle = LoginThrottle()
         self.pairing_path = pairing_path
@@ -308,6 +337,15 @@ class Application:
         with self.publish_lock:
             config = self.config.load()
             playlist = validate_playlist(config["playlist"])
+            self.plex_proxy.clear()
+            runtime_scenes = []
+            for scene in playlist["scenes"]:
+                published = dict(scene)
+                if scene["source"] == "plex":
+                    published["plex_playback_url"], published["plex_stop_url"] = self.plex_proxy.publish(
+                        scene["plex_rating_key"]
+                    )
+                runtime_scenes.append(published)
             atomic_write(
                 self.target_path,
                 str(config["url"]) + "\n",
@@ -315,9 +353,71 @@ class Application:
             )
             atomic_write(
                 self.target_path.with_name("playlist.json"),
-                json.dumps({**playlist, "revision": config.get("playlist_revision", "")}) + "\n",
+                json.dumps({
+                    **playlist, "scenes": runtime_scenes,
+                    "revision": config.get("playlist_revision", ""),
+                }) + "\n",
                 mode=0o640,
             )
+
+    def close(self) -> None:
+        self.plex_proxy.close()
+
+    def plex_client(self) -> PlexClient:
+        config = self.config.load()
+        if not config["plex_server_url"] or not config["plex_token"]:
+            raise ValueError("Configure a Plex server and token first")
+        return PlexClient(
+            str(config["plex_server_url"]),
+            str(config["plex_token"]),
+            self.plex_client_identifier,
+            socket.gethostname(),
+            self.updater.running_version(),
+        )
+
+    def plex_config(self) -> dict[str, object]:
+        config = self.config.load()
+        return {
+            "server_url": config["plex_server_url"],
+            "configured": bool(config["plex_server_url"] and config["plex_token"]),
+        }
+
+    def save_plex_config(self, value: object) -> dict[str, object]:
+        if not isinstance(value, dict):
+            raise ValueError("Plex settings must be an object")
+        current = self.config.load()
+        clear_token = value.get("clear_token", False)
+        if not isinstance(clear_token, bool):
+            raise ValueError("clear_token must be true or false")
+        token_input = value.get("token", "")
+        if token_input:
+            token = validate_token(token_input)
+        elif clear_token:
+            self.config.update(
+                plex_server_url="",
+                plex_token="",
+                playlist_revision=secrets.token_hex(16),
+            )
+            self.publish_target()
+            return {"server_url": "", "configured": False, "server_name": ""}
+        else:
+            token = str(current["plex_token"])
+        server_url = validate_server_url(value.get("server_url") or current["plex_server_url"])
+        identity = PlexClient(
+            server_url, token, self.plex_client_identifier,
+            socket.gethostname(), self.updater.running_version(),
+        ).identity()
+        self.config.update(
+            plex_server_url=server_url,
+            plex_token=token,
+            playlist_revision=secrets.token_hex(16),
+        )
+        self.publish_target()
+        return {
+            "server_url": server_url,
+            "configured": True,
+            "server_name": identity["name"],
+        }
 
     def save_playlist(self, value: object) -> dict[str, object]:
         playlist = validate_playlist(value)
@@ -660,6 +760,32 @@ def make_handler(app: Application) -> type[BaseHTTPRequestHandler]:
                     {"url": config["url"], "auto_ap": config["auto_ap"]},
                 )
                 return
+            request_path = urlsplit(self.path)
+            if request_path.path == "/api/plex/config" and not request_path.query:
+                if self._require_session():
+                    self._json(HTTPStatus.OK, app.plex_config())
+                return
+            if request_path.path in ("/api/plex/libraries", "/api/plex/browse"):
+                if not self._require_session():
+                    return
+                try:
+                    client = app.plex_client()
+                    if request_path.path.endswith("/libraries"):
+                        if request_path.query:
+                            raise ValueError("Invalid Plex library location")
+                        result = {"items": client.browse()}
+                    else:
+                        query = parse_qs(request_path.query, keep_blank_values=True)
+                        if set(query) - {"key"}:
+                            raise ValueError("Invalid Plex library location")
+                        key_values = query.get("key", [])
+                        if len(key_values) > 1:
+                            raise ValueError("Invalid Plex library location")
+                        result = {"items": client.browse(key_values[0] if key_values else None)}
+                    self._json(HTTPStatus.OK, result)
+                except ValueError as error:
+                    self._json(HTTPStatus.BAD_GATEWAY, {"error": str(error)})
+                return
             if self.path == "/api/playlist":
                 if self._require_session():
                     self._json(HTTPStatus.OK, app.config.load()["playlist"])
@@ -813,6 +939,10 @@ def make_handler(app: Application) -> type[BaseHTTPRequestHandler]:
 
         def do_PUT(self) -> None:
             try:
+                if self.path == "/api/plex/config":
+                    if self._require_session(csrf=True):
+                        self._json(HTTPStatus.OK, app.save_plex_config(self._body()))
+                    return
                 if self.path == "/api/playlist":
                     if self._require_session(csrf=True):
                         self._json(HTTPStatus.OK, app.save_playlist(self._body(512 * 1024)))
@@ -941,7 +1071,11 @@ def serve(args: argparse.Namespace) -> None:
     context.load_cert_chain(args.certificate, args.private_key)
     server.socket = context.wrap_socket(server.socket, server_side=True)
     LOG.info("Management service listening on https://%s:%d", args.bind, args.port)
-    server.serve_forever()
+    try:
+        server.serve_forever()
+    finally:
+        server.server_close()
+        app.close()
 
 
 def main() -> None:

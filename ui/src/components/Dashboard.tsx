@@ -3,6 +3,7 @@ import { ApiError, api, type NetworkStatus, type Status } from "../api";
 import { DebugKeysCard } from "./DebugKeysCard";
 import { DisplayCard } from "./DisplayCard";
 import { PlaylistCard } from "./PlaylistCard";
+import { PlexCard } from "./PlexCard";
 import { HostnameCard } from "./HostnameCard";
 import { StatusCard } from "./StatusCard";
 import type { Notice } from "./Toast";
@@ -50,6 +51,7 @@ export function Dashboard({ notify, onExpired }: Props) {
     <div className="grid">
       <StatusCard status={status} network={network} />
       <DisplayCard notify={notify} fail={fail} />
+      <PlexCard notify={notify} fail={fail} />
       <PlaylistCard notify={notify} fail={fail} />
       <HostnameCard current={status?.hostname ?? null} notify={notify} fail={fail} />
       <WifiCard network={network} notify={notify} fail={fail} refresh={refreshNetwork} />

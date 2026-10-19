@@ -381,7 +381,7 @@ def main() -> None:
             revision = ""
             try:
                 published = json.loads(Path(args.playlist).read_text(encoding="utf-8"))
-                playlist = validate_playlist(published)
+                playlist = validate_playlist(published, allow_runtime=True)
                 revision = published.get("revision", "")
                 playlist_error = False
             except FileNotFoundError:

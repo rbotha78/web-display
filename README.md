@@ -134,7 +134,7 @@ If all scenes fail, a local recovery screen remains visible between retries.
 Starting the setup access point interrupts the carousel for the existing setup
 screen; after it stops, the playlist starts again from its first enabled scene.
 
-Videos must be direct HTTP(S) streams/files supported by mpv, not web-player
+Direct-video scenes use HTTP(S) streams/files supported by mpv, not web-player
 pages. Audio output is disabled, with the tested X11/EGL and V4L2 decoding options.
 For `.m3u8` master playlists the kiosk selects a rendition before starting mpv:
 at most 1280x720 and 4 Mbps where advertised, excluding explicitly advertised
@@ -144,28 +144,53 @@ playlists and non-HLS files are not transcoded or downscaled by this selection.
 The base-image package list now includes **mpv**. Existing devices need it
 installed separately or a rebuilt base image: an application update or
 development source push cannot install system packages. Missing mpv causes
-video scenes to fail and be skipped; browser/dashboard scenes still work.
-Do not place private Plex tokens in scene URLs. Image uploads and private Plex
-configuration/media picking are deferred to the next slice, as is manager-side
-playlist editing.
+direct-video scenes to fail and be skipped; browser/dashboard scenes still work.
+
+### Plex library playback
+
+Configure a Plex Media Server base address and token in the device
+administration page; server/account discovery and Plex account sign-in are not
+included. The token is write-only in the UI and stored in the private device
+configuration; it is never included in playlist API responses, runtime scene
+data, logs, HLS URLs or browser content. The picker browses movie and TV
+libraries and saves only the selected Plex rating key in the playlist.
+
+The device uses one persistent `X-Plex-Client-Identifier` across playback,
+restarts and application updates. Each playback gets a separate session ID.
+Plex HLS is relayed through a loopback-only proxy that injects the token as an
+HTTP header and strips it from media-resource URLs; the transcoder session is
+stopped when the scene ends, is replaced, or the service shuts down. This keeps
+the token away from Chromium and mpv command-line URLs. Plex playback is muted,
+as is direct-video playback. Plex HLS playback is now active on both Pi 2 and
+Pi 3; recent device checks showed hardware decoding with no dropped frames.
+Validate audio separately; it is disabled by design.
 
 The authenticated API is `GET /api/playlist` and `PUT /api/playlist`, using the
 same session/CSRF or bearer-key rules as other device settings. PUT replaces the
 whole playlist with `{"enabled": boolean, "scenes": [...]}`. Each scene has a
 unique `id`, `kind` (`web`, `dashboard`, `video`), optional `title` and `enabled`,
-and `duration` in seconds (`null` disables a video cutoff). Web/video scenes
-require `url`; dashboards accept `layout` (`clock`, `notice`, `clock-notice`) and
-`text` (at most 2000 characters). Omitting timing uses the defaults above.
-Private configuration is atomically saved; only validated scene data is
-published for the separate unprivileged kiosk.
+and `duration` in seconds (`null` disables a video cutoff). Web and direct-video
+scenes require `url`; Plex video scenes use `source: "plex"` and a
+`plex_rating_key`; dashboards accept `layout` (`clock`, `notice`, `clock-notice`)
+and `text` (at most 2000 characters). Omitting timing uses the defaults above.
+Private configuration is atomically saved; the administrator playlist API
+contains no Plex token or playback capability URLs.
+The authenticated Plex endpoints are `GET /api/plex/config`,
+`PUT /api/plex/config`, `GET /api/plex/libraries`, and
+`GET /api/plex/browse?key=...`. The config response exposes only the server
+address and whether a token is configured. A blank token on save keeps the
+current token; **Remove Plex settings** clears both server address and token.
 
-This remains an experimental first slice. Video playback has been physically
-confirmed on Pi 2 and Pi 3. Both passed unavailable-content, browser/player-crash
-and single-URL restoration checks, plus simulated inactive-HDMI recovery.
-An approximately three-hour endurance comparison showed stable available memory,
+Slice 1 was accepted on 2026-10-19 after physical video playback confirmation on
+Pi 2 and Pi 3, unavailable-content and browser/player-crash recovery checks,
+single-URL restoration, and physical screen power-off/on recovery confirmation.
+An approximately 18-hour endurance comparison showed stable available memory,
 no automatic service restarts and no current throttling; sampled video playback
-used hardware decoding with no reported dropped frames. Longer unattended runs
-and actual screen power-off/on recovery still need confirmation.
+used hardware decoding with no reported dropped frames. Some transient scene
+failures occurred and later cleared. Pi 3 temperature and Pi 2 swap growth remain
+monitoring items, not guarantees of indefinite unattended operation. Plex
+playback has been validated on both devices; audio validation, image uploads
+and manager-side playlist editing remain deferred.
 
 ### Hostname
 

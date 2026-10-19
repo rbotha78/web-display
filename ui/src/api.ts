@@ -14,8 +14,25 @@ export interface Scene {
   enabled: boolean;
   duration: number | null;
   url: string;
+  source?: "url" | "plex";
+  plex_rating_key?: string;
   layout: "clock" | "notice" | "clock-notice";
   text: string;
+}
+
+export interface PlexConfig {
+  server_url: string;
+  configured: boolean;
+  server_name?: string;
+}
+
+export interface PlexBrowseItem {
+  id?: string;
+  key?: string;
+  title: string;
+  type: string;
+  container: boolean;
+  duration?: number | null;
 }
 
 export interface Playlist {
@@ -160,6 +177,12 @@ export const api = {
   playlist: () => request<Playlist>("/api/playlist"),
   playlistStatus: () => request<PlaybackStatus>("/api/playlist/status"),
   savePlaylist: (playlist: Playlist) => request<Playlist>("/api/playlist", "PUT", playlist),
+  plexConfig: () => request<PlexConfig>("/api/plex/config"),
+  savePlexConfig: (config: { server_url: string; token?: string; clear_token?: boolean }) =>
+    request<PlexConfig>("/api/plex/config", "PUT", config),
+  plexBrowse: (key?: string) => request<{ items: PlexBrowseItem[] }>(
+    "/api/plex/browse" + (key === undefined ? "" : "?key=" + encodeURIComponent(key)),
+  ),
   status: () => request<Status>("/api/status"),
   network: () => request<NetworkStatus>("/api/network"),
   setHostname: (hostname: string) =>

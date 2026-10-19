@@ -90,6 +90,7 @@ class ApiTests(unittest.TestCase):
         self.server.shutdown()
         self.server.server_close()
         self.thread.join()
+        self.app.close()
         self.directory.cleanup()
 
     def request(self, method, path, body=None, headers=None):
@@ -239,6 +240,48 @@ class ApiTests(unittest.TestCase):
             Path(self.directory.name) / "target-url", Path("/bin/true"),
         )
         self.assertEqual(restarted.config.load()["playlist"], saved)
+        restarted.close()
+
+    def test_plex_configuration_is_authenticated_write_only_and_csrf_protected(self):
+        response, _ = self.request("GET", "/api/plex/config")
+        self.assertEqual(response.status, 401)
+        token, session = self.app.sessions.create()
+        cookie = {"Cookie": f"session={token}"}
+        response, config = self.request("GET", "/api/plex/config", headers=cookie)
+        self.assertEqual(response.status, 200)
+        self.assertEqual(config, {"server_url": "", "configured": False})
+        self.assertNotIn("token", config)
+        body = {"server_url": "http://plex.example:32400", "token": "private-token"}
+        response, _ = self.request("PUT", "/api/plex/config", body, cookie)
+        self.assertEqual(response.status, 403)
+        self.app.save_plex_config = lambda value: {
+            "server_url": value["server_url"], "configured": True, "server_name": "Plex",
+        }
+        response, result = self.request(
+            "PUT", "/api/plex/config", body,
+            {**cookie, "X-CSRF-Token": session.csrf},
+        )
+        self.assertEqual(response.status, 200)
+        self.assertNotIn("private-token", json.dumps(result))
+        self.assertNotIn("token", result)
+
+    def test_plex_library_browsing_requires_authentication(self):
+        response, _ = self.request("GET", "/api/plex/libraries")
+        self.assertEqual(response.status, 401)
+        token, _ = self.app.sessions.create()
+        headers = {"Cookie": f"session={token}"}
+        client = type("PlexStub", (), {
+            "browse": lambda self, key=None: [{"title": "Movies", "key": key or "1"}],
+        })()
+        self.app.plex_client = lambda: client
+        response, result = self.request(
+            "GET", "/api/plex/browse?key=%2Flibrary%2Fmetadata%2F10%2Fchildren",
+            headers=headers,
+        )
+        self.assertEqual(response.status, 200)
+        self.assertEqual(result["items"], [{
+            "title": "Movies", "key": "/library/metadata/10/children",
+        }])
 
     def test_playlist_supports_bearer_keys_and_large_notices(self):
         key = self.app.create_key("manager")["key"]
