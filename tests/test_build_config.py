@@ -149,6 +149,7 @@ class BuildConfigTests(unittest.TestCase):
             "image/stage-web-display/01-install/files/web-display-kiosk.service"
         ).read_text(encoding="utf-8")
         self.assertIn("-nocursor", unit)
+        self.assertIn("SupplementaryGroups=audio video input render", unit)
 
 
     def test_build_script_has_fast_development_path_only(self):

@@ -21,7 +21,37 @@ class PlaylistTests(unittest.TestCase):
             scene("live", kind="video", url="https://example.com/live", duration=None),
         )
         self.assertEqual([item["duration"] for item in saved["scenes"]], [60, 60, 300, None])
+        self.assertFalse(saved["scenes"][2]["audio_enabled"])
         self.assertFalse(validate_playlist({"enabled": False, "scenes": []})["enabled"])
+
+    def test_video_audio_setting_is_validated_and_normalized(self):
+        disabled = playlist(scene("silent", kind="video", url="https://example.com/stream"))
+        enabled = playlist(scene(
+            "sound", kind="video", url="https://example.com/stream", audio_enabled=True,
+        ))
+        self.assertFalse(disabled["scenes"][0]["audio_enabled"])
+        self.assertTrue(enabled["scenes"][0]["audio_enabled"])
+        with self.assertRaisesRegex(ValueError, "Video audio"):
+            playlist(scene(
+                "invalid", kind="video", url="https://example.com/stream", audio_enabled="yes",
+            ))
+
+    def test_plex_bitrate_override_is_optional_and_bounded(self):
+        default = playlist(scene(
+            "plex-default", kind="video", source="plex", plex_rating_key="42",
+        ))["scenes"][0]
+        custom = playlist(scene(
+            "plex-custom", kind="video", source="plex", plex_rating_key="42",
+            plex_bitrate_kbps=6500,
+        ))["scenes"][0]
+        self.assertIsNone(default["plex_bitrate_kbps"])
+        self.assertEqual(custom["plex_bitrate_kbps"], 6500)
+        for value in (499, 20001, True, "6500"):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                playlist(scene(
+                    "invalid", kind="video", source="plex", plex_rating_key="42",
+                    plex_bitrate_kbps=value,
+                ))
 
     def test_rejects_invalid_playlist_and_scenes(self):
         invalid = [

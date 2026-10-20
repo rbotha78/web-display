@@ -159,6 +159,7 @@ class PlexTests(unittest.TestCase):
             self.assertEqual(set(FakePlexHandler.identifiers), {"stable-client-id-1234"})
             self.assertTrue(all(all(profile) for profile in FakePlexHandler.profiles))
             query = FakePlexHandler.transcode_params[0]
+            self.assertEqual(query["maxVideoBitrate"], ["4000"])
             self.assertEqual(query["X-Plex-Platform"], ["Generic"])
             self.assertTrue(query["X-Plex-Platform-Version"][0])
             self.assertEqual(query["X-Plex-Device"], ["Raspberry Pi"])
@@ -167,6 +168,19 @@ class PlexTests(unittest.TestCase):
                 "add-transcode-target(type=videoProfile&context=streaming&protocol=hls"
                 "&container=mpegts&videoCodec=h264&audioCodec=aac)"
             ])
+        finally:
+            proxy.close()
+
+    def test_proxy_uses_per_scene_bitrate_override(self):
+        FakePlexHandler.transcode_params = []
+        proxy = PlexPlaybackProxy(self.client)
+        try:
+            playback_url, _ = proxy.publish("42", 6500)
+            with urllib.request.urlopen(playback_url, timeout=5):
+                pass
+            self.assertEqual(
+                FakePlexHandler.transcode_params[0]["maxVideoBitrate"], ["6500"],
+            )
         finally:
             proxy.close()
 
@@ -189,15 +203,27 @@ class PlexTests(unittest.TestCase):
                 root / "config.json", root / "pairing", root / "target", Path("/bin/true"),
             )
             try:
-                app.save_plex_config({"server_url": self.url, "token": FakePlexHandler.token})
+                app.save_plex_config({
+                    "server_url": self.url,
+                    "token": FakePlexHandler.token,
+                    "default_bitrate_kbps": 6000,
+                })
                 identifier = app.plex_client_identifier
-                self.assertEqual(app.plex_config(), {"server_url": self.url, "configured": True})
+                self.assertEqual(app.plex_config(), {
+                    "server_url": self.url, "configured": True, "default_bitrate_kbps": 6000,
+                })
                 playlist = {
                     "enabled": False,
-                    "scenes": [{
-                        "id": "plex-scene", "kind": "video", "source": "plex",
-                        "plex_rating_key": "42", "duration": 300,
-                    }],
+                    "scenes": [
+                        {
+                            "id": "plex-scene", "kind": "video", "source": "plex",
+                            "plex_rating_key": "42", "duration": 300, "plex_bitrate_kbps": 7500,
+                        },
+                        {
+                            "id": "plex-default", "kind": "video", "source": "plex",
+                            "plex_rating_key": "43", "duration": 300,
+                        },
+                    ],
                 }
                 app.save_playlist(playlist)
                 published = (root / "playlist.json").read_text()
@@ -206,7 +232,15 @@ class PlexTests(unittest.TestCase):
                 runtime = json.loads(published)["scenes"][0]
                 with urllib.request.urlopen(runtime["plex_playback_url"], timeout=5) as response:
                     self.assertNotIn(FakePlexHandler.token.encode(), response.read())
+                self.assertEqual(FakePlexHandler.transcode_params[-1]["maxVideoBitrate"], ["7500"])
                 request = urllib.request.Request(runtime["plex_stop_url"], method="POST")
+                with urllib.request.urlopen(request, timeout=5):
+                    pass
+                runtime_default = json.loads(published)["scenes"][1]
+                with urllib.request.urlopen(runtime_default["plex_playback_url"], timeout=5):
+                    pass
+                self.assertEqual(FakePlexHandler.transcode_params[-1]["maxVideoBitrate"], ["6000"])
+                request = urllib.request.Request(runtime_default["plex_stop_url"], method="POST")
                 with urllib.request.urlopen(request, timeout=5):
                     pass
                 first_session = FakePlexHandler.sessions[-1]
@@ -220,6 +254,9 @@ class PlexTests(unittest.TestCase):
                     runtime = json.loads((root / "playlist.json").read_text())["scenes"][0]
                     with urllib.request.urlopen(runtime["plex_playback_url"], timeout=5):
                         pass
+                    self.assertEqual(
+                        FakePlexHandler.transcode_params[-1]["maxVideoBitrate"], ["7500"],
+                    )
                     self.assertNotEqual(FakePlexHandler.sessions[-1], first_session)
                     self.assertEqual(set(FakePlexHandler.identifiers), {identifier})
                 finally:

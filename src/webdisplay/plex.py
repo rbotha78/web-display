@@ -17,7 +17,7 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Callable
 
-from .carousel import validate_url
+from .carousel import DEFAULT_PLEX_BITRATE_KBPS, validate_plex_bitrate, validate_url
 
 MAX_MANIFEST_BYTES = 1024 * 1024
 MAX_TOKEN_LENGTH = 512
@@ -184,9 +184,12 @@ class PlexClient:
                 })
         return items
 
-    def transcode_url(self, rating_key: str, session: str) -> str:
+    def transcode_url(
+        self, rating_key: str, session: str, bitrate_kbps: int = DEFAULT_PLEX_BITRATE_KBPS,
+    ) -> str:
         if not RATING_KEY.fullmatch(rating_key):
             raise ValueError("Invalid Plex media identifier")
+        bitrate_kbps = validate_plex_bitrate(bitrate_kbps)
         return self.url(
             "/video/:/transcode/universal/start.m3u8",
             {
@@ -199,7 +202,7 @@ class PlexClient:
                 "directStream": 1,
                 "videoQuality": 60,
                 "videoResolution": "1280x720",
-                "maxVideoBitrate": 4000,
+                "maxVideoBitrate": bitrate_kbps,
                 "session": session,
                 "X-Plex-Platform": self.headers["X-Plex-Platform"],
                 "X-Plex-Platform-Version": self.headers["X-Plex-Platform-Version"],
@@ -222,6 +225,7 @@ class PlexClient:
 @dataclass
 class _Playback:
     rating_key: str
+    bitrate_kbps: int
     session: str = ""
     client: PlexClient | None = None
 
@@ -286,11 +290,15 @@ class PlexPlaybackProxy:
         if self.thread is not None and not self.thread.is_alive():
             self.thread.start()
 
-    def publish(self, rating_key: str) -> tuple[str, str]:
+    def publish(
+        self, rating_key: str, bitrate_kbps: int = DEFAULT_PLEX_BITRATE_KBPS,
+    ) -> tuple[str, str]:
         self.start()
         capability = secrets.token_urlsafe(24)
         with self._lock:
-            self._items[capability] = _Playback(rating_key)
+            self._items[capability] = _Playback(
+                rating_key, validate_plex_bitrate(bitrate_kbps),
+            )
         return (
             f"{self.address}/play/{capability}/start.m3u8",
             f"{self.address}/stop/{capability}",
@@ -319,7 +327,9 @@ class PlexPlaybackProxy:
         try:
             client = self.client_factory()
             session = str(uuid.uuid4())
-            target = urllib.parse.urlsplit(client.transcode_url(item.rating_key, session))
+            target = urllib.parse.urlsplit(
+                client.transcode_url(item.rating_key, session, item.bitrate_kbps)
+            )
             response = client.open(target.path + "?" + target.query, timeout=30)
             with self._lock:
                 item.session, item.client = session, client

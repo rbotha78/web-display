@@ -158,6 +158,30 @@ class RendererTests(unittest.TestCase):
         ipc.close.assert_called_once()
         self.stop_process.assert_any_call(self.process)
 
+    def test_audio_is_enabled_only_for_scenes_that_opt_in(self):
+        for enabled, expected in (
+            (False, ("--mute=yes", "--audio=no")),
+            (
+                True,
+                (
+                    "--aid=auto", "--mute=no",
+                    "--audio-device=alsa/hdmi:CARD=vc4hdmi,DEV=0",
+                ),
+            ),
+        ):
+            with self.subTest(audio_enabled=enabled):
+                self.renderer.scene = make_scene("video", audio_enabled=enabled)
+                with patch("webdisplay.scene_player.subprocess.Popen") as spawn:
+                    self.renderer._launch_video("https://example.com/stream")
+                arguments = spawn.call_args.args[0]
+                self.assertTrue(all(option in arguments for option in expected))
+                other_options = ("--mute=yes", "--audio=no") if enabled else (
+                    "--aid=auto", "--mute=no",
+                    "--audio-device=alsa/hdmi:CARD=vc4hdmi,DEV=0",
+                )
+                self.assertFalse(any(option in arguments for option in other_options))
+                self.assertNotIn("--audio=yes", arguments)
+
     def test_player_ipc_errors_are_failures(self):
         self.start_video()
         self.renderer.ipc = Mock()

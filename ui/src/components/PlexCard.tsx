@@ -11,12 +11,14 @@ export function PlexCard({ notify, fail }: Props) {
   const [config, setConfig] = useState<PlexConfig | null>(null);
   const [serverUrl, setServerUrl] = useState("");
   const [token, setToken] = useState("");
+  const [defaultBitrate, setDefaultBitrate] = useState("4000");
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     api.plexConfig().then((value) => {
       setConfig(value);
       setServerUrl(value.server_url);
+      setDefaultBitrate(String(value.default_bitrate_kbps));
     }).catch(fail);
   }, [fail]);
 
@@ -26,10 +28,12 @@ export function PlexCard({ notify, fail }: Props) {
     try {
       const saved = await api.savePlexConfig({
         server_url: serverUrl,
+        default_bitrate_kbps: Number(defaultBitrate),
         ...(token ? { token } : {}),
       });
       setConfig(saved);
       setServerUrl(saved.server_url);
+      setDefaultBitrate(String(saved.default_bitrate_kbps));
       setToken("");
       notify(`Verified ${saved.server_name || "Plex Media Server"} and saved Plex settings.`, "success");
     } catch (error) {
@@ -47,6 +51,7 @@ export function PlexCard({ notify, fail }: Props) {
       setConfig(saved);
       setServerUrl("");
       setToken("");
+      setDefaultBitrate(String(saved.default_bitrate_kbps));
       notify("Plex settings removed.", "success");
     } catch (error) {
       fail(error);
@@ -76,6 +81,12 @@ export function PlexCard({ notify, fail }: Props) {
           placeholder={config?.configured ? "Leave blank to keep saved token" : "Enter token"}
           onChange={(event) => setToken(event.target.value)} />
       </label>
+      <label>
+        Default Plex bitrate (kbps)
+        <input type="number" min={500} max={20000} step={250} required
+          value={defaultBitrate} onChange={(event) => setDefaultBitrate(event.target.value)} />
+      </label>
+      <p className="muted">Used by Plex video scenes unless a scene has its own bitrate override. Range: 500-20000 kbps.</p>
       <div className="actions">
         <button className="primary" disabled={busy || !serverUrl}>
           {busy ? "Connecting…" : config?.configured ? "Save and test connection" : "Connect"}

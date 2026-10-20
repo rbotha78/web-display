@@ -160,10 +160,10 @@ restarts and application updates. Each playback gets a separate session ID.
 Plex HLS is relayed through a loopback-only proxy that injects the token as an
 HTTP header and strips it from media-resource URLs; the transcoder session is
 stopped when the scene ends, is replaced, or the service shuts down. This keeps
-the token away from Chromium and mpv command-line URLs. Plex playback is muted,
-as is direct-video playback. Plex HLS playback is now active on both Pi 2 and
-Pi 3; recent device checks showed hardware decoding with no dropped frames.
-Validate audio separately; it is disabled by design.
+the token away from Chromium and mpv command-line URLs. Video scenes are muted
+by default; enable audio per scene in the carousel settings when sound is
+desired. Plex HLS playback is now active on both Pi 2 and Pi 3; recent device
+checks showed hardware decoding with no dropped frames. Validate audio separately.
 
 The authenticated API is `GET /api/playlist` and `PUT /api/playlist`, using the
 same session/CSRF or bearer-key rules as other device settings. PUT replaces the
@@ -171,8 +171,11 @@ whole playlist with `{"enabled": boolean, "scenes": [...]}`. Each scene has a
 unique `id`, `kind` (`web`, `dashboard`, `video`), optional `title` and `enabled`,
 and `duration` in seconds (`null` disables a video cutoff). Web and direct-video
 scenes require `url`; Plex video scenes use `source: "plex"` and a
-`plex_rating_key`; dashboards accept `layout` (`clock`, `notice`, `clock-notice`)
-and `text` (at most 2000 characters). Omitting timing uses the defaults above.
+`plex_rating_key`; video scenes accept optional `audio_enabled` (default false).
+Plex video scenes may set `plex_bitrate_kbps` to override the global default;
+valid values are 500-20000 kbps. The global Plex default is 4000 kbps.
+Dashboards accept `layout` (`clock`, `notice`, `clock-notice`) and `text` (at
+most 2000 characters). Omitting timing uses the defaults above.
 Private configuration is atomically saved; the administrator playlist API
 contains no Plex token or playback capability URLs.
 The authenticated Plex endpoints are `GET /api/plex/config`,

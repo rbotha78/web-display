@@ -9,6 +9,9 @@ LOG = logging.getLogger(__name__)
 MAX_SCENES = 30
 STARTUP_TIMEOUT = 30
 RETRY_COOLDOWN = 60
+DEFAULT_PLEX_BITRATE_KBPS = 4000
+MIN_PLEX_BITRATE_KBPS = 500
+MAX_PLEX_BITRATE_KBPS = 20000
 
 
 class Scene(TypedDict):
@@ -17,6 +20,8 @@ class Scene(TypedDict):
     title: str
     enabled: bool
     duration: int | None
+    audio_enabled: bool
+    plex_bitrate_kbps: int | None
     url: str
     source: str
     plex_rating_key: str
@@ -51,6 +56,14 @@ def validate_url(value: object) -> str:
     return value
 
 
+def validate_plex_bitrate(value: object) -> int:
+    if type(value) is not int or not MIN_PLEX_BITRATE_KBPS <= value <= MAX_PLEX_BITRATE_KBPS:
+        raise ValueError(
+            f"Plex bitrate must be {MIN_PLEX_BITRATE_KBPS}-{MAX_PLEX_BITRATE_KBPS} kbps"
+        )
+    return value
+
+
 def validate_playlist(value: object, *, allow_runtime: bool = False) -> Playlist:
     if not isinstance(value, dict) or not isinstance(value.get("enabled"), bool):
         raise ValueError("Playlist enabled must be true or false")
@@ -81,9 +94,15 @@ def validate_playlist(value: object, *, allow_runtime: bool = False) -> Playlist
         if not (kind == "video" and duration is None):
             if type(duration) is not int or not 5 <= duration <= 86400:
                 raise ValueError("Scene duration must be 5-86400 seconds (or null for video)")
+        audio_enabled = item.get("audio_enabled", False) if kind == "video" else False
+        if not isinstance(audio_enabled, bool):
+            raise ValueError("Video audio must be true or false")
         source = item.get("source", "url") if kind == "video" else "url"
         if source not in ("url", "plex"):
             raise ValueError("Video source must be a URL or Plex")
+        plex_bitrate = item.get("plex_bitrate_kbps") if source == "plex" else None
+        if plex_bitrate is not None:
+            plex_bitrate = validate_plex_bitrate(plex_bitrate)
         url = validate_url(item.get("url", "")) if kind != "dashboard" else ""
         plex_rating_key = item.get("plex_rating_key", "") if source == "plex" else ""
         if source == "plex":
@@ -101,7 +120,8 @@ def validate_playlist(value: object, *, allow_runtime: bool = False) -> Playlist
             raise ValueError("Notice text must be at most 2000 characters")
         scene = Scene(
             id=scene_id, kind=kind, title=title.strip(), enabled=enabled,
-            duration=duration, url=url, source=source, plex_rating_key=plex_rating_key,
+            duration=duration, audio_enabled=audio_enabled, url=url, source=source,
+            plex_rating_key=plex_rating_key, plex_bitrate_kbps=plex_bitrate,
             layout=layout, text=text,
         )
         if allow_runtime and source == "plex":

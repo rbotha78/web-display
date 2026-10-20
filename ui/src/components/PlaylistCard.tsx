@@ -14,6 +14,7 @@ export function PlaylistCard({ notify, fail }: Props) {
   const [status, setStatus] = useState<PlaybackStatus | null>(null);
   const [checking, setChecking] = useState(false);
   const [plexConfigured, setPlexConfigured] = useState(false);
+  const [plexDefaultBitrate, setPlexDefaultBitrate] = useState(4000);
   const [pickerScene, setPickerScene] = useState<string | null>(null);
   const [pickerItems, setPickerItems] = useState<PlexBrowseItem[]>([]);
   const [pickerPath, setPickerPath] = useState<{ title: string; key?: string }[]>([]);
@@ -32,7 +33,10 @@ export function PlaylistCard({ notify, fail }: Props) {
 
   useEffect(() => {
     api.playlist().then(setPlaylist).catch(fail);
-    api.plexConfig().then((config) => setPlexConfigured(config.configured)).catch(fail);
+    api.plexConfig().then((config) => {
+      setPlexConfigured(config.configured);
+      setPlexDefaultBitrate(config.default_bitrate_kbps);
+    }).catch(fail);
   }, [fail]);
 
   async function openPlexPicker(sceneId: string) {
@@ -139,8 +143,8 @@ export function PlaylistCard({ notify, fail }: Props) {
         after Save and apply. Disabling it restores the URL in Display settings.
       </p>
       <p className="warn">
-        Experimental: scene changes relaunch the browser. Streaming video is muted and
-        requires mpv on the base image. Image uploads are not included yet.
+        Experimental: scene changes relaunch the browser. Streaming video is muted by
+        default and requires mpv on the base image. Image uploads are not included yet.
         Plex playback uses the private server configuration above.
       </p>
       <fieldset className="playlist-fields" disabled={!playlist || busy}>
@@ -218,6 +222,27 @@ export function PlaylistCard({ notify, fail }: Props) {
                       onChange={(event) => update(scene.id, { text: event.target.value })} />
                   </label>
                 )}
+              </>
+            )}
+            {scene.kind === "video" && (
+              <label className="check">
+                <input type="checkbox" checked={scene.audio_enabled ?? false}
+                  onChange={(event) => update(scene.id, { audio_enabled: event.target.checked })} />
+                Enable audio
+              </label>
+            )}
+            {scene.kind === "video" && scene.source === "plex" && (
+              <>
+                <label>
+                  Plex target bitrate (kbps)
+                  <input type="number" min={500} max={20000} step={250}
+                    placeholder={`Default: ${plexDefaultBitrate}`}
+                    value={scene.plex_bitrate_kbps ?? ""}
+                    onChange={(event) => update(scene.id, {
+                      plex_bitrate_kbps: event.target.value ? Number(event.target.value) : null,
+                    })} />
+                </label>
+                <span className="muted">Leave blank to use the global Plex default.</span>
               </>
             )}
             {scene.kind === "video" && (

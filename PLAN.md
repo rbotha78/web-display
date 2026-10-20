@@ -222,8 +222,8 @@ deferred. See README.md for current behaviour and hardware results.
   and update retain the same Plex device identity before declaring this fixed.
 - Start with private Plex server/token configuration and a media picker rather
   than requiring manually entered internal media IDs.
-- Default video to muted. Audio output needs separate hardware validation before
-  claiming support.
+- Default video to muted, with an optional per-scene audio setting. Audio output
+  needs separate hardware validation before claiming support.
 
 ### Remaining Details
 

@@ -13,6 +13,8 @@ export interface Scene {
   title: string;
   enabled: boolean;
   duration: number | null;
+  audio_enabled?: boolean;
+  plex_bitrate_kbps?: number | null;
   url: string;
   source?: "url" | "plex";
   plex_rating_key?: string;
@@ -23,6 +25,7 @@ export interface Scene {
 export interface PlexConfig {
   server_url: string;
   configured: boolean;
+  default_bitrate_kbps: number;
   server_name?: string;
 }
 
@@ -178,7 +181,12 @@ export const api = {
   playlistStatus: () => request<PlaybackStatus>("/api/playlist/status"),
   savePlaylist: (playlist: Playlist) => request<Playlist>("/api/playlist", "PUT", playlist),
   plexConfig: () => request<PlexConfig>("/api/plex/config"),
-  savePlexConfig: (config: { server_url: string; token?: string; clear_token?: boolean }) =>
+  savePlexConfig: (config: {
+    server_url: string;
+    token?: string;
+    clear_token?: boolean;
+    default_bitrate_kbps?: number;
+  }) =>
     request<PlexConfig>("/api/plex/config", "PUT", config),
   plexBrowse: (key?: string) => request<{ items: PlexBrowseItem[] }>(
     "/api/plex/browse" + (key === undefined ? "" : "?key=" + encodeURIComponent(key)),

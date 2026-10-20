@@ -25,13 +25,16 @@ test("draft edits reorder scenes, keep video cutoff optional, and publish only o
     return { ok: true, json: async () => saved };
   });
   vi.stubGlobal("fetch", fetch);
-  vi.spyOn(api, "plexConfig").mockResolvedValue({ server_url: "", configured: false });
+  vi.spyOn(api, "plexConfig").mockResolvedValue({
+    server_url: "", configured: false, default_bitrate_kbps: 4000,
+  });
   setCsrf("session-csrf");
   const notify = vi.fn();
   render(<PlaylistCard notify={notify} fail={vi.fn()} />);
   await screen.findByText("Scene 1: Clock");
   fireEvent.click(screen.getByLabelText("Enable carousel"));
   fireEvent.click(screen.getByLabelText(/No cutoff/));
+  fireEvent.click(screen.getByLabelText("Enable audio"));
   fireEvent.click(screen.getByLabelText("Move scene 2 up"));
   const first = screen.getByText("Scene 1: Video").closest("fieldset")!;
   fireEvent.click(within(first).getByLabelText("Include this scene"));
@@ -44,13 +47,16 @@ test("draft edits reorder scenes, keep video cutoff optional, and publish only o
   expect(saved.scenes.map((scene) => scene.id)).toEqual(["video", "clock"]);
   expect(saved.scenes[0].duration).toBeNull();
   expect(saved.scenes[0].enabled).toBe(false);
+  expect(saved.scenes[0].audio_enabled).toBe(true);
   const request = fetch.mock.calls.find(([, init]) => init?.method === "PUT")![1]!;
   expect((request.headers as Record<string, string>)["X-CSRF-Token"]).toBe("session-csrf");
 });
 
 test("adds and removes dashboard scenes without publishing partial changes", async () => {
   vi.spyOn(api, "playlist").mockResolvedValue({ enabled: false, scenes: [] });
-  vi.spyOn(api, "plexConfig").mockResolvedValue({ server_url: "", configured: false });
+  vi.spyOn(api, "plexConfig").mockResolvedValue({
+    server_url: "", configured: false, default_bitrate_kbps: 4000,
+  });
   const save = vi.spyOn(api, "savePlaylist");
   render(<PlaylistCard notify={vi.fn()} fail={vi.fn()} />);
   await waitFor(() => expect((screen.getByLabelText("New scene type") as HTMLSelectElement).disabled).toBe(false));
@@ -65,7 +71,9 @@ test("adds and removes dashboard scenes without publishing partial changes", asy
 
 test("a rejected save keeps the draft and displays the server error", async () => {
   vi.spyOn(api, "playlist").mockResolvedValue({ enabled: false, scenes: [] });
-  vi.spyOn(api, "plexConfig").mockResolvedValue({ server_url: "", configured: false });
+  vi.spyOn(api, "plexConfig").mockResolvedValue({
+    server_url: "", configured: false, default_bitrate_kbps: 4000,
+  });
   vi.spyOn(api, "savePlaylist").mockRejectedValue(new Error("Enable at least one scene"));
   const fail = vi.fn();
   const notify = vi.fn();
@@ -79,7 +87,9 @@ test("a rejected save keeps the draft and displays the server error", async () =
 });
 
 test("playback status shows failures alongside the matching saved scene", async () => {
-  vi.spyOn(api, "plexConfig").mockResolvedValue({ server_url: "", configured: false });
+  vi.spyOn(api, "plexConfig").mockResolvedValue({
+    server_url: "", configured: false, default_bitrate_kbps: 4000,
+  });
   vi.spyOn(api, "playlist").mockResolvedValue({
     enabled: true,
     scenes: [{ id: "bad", kind: "video", title: "News", enabled: true, duration: 300,
@@ -103,7 +113,9 @@ test("selects a Plex library item for a video scene and saves only its identifie
     scenes: [{ id: "movie", kind: "video", title: "Movie", enabled: true, duration: 300,
       url: "", source: "url", plex_rating_key: "", layout: "clock", text: "" }],
   });
-  vi.spyOn(api, "plexConfig").mockResolvedValue({ server_url: "http://plex.local:32400", configured: true });
+  vi.spyOn(api, "plexConfig").mockResolvedValue({
+    server_url: "http://plex.local:32400", configured: true, default_bitrate_kbps: 4000,
+  });
   const browse = vi.spyOn(api, "plexBrowse").mockImplementation(async (key) => ({
     items: key
       ? [{ id: "42", title: "Example Film", type: "movie", container: false }]
@@ -117,10 +129,13 @@ test("selects a Plex library item for a video scene and saves only its identifie
   fireEvent.click(await screen.findByText("Movies ›"));
   fireEvent.click(await screen.findByText("Example Film"));
   expect(screen.getByText("Selected from Plex: Example Film")).toBeTruthy();
+  fireEvent.change(screen.getByLabelText("Plex target bitrate (kbps)"), {
+    target: { value: "6500" },
+  });
   fireEvent.click(screen.getByText("Save and apply"));
   await waitFor(() => expect(save).toHaveBeenCalled());
   expect(save.mock.calls[0][0].scenes[0]).toMatchObject({
-    source: "plex", plex_rating_key: "42", url: "",
+    source: "plex", plex_rating_key: "42", url: "", plex_bitrate_kbps: 6500,
   });
   expect(browse).toHaveBeenCalledWith("1");
 });

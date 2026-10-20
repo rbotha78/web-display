@@ -213,13 +213,21 @@ class SceneRenderer:
         self.video_state = "starting"
         self.position = None
         self.last_progress = time.monotonic()
+        audio_options = (
+            [
+                "--aid=auto", "--mute=no",
+                "--audio-device=alsa/hdmi:CARD=vc4hdmi,DEV=0",
+            ]
+            if self.scene and self.scene.get("audio_enabled")
+            else ["--mute=yes", "--audio=no"]
+        )
         self.process = subprocess.Popen([
             self.mpv, "--no-config", "--load-scripts=no", "--ytdl=no",
             "--autoload-files=no",
             "--demuxer-lavf-o=protocol_whitelist=[http,https,tcp,tls,crypto,data]",
             "--fullscreen", "--no-terminal",
             "--vo=gpu", "--gpu-context=x11egl", "--hwdec=v4l2m2m",
-            "--mute=yes", "--audio=no", "--idle=yes", "--force-window=immediate",
+            *audio_options, "--idle=yes", "--force-window=immediate",
             "--hls-bitrate=4000000",
             f"--input-ipc-server={self.ipc_path}", "--", url,
         ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)

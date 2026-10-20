@@ -26,7 +26,12 @@ from typing import BinaryIO
 from urllib.parse import parse_qs, urlsplit
 
 from . import releases
-from .carousel import validate_playlist, validate_url
+from .carousel import (
+    DEFAULT_PLEX_BITRATE_KBPS,
+    validate_plex_bitrate,
+    validate_playlist,
+    validate_url,
+)
 from .hostname_helper import validate_hostname
 from .network import default_route_interface, internet_status, website_status
 from .plex import PlexClient, PlexPlaybackProxy, validate_server_url, validate_token
@@ -102,7 +107,8 @@ class ConfigStore:
             if not self.path.exists():
                 return {"url": "", "password": None, "auto_ap": False,
                         "api_keys": [], "playlist": {"enabled": False, "scenes": []},
-                        "plex_server_url": "", "plex_token": "", "plex_client_identifier": ""}
+                        "plex_server_url": "", "plex_token": "", "plex_client_identifier": "",
+                        "plex_default_bitrate_kbps": DEFAULT_PLEX_BITRATE_KBPS}
             with self.path.open(encoding="utf-8") as stream:
                 data = json.load(stream)
             return {
@@ -115,6 +121,9 @@ class ConfigStore:
                 "plex_server_url": validate_server_url(data["plex_server_url"]) if data.get("plex_server_url") else "",
                 "plex_token": data.get("plex_token", ""),
                 "plex_client_identifier": data.get("plex_client_identifier", ""),
+                "plex_default_bitrate_kbps": validate_plex_bitrate(
+                    data.get("plex_default_bitrate_kbps", DEFAULT_PLEX_BITRATE_KBPS)
+                ),
             }
 
     def update(self, **changes: object) -> dict[str, object]:
@@ -130,6 +139,9 @@ class ConfigStore:
             data["playlist"] = validate_playlist(data.get("playlist", {"enabled": False, "scenes": []}))
             data["plex_server_url"] = validate_server_url(data["plex_server_url"]) if data.get("plex_server_url") else ""
             data["plex_token"] = validate_token(data["plex_token"]) if data.get("plex_token") else ""
+            data["plex_default_bitrate_kbps"] = validate_plex_bitrate(
+                data.get("plex_default_bitrate_kbps", DEFAULT_PLEX_BITRATE_KBPS)
+            )
             identifier = data.get("plex_client_identifier", "")
             if identifier and (not isinstance(identifier, str) or not re.fullmatch(r"[A-Za-z0-9_-]{16,128}", identifier)):
                 raise ValueError("Invalid Plex client identifier")
@@ -343,7 +355,8 @@ class Application:
                 published = dict(scene)
                 if scene["source"] == "plex":
                     published["plex_playback_url"], published["plex_stop_url"] = self.plex_proxy.publish(
-                        scene["plex_rating_key"]
+                        scene["plex_rating_key"],
+                        scene["plex_bitrate_kbps"] or config["plex_default_bitrate_kbps"],
                     )
                 runtime_scenes.append(published)
             atomic_write(
@@ -380,6 +393,7 @@ class Application:
         return {
             "server_url": config["plex_server_url"],
             "configured": bool(config["plex_server_url"] and config["plex_token"]),
+            "default_bitrate_kbps": config["plex_default_bitrate_kbps"],
         }
 
     def save_plex_config(self, value: object) -> dict[str, object]:
@@ -390,16 +404,23 @@ class Application:
         if not isinstance(clear_token, bool):
             raise ValueError("clear_token must be true or false")
         token_input = value.get("token", "")
+        default_bitrate = validate_plex_bitrate(
+            value.get("default_bitrate_kbps", current["plex_default_bitrate_kbps"])
+        )
         if token_input:
             token = validate_token(token_input)
         elif clear_token:
             self.config.update(
                 plex_server_url="",
                 plex_token="",
+                plex_default_bitrate_kbps=default_bitrate,
                 playlist_revision=secrets.token_hex(16),
             )
             self.publish_target()
-            return {"server_url": "", "configured": False, "server_name": ""}
+            return {
+                "server_url": "", "configured": False, "server_name": "",
+                "default_bitrate_kbps": default_bitrate,
+            }
         else:
             token = str(current["plex_token"])
         server_url = validate_server_url(value.get("server_url") or current["plex_server_url"])
@@ -410,6 +431,7 @@ class Application:
         self.config.update(
             plex_server_url=server_url,
             plex_token=token,
+            plex_default_bitrate_kbps=default_bitrate,
             playlist_revision=secrets.token_hex(16),
         )
         self.publish_target()
@@ -417,6 +439,7 @@ class Application:
             "server_url": server_url,
             "configured": True,
             "server_name": identity["name"],
+            "default_bitrate_kbps": default_bitrate,
         }
 
     def save_playlist(self, value: object) -> dict[str, object]:

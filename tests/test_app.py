@@ -39,6 +39,16 @@ class ConfigTests(unittest.TestCase):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 validate_url(value)
 
+    def test_plex_default_bitrate_is_persisted_and_validated(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = ConfigStore(Path(directory) / "config.json")
+            self.assertEqual(store.load()["plex_default_bitrate_kbps"], 4000)
+            store.update(plex_default_bitrate_kbps=6500)
+            self.assertEqual(store.load()["plex_default_bitrate_kbps"], 6500)
+            for value in (499, 20001, True, 6500.0):
+                with self.subTest(value=value), self.assertRaises(ValueError):
+                    store.update(plex_default_bitrate_kbps=value)
+
 
 class AuthenticationTests(unittest.TestCase):
     def test_password_hash(self):
@@ -249,13 +259,16 @@ class ApiTests(unittest.TestCase):
         cookie = {"Cookie": f"session={token}"}
         response, config = self.request("GET", "/api/plex/config", headers=cookie)
         self.assertEqual(response.status, 200)
-        self.assertEqual(config, {"server_url": "", "configured": False})
+        self.assertEqual(config, {
+            "server_url": "", "configured": False, "default_bitrate_kbps": 4000,
+        })
         self.assertNotIn("token", config)
         body = {"server_url": "http://plex.example:32400", "token": "private-token"}
         response, _ = self.request("PUT", "/api/plex/config", body, cookie)
         self.assertEqual(response.status, 403)
         self.app.save_plex_config = lambda value: {
             "server_url": value["server_url"], "configured": True, "server_name": "Plex",
+            "default_bitrate_kbps": value.get("default_bitrate_kbps", 4000),
         }
         response, result = self.request(
             "PUT", "/api/plex/config", body,
