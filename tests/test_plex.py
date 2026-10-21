@@ -230,6 +230,7 @@ class PlexTests(unittest.TestCase):
                 self.assertNotIn(FakePlexHandler.token, published)
                 self.assertIn("plex_playback_url", published)
                 runtime = json.loads(published)["scenes"][0]
+                self.assertEqual(runtime["plex_bitrate_kbps"], 7500)
                 with urllib.request.urlopen(runtime["plex_playback_url"], timeout=5) as response:
                     self.assertNotIn(FakePlexHandler.token.encode(), response.read())
                 self.assertEqual(FakePlexHandler.transcode_params[-1]["maxVideoBitrate"], ["7500"])
@@ -237,6 +238,10 @@ class PlexTests(unittest.TestCase):
                 with urllib.request.urlopen(request, timeout=5):
                     pass
                 runtime_default = json.loads(published)["scenes"][1]
+                self.assertEqual(runtime_default["plex_bitrate_kbps"], 6000)
+                self.assertIsNone(
+                    app.config.load()["playlist"]["scenes"][1]["plex_bitrate_kbps"]
+                )
                 with urllib.request.urlopen(runtime_default["plex_playback_url"], timeout=5):
                     pass
                 self.assertEqual(FakePlexHandler.transcode_params[-1]["maxVideoBitrate"], ["6000"])

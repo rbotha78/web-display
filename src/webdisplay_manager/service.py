@@ -172,6 +172,17 @@ class Manager:
 
     def action(self, identifier: str, action: str, body: dict[str, object]) -> dict[str, object]:
         device = self.client(identifier)
+        if action == "admin-login":
+            status, payload, _ = device.request("POST", "/api/admin-login-token", {})
+            if status == 404:
+                raise DeviceError("Automatic login needs newer device software. Open the admin page manually or update the device.")
+            if status != 201:
+                raise DeviceError(str(payload.get("error") or "Could not create an admin login link"))
+            token = payload.get("token")
+            if not isinstance(token, str) or not re.fullmatch(r"[A-Za-z0-9_-]{43}", token):
+                raise DeviceError("The device returned an invalid admin login link")
+            host = f"[{device.host}]" if ":" in device.host else device.host
+            return {"url": f"https://{host}:{device.port}/#admin-login={token}"}
         if action == "reboot":
             return device.call("POST", "/api/reboot", {})
         if action == "url":

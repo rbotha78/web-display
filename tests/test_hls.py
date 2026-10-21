@@ -5,6 +5,27 @@ from webdisplay.hls import MAX_MANIFEST_BYTES, resolve_video_url, select_renditi
 
 
 class HlsTests(unittest.TestCase):
+    def test_plex_bitrate_limit_accepts_requested_rendition_but_keeps_resolution_limit(self):
+        manifest = """#EXTM3U
+#EXT-X-STREAM-INF:BANDWIDTH=6632000,RESOLUTION=1280x720
+720.m3u8
+#EXT-X-STREAM-INF:BANDWIDTH=7000000,RESOLUTION=1920x1080
+1080.m3u8
+"""
+        base = "https://example.com/master.m3u8"
+        with self.assertRaisesRegex(ValueError, "4 Mbps"):
+            select_rendition(manifest, base)
+        self.assertEqual(
+            select_rendition(manifest, base, 8_000_000), "https://example.com/720.m3u8",
+        )
+        response = Mock(url=base)
+        response.read.return_value = manifest.encode()
+        with patch("webdisplay.hls.urllib.request.urlopen") as open_url:
+            open_url.return_value.__enter__.return_value = response
+            self.assertEqual(
+                resolve_video_url(base, 8_000_000), "https://example.com/720.m3u8",
+            )
+
     def test_selects_720p_before_player_opens_all_variants(self):
         manifest = """#EXTM3U
 #EXT-X-STREAM-INF:BANDWIDTH=582000,RESOLUTION=426x240

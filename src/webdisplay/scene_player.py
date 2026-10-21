@@ -21,8 +21,11 @@ from typing import Callable
 from urllib.parse import urlsplit
 
 from .app import atomic_write, static_file
-from .carousel import RETRY_COOLDOWN, PlaybackState, Scene, validate_url
-from .hls import resolve_video_url
+from .carousel import (
+    DEFAULT_PLEX_BITRATE_KBPS, RETRY_COOLDOWN, PlaybackState, Scene,
+    validate_plex_bitrate, validate_url,
+)
+from .hls import MAX_VIDEO_BITRATE, resolve_video_url
 
 LOG = logging.getLogger(__name__)
 STALL_TIMEOUT = 30
@@ -199,13 +202,24 @@ class SceneRenderer:
                 else:
                     video_url = scene["url"]
                 self.resolve_process = subprocess.Popen(
-                    [sys.executable, "-m", "webdisplay.scene_player", "--resolve-video", video_url],
+                    [
+                        sys.executable, "-m", "webdisplay.scene_player",
+                        "--resolve-video", video_url,
+                        "--max-video-bitrate", str(self._video_bitrate()),
+                    ],
                     stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, start_new_session=True,
                 )
         except (OSError, subprocess.SubprocessError):
             self.error = "Could not start the scene renderer."
             LOG.error("Could not launch renderer for scene %s", scene["id"])
             self.video_state = "failed"
+
+    def _video_bitrate(self) -> int:
+        if self.scene and self.scene["source"] == "plex":
+            return validate_plex_bitrate(
+                self.scene.get("plex_bitrate_kbps") or DEFAULT_PLEX_BITRATE_KBPS
+            ) * 1000
+        return MAX_VIDEO_BITRATE
 
     def _launch_video(self, url: str) -> None:
         self.runtime.mkdir(parents=True, exist_ok=True)
@@ -228,7 +242,7 @@ class SceneRenderer:
             "--fullscreen", "--no-terminal",
             "--vo=gpu", "--gpu-context=x11egl", "--hwdec=v4l2m2m",
             *audio_options, "--idle=yes", "--force-window=immediate",
-            "--hls-bitrate=4000000",
+            f"--hls-bitrate={self._video_bitrate()}",
             f"--input-ipc-server={self.ipc_path}", "--", url,
         ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
 
@@ -402,7 +416,7 @@ class SceneRenderer:
 
 RESOLUTION_ERRORS = {
     "not-hls": "Stream returned a web page or other non-HLS content. Use a direct media playlist URL.",
-    "unsupported": "No compatible HLS rendition at or below 720p and 4 Mbps.",
+    "unsupported": "No compatible HLS rendition at or below 720p and the configured bitrate limit.",
     "invalid": "HLS playlist is invalid or exceeds the supported limits.",
     "network": "Stream could not be reached. Check availability and access permissions.",
 }
@@ -413,11 +427,15 @@ if __name__ == "__main__":
     operation = parser.add_mutually_exclusive_group(required=True)
     operation.add_argument("--probe")
     operation.add_argument("--resolve-video")
+    parser.add_argument("--max-video-bitrate", type=int, default=MAX_VIDEO_BITRATE)
     args = parser.parse_args()
     if args.probe:
         raise SystemExit(0 if reachable(args.probe) else 1)
     try:
-        payload = json.dumps({"url": resolve_video_url(args.resolve_video)}, ensure_ascii=False)
+        validate_plex_bitrate(args.max_video_bitrate // 1000)
+        payload = json.dumps({
+            "url": resolve_video_url(args.resolve_video, args.max_video_bitrate),
+        }, ensure_ascii=False)
         if len(payload.encode("utf-8")) > 4096:
             raise ValueError("Resolved stream URL exceeds the IPC limit")
         print(payload)

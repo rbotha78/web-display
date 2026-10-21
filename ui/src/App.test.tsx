@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { App } from "./App";
+import { StrictMode } from "react";
 
 type Handler = (init: RequestInit) => { status?: number; body: unknown };
 
@@ -39,6 +40,39 @@ afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+  window.history.replaceState(null, "", "/");
+});
+
+test("exchanges a manager link once, clears the fragment and limits key management", async () => {
+  window.location.hash = "#admin-login=one-time-secret";
+  const calls = mockFetch(dashboardRoutes({
+    "POST /api/admin-login": () => ({ body: { csrf: "delegated", can_manage_keys: false } }),
+    "PUT /api/config": () => ({ body: { url: "", auto_ap: false } }),
+  }));
+  render(<StrictMode><App /></StrictMode>);
+  await waitFor(() => expect((screen.getByLabelText("Web page URL") as HTMLInputElement).value).toBe("https://example.com"));
+  fireEvent.click(await screen.findByText("Save settings"));
+  await screen.findByText(/Settings saved/);
+  expect(window.location.hash).toBe("");
+  const logins = calls.filter((call) => call.path === "/api/admin-login");
+  expect(logins).toHaveLength(1);
+  expect(JSON.parse(logins[0].init.body as string)).toEqual({ token: "one-time-secret" });
+  expect(calls.some((call) => call.path === "/api/keys")).toBe(false);
+  const save = calls.find((call) => call.init.method === "PUT")!;
+  expect((save.init.headers as Record<string, string>)["X-CSRF-Token"]).toBe("delegated");
+  expect(screen.getByText(/Signed in through the display manager/)).toBeTruthy();
+});
+
+test("reports an expired manager link and allows password login", async () => {
+  window.location.hash = "#admin-login=expired";
+  mockFetch({
+    "POST /api/admin-login": () => ({ status: 401, body: { error: "Login link expired" } }),
+    "GET /health": () => ({ body: { paired: true } }),
+  });
+  render(<App />);
+  expect(await screen.findByText("Login link expired")).toBeTruthy();
+  expect(await screen.findByLabelText("Administrator password")).toBeTruthy();
+  expect(window.location.hash).toBe("");
 });
 
 test("shows pairing when the device is unpaired", async () => {

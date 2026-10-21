@@ -10,7 +10,9 @@ MAX_MANIFEST_BYTES = 256 * 1024
 MAX_VIDEO_BITRATE = 4_000_000
 
 
-def select_rendition(manifest: str, base_url: str) -> str:
+def select_rendition(
+    manifest: str, base_url: str, max_bitrate: int = MAX_VIDEO_BITRATE,
+) -> str:
     lines = manifest.lstrip("\ufeff").splitlines()
     if not lines or lines[0].strip() != "#EXTM3U":
         raise ValueError("Stream did not return an HLS playlist")
@@ -30,7 +32,7 @@ def select_rendition(manifest: str, base_url: str) -> str:
             width, height = map(int, resolution.split("x")) if resolution else (0, 0)
         except ValueError:
             raise ValueError("HLS playlist has invalid variant metadata") from None
-        if not 0 < bitrate <= MAX_VIDEO_BITRATE or not 0 <= width <= 1280 or not 0 <= height <= 720:
+        if not 0 < bitrate <= max_bitrate or not 0 <= width <= 1280 or not 0 <= height <= 720:
             continue
         codecs = attributes.get("CODECS", "").lower().split(",")
         if any(codec.startswith(("hev", "hvc", "av01", "vp09")) for codec in codecs):
@@ -45,11 +47,13 @@ def select_rendition(manifest: str, base_url: str) -> str:
     if not master:
         return base_url
     if not variants:
-        raise ValueError("No compatible HLS rendition at or below 720p and 4 Mbps")
+        raise ValueError(
+            f"No compatible HLS rendition at or below 720p and {max_bitrate / 1_000_000:g} Mbps"
+        )
     return max(variants)[2]
 
 
-def resolve_video_url(url: str) -> str:
+def resolve_video_url(url: str, max_bitrate: int = MAX_VIDEO_BITRATE) -> str:
     if not urlsplit(url).path.lower().endswith(".m3u8"):
         return url
     request = urllib.request.Request(url, headers={"User-Agent": "WebDisplay/1"})
@@ -61,4 +65,4 @@ def resolve_video_url(url: str) -> str:
             manifest = data.decode("utf-8-sig")
         except UnicodeDecodeError:
             raise ValueError("HLS playlist is not UTF-8") from None
-        return select_rendition(manifest, response.url)
+        return select_rendition(manifest, response.url, max_bitrate)

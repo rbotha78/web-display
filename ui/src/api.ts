@@ -1,5 +1,6 @@
 export interface Session {
   csrf: string;
+  can_manage_keys?: boolean;
 }
 
 export interface Config {
@@ -171,6 +172,7 @@ async function uploadUpdate(file: File): Promise<UpdateResult> {
 export const api = {
   health: () => request<{ paired: boolean }>("/health"),
   session: () => request<Session>("/api/session"),
+  managerLogin: (token: string) => request<Session>("/api/admin-login", "POST", { token }),
   login: (password: string) => request<Session>("/api/login", "POST", { password }),
   pair: (code: string, password: string) =>
     request<Session>("/api/pair", "POST", { code, password }),

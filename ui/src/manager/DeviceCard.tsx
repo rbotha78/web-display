@@ -79,6 +79,24 @@ export function DeviceCard({ device, notify, refresh, readd }: Props) {
     });
   };
 
+  const openAdmin = () => {
+    const tab = window.open("", "_blank");
+    if (!tab) {
+      notify("Allow pop-ups for the manager to open the admin page.", "error");
+      return;
+    }
+    tab.opener = null;
+    void run(async () => {
+      try {
+        const { url } = await api.adminLogin(device.id);
+        tab.location.replace(url);
+      } catch (error) {
+        tab.close();
+        throw error;
+      }
+    });
+  };
+
   const connection =
     device.default_route === undefined
       ? "unknown"
@@ -180,8 +198,11 @@ export function DeviceCard({ device, notify, refresh, readd }: Props) {
       )}
       {healthy && <DeviceKeys deviceId={device.id} deviceName={device.name} notify={notify} />}
       <div className="actions">
+        {healthy && (
+          <button type="button" disabled={busy} onClick={openAdmin}>Open admin page</button>
+        )}
         <a className="button" href={adminUrl} target="_blank" rel="noopener noreferrer">
-          Open admin page
+          {healthy ? "Open without automatic login" : "Open admin page"}
         </a>
         <button type="button" disabled={busy} onClick={forget}>
           Remove

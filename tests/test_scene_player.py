@@ -188,6 +188,30 @@ class RendererTests(unittest.TestCase):
         self.renderer.ipc.recv.return_value = b"not json\n"
         self.assertEqual(self.renderer.state(), "failed")
 
+    def test_plex_bitrate_reaches_resolver_and_player_without_changing_direct_streams(self):
+        for source, expected in (("plex", 8_000_000), ("url", 4_000_000)):
+            with self.subTest(source=source):
+                scene = make_scene(
+                    "video", source=source, plex_bitrate_kbps=8000,
+                    plex_rating_key="42", url="" if source == "plex" else "https://example.com/live",
+                )
+                scene["plex_playback_url"] = "http://127.0.0.1:4321/play/cap/start.m3u8"
+                resolver = Mock(pid=12346)
+                resolver.poll.return_value = 0
+                resolver.communicate.return_value = (
+                    b'{"url":"https://example.com/720p.m3u8"}', None,
+                )
+                with patch(
+                    "webdisplay.scene_player.subprocess.Popen",
+                    side_effect=[resolver, self.process],
+                ) as spawn:
+                    self.renderer.start(scene)
+                    args = spawn.call_args.args[0]
+                    self.assertEqual(args[-2:], ["--max-video-bitrate", str(expected)])
+                    self.assertEqual(self.renderer.state(), "starting")
+                    self.assertIn(f"--hls-bitrate={expected}", spawn.call_args.args[0])
+                self.renderer.scene = None
+
     def start_video(self):
         resolver = Mock(pid=12346)
         resolver.poll.return_value = 0

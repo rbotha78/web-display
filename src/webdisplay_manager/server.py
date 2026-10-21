@@ -24,7 +24,7 @@ from .store import DeviceStore
 LOG = logging.getLogger("web-display-manager")
 STATIC_DIR = Path(__file__).parent / "static"
 MAX_BODY = 16 * 1024
-ACTIONS = {"reboot", "url", "update-check", "update-install"}
+ACTIONS = {"reboot", "url", "update-check", "update-install", "admin-login"}
 CSP = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; frame-ancestors 'none'"
 
 

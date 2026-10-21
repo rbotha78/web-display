@@ -352,6 +352,9 @@ th {
 }
 
 .toast {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
   position: fixed;
   left: 50%;
   bottom: 1.5rem;

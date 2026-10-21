@@ -5,6 +5,7 @@ import { ManagerApp } from "./ManagerApp";
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 function stub(devices: object[]) {
@@ -104,7 +105,7 @@ test("links to each device's admin page and manages its SSH keys", async () => {
   );
   vi.spyOn(window, "confirm").mockReturnValue(true);
   render(<ManagerApp />);
-  const link = (await screen.findByText("Open admin page")) as HTMLAnchorElement;
+  const link = (await screen.findByText("Open without automatic login")) as HTMLAnchorElement;
   expect(link.getAttribute("href")).toBe("https://10.0.0.5:8443/");
   expect(link.rel).toContain("noopener");
 
@@ -117,6 +118,46 @@ test("links to each device's admin page and manages its SSH keys", async () => {
 
   fireEvent.click(screen.getAllByText("Remove").find((b) => b.closest("p"))!);
   await waitFor(() => expect(screen.queryByText("laptop")).toBeNull());
+});
+
+test("opens a one-time login link in an isolated tab", async () => {
+  const replace = vi.fn();
+  const tab = { opener: window, location: { replace }, close: vi.fn() };
+  vi.stubGlobal("open", vi.fn(() => tab));
+  let resolveLogin: (reply: Response) => void = () => undefined;
+  const fetch = vi.fn(async (path: string) => {
+    if (path.endsWith("/admin-login")) {
+      return new Promise<Response>((resolve) => { resolveLogin = resolve; });
+    }
+    return {
+      ok: true, status: 200,
+      json: async () => ({ devices: [{ id: "aabbccddeeff", name: "Lobby", host: "device.example", port: 8443, online: true }] }),
+    } as Response;
+  });
+  vi.stubGlobal("fetch", fetch);
+  render(<ManagerApp />);
+  fireEvent.click(await screen.findByText("Open admin page"));
+  expect(window.open).toHaveBeenCalledWith("", "_blank");
+  expect(tab.opener).toBeNull();
+  expect(replace).not.toHaveBeenCalled();
+  resolveLogin({ ok: true, json: async () => ({ url: "https://device.example:8443/#admin-login=secret" }) } as Response);
+  await waitFor(() => expect(replace).toHaveBeenCalledWith("https://device.example:8443/#admin-login=secret"));
+  expect(fetch).toHaveBeenCalledWith("/api/devices/aabbccddeeff/admin-login", expect.objectContaining({ method: "POST" }));
+});
+
+test("closes the new tab and reports a failed automatic login", async () => {
+  const tab = { opener: window, close: vi.fn() };
+  vi.stubGlobal("open", vi.fn(() => tab));
+  vi.stubGlobal("fetch", vi.fn(async (path: string) => ({
+    ok: !path.endsWith("/admin-login"), status: path.endsWith("/admin-login") ? 502 : 200,
+    json: async () => path.endsWith("/admin-login")
+      ? { error: "Update device software first" }
+      : { devices: [{ id: "aabbccddeeff", name: "Lobby", host: "device.example", port: 8443, online: true }] },
+  })));
+  render(<ManagerApp />);
+  fireEvent.click(await screen.findByText("Open admin page"));
+  expect(await screen.findByText("Update device software first")).toBeTruthy();
+  expect(tab.close).toHaveBeenCalled();
 });
 
 test("hides SSH keys when the device has none to manage", async () => {

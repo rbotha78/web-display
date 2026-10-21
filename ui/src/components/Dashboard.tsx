@@ -14,9 +14,10 @@ import { WifiCard } from "./WifiCard";
 interface Props {
   notify: (text: string, kind?: Notice["kind"]) => void;
   onExpired: () => void;
+  canManageKeys: boolean;
 }
 
-export function Dashboard({ notify, onExpired }: Props) {
+export function Dashboard({ notify, onExpired, canManageKeys }: Props) {
   const [status, setStatus] = useState<Status | null>(null);
   const [network, setNetwork] = useState<NetworkStatus | null>(null);
 
@@ -56,7 +57,12 @@ export function Dashboard({ notify, onExpired }: Props) {
       <HostnameCard current={status?.hostname ?? null} notify={notify} fail={fail} />
       <WifiCard network={network} notify={notify} fail={fail} refresh={refreshNetwork} />
       <UpdatesCard notify={notify} fail={fail} />
-      <ManagerKeysCard notify={notify} fail={fail} />
+      {canManageKeys ? <ManagerKeysCard notify={notify} fail={fail} /> : (
+        <section className="card">
+          <h2>Manager access</h2>
+          <p className="muted">Signed in through the display manager. Sign out and log in with the administrator password to manage API keys.</p>
+        </section>
+      )}
       <DebugKeysCard notify={notify} fail={fail} />
     </div>
   );

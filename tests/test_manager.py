@@ -6,6 +6,8 @@ import subprocess
 import tempfile
 import threading
 import unittest
+from unittest.mock import patch
+from urllib.parse import urlsplit
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 
@@ -281,6 +283,37 @@ class ServerTests(ManagerCase):
     def test_bad_enrol_is_a_client_error(self):
         status, _ = self.call("POST", "/api/enroll", {"host": "bad host"})
         self.assertEqual(status, 400)
+
+    def test_admin_login_over_http_uses_pinned_device_and_single_use_token(self):
+        identifier = self.enroll()
+        path = f"/api/devices/{identifier}/admin-login"
+        self.assertEqual(self.call("POST", path, {}, token=False)[0], 401)
+        self.assertEqual(self.call("POST", path, {}, {"Origin": "https://evil.example"})[0], 403)
+        status, result = self.call("POST", path, {})
+        self.assertEqual(status, 200)
+        url = urlsplit(result["url"])
+        self.assertEqual((url.scheme, url.hostname, url.port, url.path, url.query),
+                         ("https", "127.0.0.1", self.device.port, "/", ""))
+        token = url.fragment.removeprefix("admin-login=")
+        browser = DeviceClient("127.0.0.1", self.device.port, self.device.fingerprint)
+        status, session, headers = browser.request("POST", "/api/admin-login", {"token": token})
+        self.assertEqual(status, 200)
+        self.assertFalse(session["can_manage_keys"])
+        cookie = {"Cookie": headers["set-cookie"].split(";", 1)[0]}
+        self.assertEqual(browser.request("GET", "/api/config", headers=cookie)[0], 200)
+        self.assertEqual(browser.request("POST", "/api/admin-login", {"token": token})[0], 401)
+        self.assertNotIn(str(self.store.get(identifier)["key"]), result["url"])
+        self.store.save("127.0.0.1", self.device.port, "11:" * 31 + "11", "wdk_x", "Wrong")
+        wrong = next(i for i in self.store.all() if i != identifier)
+        self.assertEqual(self.call("POST", f"/api/devices/{wrong}/admin-login", {})[0], 502)
+
+    def test_admin_login_reports_old_device_software(self):
+        identifier = self.enroll()
+        with patch.object(DeviceClient, "request", return_value=(404, {"error": "not found"}, {})):
+            with patch.object(self.manager, "client", return_value=DeviceClient("device.example", 8443, "")):
+                status, payload = self.call("POST", f"/api/devices/{identifier}/admin-login", {})
+        self.assertEqual(status, 502)
+        self.assertIn("newer device software", payload["error"])
 
 
 class VersionTests(ManagerCase):

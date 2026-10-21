@@ -209,21 +209,41 @@ def verify_password(password: str, stored: object) -> bool:
 class Session:
     csrf: str
     expires_at: float
+    key_hash: str | None = None
 
 
 class SessionStore:
     def __init__(self) -> None:
         self._sessions: dict[str, Session] = {}
+        self._login_tokens: dict[str, tuple[str, float]] = {}
         self._lock = threading.Lock()
 
-    def create(self) -> tuple[str, Session]:
+    def create(self, key_hash: str | None = None) -> tuple[str, Session]:
         token = secrets.token_urlsafe(32)
         session = Session(
-            csrf=secrets.token_urlsafe(32), expires_at=time.time() + SESSION_TTL_SECONDS
+            csrf=secrets.token_urlsafe(32), expires_at=time.time() + SESSION_TTL_SECONDS,
+            key_hash=key_hash,
         )
         with self._lock:
             self._sessions[token] = session
         return token, session
+
+    def login_token(self, key_hash: str) -> str:
+        now = time.time()
+        token = secrets.token_urlsafe(32)
+        with self._lock:
+            self._login_tokens = {
+                digest: entry for digest, entry in self._login_tokens.items() if entry[1] > now
+            }
+            if len(self._login_tokens) >= 128:
+                raise ValueError("Too many pending logins; try again in a minute")
+            self._login_tokens[hash_key(token)] = (key_hash, now + 60)
+        return token
+
+    def consume_login_token(self, token: str) -> str | None:
+        with self._lock:
+            entry = self._login_tokens.pop(hash_key(token), None)
+        return entry[0] if entry and entry[1] > time.time() else None
 
     def get(self, token: str | None) -> Session | None:
         if not token:
@@ -335,7 +355,9 @@ class Application:
             self.config.update(api_keys=remaining)
 
     def key_valid(self, key: str) -> bool:
-        digest = hash_key(key)
+        return self.key_hash_valid(hash_key(key))
+
+    def key_hash_valid(self, digest: str) -> bool:
         found = False
         for entry in self.config.load()["api_keys"]:  # type: ignore[union-attr]
             if hmac.compare_digest(str(entry["hash"]), digest):
@@ -354,9 +376,10 @@ class Application:
             for scene in playlist["scenes"]:
                 published = dict(scene)
                 if scene["source"] == "plex":
+                    bitrate = scene["plex_bitrate_kbps"] or config["plex_default_bitrate_kbps"]
+                    published["plex_bitrate_kbps"] = bitrate
                     published["plex_playback_url"], published["plex_stop_url"] = self.plex_proxy.publish(
-                        scene["plex_rating_key"],
-                        scene["plex_bitrate_kbps"] or config["plex_default_bitrate_kbps"],
+                        scene["plex_rating_key"], bitrate,
                     )
                 runtime_scenes.append(published)
             atomic_write(
@@ -716,7 +739,11 @@ def make_handler(app: Application) -> type[BaseHTTPRequestHandler]:
             return item.value if item else None
 
         def _session(self) -> Session | None:
-            return app.sessions.get(self._session_token())
+            session = app.sessions.get(self._session_token())
+            if session and session.key_hash and not app.key_hash_valid(session.key_hash):
+                app.sessions.delete(self._session_token())
+                return None
+            return session
 
         def _bearer_key(self) -> str | None:
             header = self.headers.get("Authorization", "")
@@ -734,10 +761,13 @@ def make_handler(app: Application) -> type[BaseHTTPRequestHandler]:
                     self._json(HTTPStatus.UNAUTHORIZED, {"error": "invalid API key"})
                     return None
                 # Bearer keys are not ambient credentials, so no CSRF token is needed.
-                return Session(csrf="", expires_at=0)
+                return Session(csrf="", expires_at=0, key_hash=hash_key(key))
             session = self._session()
             if not session:
                 self._json(HTTPStatus.UNAUTHORIZED, {"error": "authentication required"})
+                return None
+            if not allow_key and session.key_hash:
+                self._json(HTTPStatus.FORBIDDEN, {"error": "password login required to manage API keys"})
                 return None
             if csrf and not hmac.compare_digest(
                 self.headers.get("X-CSRF-Token", ""), session.csrf
@@ -760,7 +790,9 @@ def make_handler(app: Application) -> type[BaseHTTPRequestHandler]:
             if self.path == "/api/session":
                 session = self._require_session()
                 if session:
-                    self._json(HTTPStatus.OK, {"csrf": session.csrf})
+                    self._json(HTTPStatus.OK, {
+                        "csrf": session.csrf, "can_manage_keys": session.key_hash is None,
+                    })
                 return
             if self.path == "/api/keys":
                 if self._require_session(allow_key=False):
@@ -879,6 +911,35 @@ def make_handler(app: Application) -> type[BaseHTTPRequestHandler]:
                     self._pair(body)
                 elif self.path == "/api/login":
                     self._login_response(body)
+                elif self.path == "/api/admin-login-token":
+                    key = self._bearer_key()
+                    if not key:
+                        self._json(HTTPStatus.UNAUTHORIZED, {"error": "API key required"})
+                        return
+                    if not self._require_session():
+                        return
+                    self._json(HTTPStatus.CREATED, {
+                        "token": app.sessions.login_token(hash_key(key)), "expires_in": 60,
+                    })
+                elif self.path == "/api/admin-login":
+                    client = self.client_address[0]
+                    if not app.throttle.allowed(client):
+                        self._json(HTTPStatus.TOO_MANY_REQUESTS, {"error": "try again later"})
+                        return
+                    token = body.get("token")
+                    digest = (
+                        app.sessions.consume_login_token(token)
+                        if isinstance(token, str) and len(token) == 43 else None
+                    )
+                    if not digest or not app.key_hash_valid(digest):
+                        app.throttle.failure(client)
+                        self._json(HTTPStatus.UNAUTHORIZED, {"error": "Login link expired or invalid; open it again from the manager"})
+                        return
+                    token, session = app.sessions.create(key_hash=digest)
+                    self._json(
+                        HTTPStatus.OK, {"csrf": session.csrf, "can_manage_keys": False},
+                        headers={"Set-Cookie": session_cookie(token)},
+                    )
                 elif self.path == "/api/logout":
                     if not self._require_session(csrf=True):
                         return

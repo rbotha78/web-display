@@ -92,6 +92,8 @@ export const api = {
   setUrl: (id: string, url: string) =>
     request<object>("/api/devices/" + id + "/url", "POST", { url }),
   reboot: (id: string) => request<object>("/api/devices/" + id + "/reboot", "POST", {}),
+  adminLogin: (id: string) =>
+    request<{ url: string }>("/api/devices/" + id + "/admin-login", "POST", {}),
   checkUpdate: (id: string) =>
     request<{ available: boolean; latest: { version: string } | null }>(
       "/api/devices/" + id + "/update-check",

@@ -174,6 +174,9 @@ scenes require `url`; Plex video scenes use `source: "plex"` and a
 `plex_rating_key`; video scenes accept optional `audio_enabled` (default false).
 Plex video scenes may set `plex_bitrate_kbps` to override the global default;
 valid values are 500-20000 kbps. The global Plex default is 4000 kbps.
+The effective Plex bitrate is used for both the server request and local HLS
+selection/playback; the 720p resolution limit remains in place. Direct streams
+retain their separate 4 Mbps limit.
 Dashboards accept `layout` (`clock`, `notice`, `clock-notice`) and `text` (at
 most 2000 characters). Omitting timing uses the defaults above.
 Private configuration is atomically saved; the administrator playlist API
@@ -383,7 +386,17 @@ fingerprint (compare it with the device screen), then uses the administrator pas
 create an API key for this PC. Only the key and pinned fingerprint are stored, in
 `~/.config/web-display-manager/devices.json` (mode 0600); passwords are never stored.
 Functions: status, change display address, check/install updates (one or all), restart.
+**Open admin page** signs the browser in using the manager's existing key, without
+storing or asking for the password. The device issues a single-use login token that
+expires after one minute; it travels in the URL fragment (not access logs) and is
+removed from the address bar before exchange for a secure, HttpOnly session cookie.
+These sessions retain manager-key permissions: API-key management still requires a
+password login, and revoking the originating key also invalidates its browser sessions.
+Both the manager and device need updated software; **Open without automatic login**
+remains available for manual login or browser certificate confirmation.
 Keys are listed and revoked in the device admin page's "Manager access" card (API: `GET /api/keys`, `DELETE /api/keys/<id>`, session login only).
+Notifications in both web UIs disappear after five seconds (ten for errors) and
+can also be dismissed immediately.
 Rebuild the manager UI with `cd ui && npm run build`.
 
 The manager shares the firmware version (`WEB_DISPLAY_VERSION`; `--version` prints it). When releasing, bump

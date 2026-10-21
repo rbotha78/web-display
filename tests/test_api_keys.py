@@ -2,9 +2,11 @@ import http.client
 import json
 import tempfile
 import threading
+import time
 import unittest
 from http.server import ThreadingHTTPServer
 from pathlib import Path
+from unittest.mock import patch
 
 from webdisplay.app import Application, make_handler
 
@@ -100,6 +102,55 @@ class ApiKeyTests(unittest.TestCase):
         key = self.mint()["key"]
         self.call("PUT", "/api/config", {"url": "https://example.com"}, self.session)
         self.assertEqual(self.call("GET", "/api/status", headers={"Authorization": f"Bearer {key}"})[0], 200)
+
+    def login_token(self, key):
+        status, payload, _ = self.call(
+            "POST", "/api/admin-login-token", {}, {"Authorization": f"Bearer {key}"},
+        )
+        self.assertEqual(status, 201)
+        self.assertEqual(payload["expires_in"], 60)
+        return payload["token"]
+
+    def test_manager_login_is_single_use_and_keeps_key_permissions_and_csrf(self):
+        minted = self.mint()
+        token = self.login_token(minted["key"])
+        status, payload, headers = self.call("POST", "/api/admin-login", {"token": token})
+        self.assertEqual(status, 200)
+        self.assertFalse(payload["can_manage_keys"])
+        self.assertIn("Secure; HttpOnly; SameSite=Strict", headers["Set-Cookie"])
+        cookie = {"Cookie": headers["Set-Cookie"].split(";", 1)[0]}
+        self.assertEqual(self.call("POST", "/api/admin-login", {"token": token})[0], 401)
+        status, session, _ = self.call("GET", "/api/session", headers=cookie)
+        self.assertEqual(status, 200)
+        self.assertEqual(session, payload)
+        self.assertEqual(self.call("PUT", "/api/config", {"url": ""}, cookie)[0], 403)
+        authenticated = {**cookie, "X-CSRF-Token": payload["csrf"]}
+        self.assertEqual(self.call("PUT", "/api/config", {"url": "https://example.com/"}, authenticated)[0], 200)
+        for method, path, body in (
+            ("GET", "/api/keys", None),
+            ("POST", "/api/keys", {"name": "extra"}),
+            ("DELETE", f"/api/keys/{minted['id']}", None),
+        ):
+            self.assertEqual(self.call(method, path, body, authenticated)[0], 403)
+        self.app.revoke_key(minted["id"])
+        self.assertEqual(self.call("GET", "/api/session", headers=cookie)[0], 401)
+        self.assertEqual(self.call("GET", "/api/config", headers=cookie)[0], 401)
+
+    def test_login_tokens_expire_and_revocation_prevents_exchange(self):
+        minted = self.mint()
+        expired = self.login_token(minted["key"])
+        with patch("webdisplay.app.time.time", return_value=time.time() + 61):
+            self.assertEqual(self.call("POST", "/api/admin-login", {"token": expired})[0], 401)
+        revoked = self.login_token(minted["key"])
+        self.app.revoke_key(minted["id"])
+        self.assertEqual(self.call("POST", "/api/admin-login", {"token": revoked})[0], 401)
+
+    def test_login_token_creation_requires_bearer_and_exchange_is_throttled(self):
+        self.assertEqual(self.call("POST", "/api/admin-login-token", {})[0], 401)
+        self.assertEqual(self.call("POST", "/api/admin-login-token", {}, self.session)[0], 401)
+        for _ in range(5):
+            self.assertEqual(self.call("POST", "/api/admin-login", {"token": "invalid"})[0], 401)
+        self.assertEqual(self.call("POST", "/api/admin-login", {"token": "invalid"})[0], 429)
 
 
 if __name__ == "__main__":
