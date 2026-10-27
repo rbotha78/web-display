@@ -11,6 +11,7 @@ from unittest.mock import Mock, patch
 
 from webdisplay.carousel import validate_playlist
 from webdisplay.scene_player import SceneRenderer, SceneServer, stop_process
+from webdisplay.browser import BrowserError
 
 
 def make_scene(kind="dashboard", **changes):
@@ -84,7 +85,12 @@ class RendererTests(unittest.TestCase):
         self.process = Mock(pid=12345)
         self.process.poll.return_value = None
         self.launch = Mock(return_value=self.process)
-        self.renderer = SceneRenderer(self.launch, Path(self.directory.name))
+        with patch("webdisplay.scene_player.PersistentBrowser") as browser, \
+             patch("webdisplay.scene_player.SceneWindows"):
+            self.renderer = SceneRenderer(self.launch, Path(self.directory.name))
+        self.browser = browser.return_value
+        self.browser.process = self.process
+        self.browser.ready.return_value = True
         stop = patch("webdisplay.scene_player.stop_process")
         self.stop_process = stop.start()
         self.addCleanup(stop.stop)
@@ -96,52 +102,52 @@ class RendererTests(unittest.TestCase):
         self.renderer.server.ready.set()
         self.assertEqual(self.renderer.state(), "playing")
         self.process.poll.return_value = 0
+        self.browser.ready.side_effect = BrowserError("exited")
         self.assertEqual(self.renderer.state(), "failed")
 
-    def test_web_probes_before_launch_and_unreachable_scenes_fail(self):
-        probe = Mock(pid=12346)
-        probe.poll.return_value = None
-        with patch("webdisplay.scene_player.subprocess.Popen", return_value=probe):
-            self.renderer.start(make_scene("web"))
-        self.assertEqual(self.renderer.state(), "starting")
-        self.launch.assert_not_called()
-        probe.poll.return_value = 1
-        self.assertEqual(self.renderer.state(), "failed")
-        self.launch.assert_not_called()
-        probe.poll.return_value = 0
-        with patch("webdisplay.scene_player.subprocess.Popen", return_value=probe):
-            self.renderer.start(make_scene("web"))
+    def test_web_waits_for_browser_readiness_and_keeps_previous_scene_visible(self):
+        self.renderer.start(make_scene())
+        self.renderer.server.ready.set()
         self.assertEqual(self.renderer.state(), "playing")
-        self.launch.assert_called_once_with("https://example.com/stream")
-
-    def test_stopping_a_stuck_probe_does_not_wait_for_its_network_timeout(self):
-        probe = Mock(pid=12346)
-        probe.poll.return_value = None
-        with patch("webdisplay.scene_player.subprocess.Popen", return_value=probe):
-            self.renderer.start(make_scene("web"))
+        self.browser.activate.reset_mock()
+        self.browser.ready.return_value = False
+        self.renderer.start(make_scene("web"))
         self.assertEqual(self.renderer.state(), "starting")
+        self.browser.activate.assert_not_called()
+        self.browser.close.assert_not_called()
+        self.browser.ready.return_value = True
+        self.assertEqual(self.renderer.state(), "playing")
+        self.browser.activate.assert_called_once()
+
+    def test_stopping_closes_browser_and_pending_tabs(self):
+        self.renderer.start(make_scene("web"))
+        pending = self.renderer.pending_tab
         self.renderer.stop()
-        self.stop_process.assert_any_call(probe)
-        self.assertIsNone(self.renderer.probe_process)
-        self.launch.assert_not_called()
+        self.browser.discard.assert_any_call(pending)
+        self.browser.close.assert_called_once()
+        self.renderer.windows.close.assert_called_once()
 
     def test_mpv_missing_fails_and_recovery_restores_browser(self):
         with patch("webdisplay.scene_player.subprocess.Popen", side_effect=FileNotFoundError):
             self.renderer.start(make_scene("video"))
         self.assertEqual(self.renderer.state(), "failed")
         self.renderer.recovery()
-        self.launch.assert_called_once_with(self.renderer.server.url)
+        self.browser.prepare.assert_called_once_with(None, self.renderer.server.url)
         self.renderer.recovery()
-        self.assertEqual(self.launch.call_count, 1)
+        self.assertEqual(self.browser.prepare.call_count, 1)
         self.renderer.start(make_scene())
         self.renderer.stop()
         self.renderer.recovery()
-        self.assertEqual(self.launch.call_count, 3)
+        self.assertEqual(self.browser.prepare.call_count, 3)
 
     def test_video_progress_eof_stall_and_crash(self):
         self.start_video()
         ipc = Mock()
         self.renderer.ipc = ipc
+        self.renderer._command = Mock(
+            side_effect=lambda command: {"w": 1280, "h": 720}
+            if command == ["get_property", "video-out-params"] else False,
+        )
         ipc.recv.side_effect = [b'{"request_id":1,"data":0.0}\n', socket.timeout()]
         with patch("webdisplay.scene_player.time.monotonic", return_value=100):
             self.assertEqual(self.renderer.state(), "playing")
@@ -155,6 +161,9 @@ class RendererTests(unittest.TestCase):
         self.process.poll.return_value = 0
         self.assertEqual(self.renderer.state(), "finished")
         self.renderer.start(make_scene())
+        self.assertEqual(self.renderer.state(), "starting")
+        self.renderer.server.ready.set()
+        self.assertEqual(self.renderer.state(), "playing")
         ipc.close.assert_called_once()
         self.stop_process.assert_any_call(self.process)
 
@@ -177,10 +186,10 @@ class RendererTests(unittest.TestCase):
                 self.assertTrue(all(option in arguments for option in expected))
                 other_options = ("--mute=yes", "--audio=no") if enabled else (
                     "--aid=auto", "--mute=no",
-                    "--audio-device=alsa/hdmi:CARD=vc4hdmi,DEV=0",
                 )
                 self.assertFalse(any(option in arguments for option in other_options))
                 self.assertNotIn("--audio=yes", arguments)
+                self.assertIn("--audio-device=alsa/hdmi:CARD=vc4hdmi,DEV=0", arguments)
 
     def test_player_ipc_errors_are_failures(self):
         self.start_video()
@@ -211,6 +220,7 @@ class RendererTests(unittest.TestCase):
                     self.assertEqual(self.renderer.state(), "starting")
                     self.assertIn(f"--hls-bitrate={expected}", spawn.call_args.args[0])
                 self.renderer.scene = None
+                self.renderer.process = None
 
     def start_video(self):
         resolver = Mock(pid=12346)
@@ -284,6 +294,101 @@ class RendererTests(unittest.TestCase):
         with patch("webdisplay.scene_player.os.killpg") as kill:
             stop_process(process)
         self.assertEqual(kill.call_count, 2)
+
+    def test_video_reuses_player_and_applies_next_scene_settings(self):
+        self.start_video()
+        self.renderer.ipc = Mock()
+        self.renderer._command = Mock(return_value=False)
+        self.renderer.activated = True
+        self.renderer.active_scene = self.renderer.scene
+        with patch("webdisplay.scene_player.subprocess.Popen"):
+            self.renderer.start(make_scene("video", audio_enabled=True))
+        with patch("webdisplay.scene_player.subprocess.Popen") as spawn:
+            self.renderer._launch_video("https://example.com/next.m3u8")
+        spawn.assert_not_called()
+        self.renderer._command.assert_any_call(["set_property", "aid", "auto"])
+        self.renderer._command.assert_any_call(["loadfile", "https://example.com/next.m3u8", "replace"])
+        self.renderer.windows.show_video.assert_not_called()
+        self.renderer._activate()
+        self.renderer.windows.show_video.assert_called_once()
+        self.renderer._command.assert_any_call(["set_property", "mute", False])
+
+    def test_video_handover_waits_for_decoded_output_and_ignores_outgoing_stop(self):
+        self.start_video()
+        ipc = Mock()
+        ipc.recv.side_effect = [
+            b'{"event":"end-file","reason":"stop"}\n{"request_id":1,"data":0}\n',
+            socket.timeout(),
+        ]
+        self.renderer.ipc = ipc
+        self.renderer._command = Mock(return_value=None)
+        self.assertEqual(self.renderer.state(), "starting")
+        self.renderer.windows.show_video.assert_not_called()
+        ipc.recv.side_effect = [b'{"request_id":2,"data":0}\n', socket.timeout()]
+        self.renderer._command.return_value = {"w": 1280, "h": 720}
+        self.assertEqual(self.renderer.state(), "playing")
+        self.renderer.windows.show_video.assert_called_once()
+
+    def test_paused_video_is_retained_until_browser_is_ready_then_released(self):
+        self.start_video()
+        self.renderer.ipc = Mock()
+        self.renderer._command = Mock(return_value=False)
+        self.renderer.activated = True
+        self.renderer.active_scene = self.renderer.scene
+        self.browser.ready.return_value = False
+        self.renderer.start(make_scene("web"))
+        self.renderer._command.assert_any_call(["set_property", "pause", True])
+        self.renderer._command.assert_any_call(["set_property", "mute", True])
+        self.assertEqual(self.renderer.state(), "starting")
+        self.assertFalse(any(c.args == (["stop"],) for c in self.renderer._command.call_args_list))
+        self.browser.ready.return_value = True
+        self.assertEqual(self.renderer.state(), "playing")
+        self.renderer._command.assert_any_call(["stop"])
+        self.assertFalse(any(c.args == (self.process,) for c in self.stop_process.call_args_list))
+
+    def test_failed_preparation_cannot_activate_the_previous_video_as_the_new_scene(self):
+        self.start_video()
+        self.renderer.ipc = Mock()
+        self.renderer._command = Mock(return_value=False)
+        self.renderer.activated = True
+        self.renderer.active_scene = self.renderer.scene
+        scene = make_scene("video", source="plex", plex_rating_key="42", url="")
+        self.renderer.start(scene)
+        self.assertEqual(self.renderer.state(), "failed")
+        self.assertFalse(self.renderer.activated)
+
+    def test_control_replies_do_not_swallow_playback_error_events(self):
+        self.start_video()
+        ipc = Mock()
+        self.renderer.ipc = ipc
+        ipc.recv.return_value = (
+            b'{"event":"end-file","reason":"error","file_error":"loading failed"}\n'
+            b'{"request_id":1,"error":"success","data":false}\n'
+        )
+        self.assertFalse(self.renderer._command(["get_property", "eof-reached"]))
+        self.assertEqual(self.renderer.state(), "failed")
+        self.assertEqual(self.renderer.error, "Stream could not be opened or read.")
+
+    def test_output_property_can_be_temporarily_unavailable_during_startup(self):
+        self.start_video()
+        ipc = Mock()
+        self.renderer.ipc = ipc
+        ipc.recv.return_value = b'{"request_id":1,"error":"property unavailable"}\n'
+        self.assertIsNone(self.renderer._command(["get_property", "video-out-params"]))
+
+    def test_browser_control_failure_restarts_browser_before_next_scene(self):
+        self.browser.prepare.side_effect = BrowserError("Browser control disconnected")
+        self.renderer.start(make_scene())
+        self.assertEqual(self.renderer.state(), "failed")
+        self.assertTrue(self.renderer.browser_failed)
+        self.browser.prepare.side_effect = None
+        self.renderer.start(make_scene("web"))
+        self.browser.close.assert_called_once()
+        self.browser.ready.return_value = True
+        self.assertEqual(self.renderer.state(), "playing")
+        report = json.loads((Path(self.directory.name) / "carousel-status.json").read_text())
+        self.assertEqual(report["active_scene"], "scene")
+        self.assertIsNone(report["preparing_scene"])
 
 
 if __name__ == "__main__":

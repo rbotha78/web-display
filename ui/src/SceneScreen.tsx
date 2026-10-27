@@ -15,22 +15,30 @@ export function SceneScreen() {
 
   useEffect(() => {
     const controller = new AbortController();
-    (async () => {
+    let timer: number | undefined;
+    const poll = async () => {
       try {
         const response = await fetch("/api/scene", { signal: controller.signal });
         if (!response.ok) throw new Error("Could not load the dashboard");
         const value: DisplayScene = await response.json();
-        setScene(value);
+        if (!controller.signal.aborted) {
+          setScene((previous) => previous?.revision === value.revision ? previous : value);
+          setError("");
+        }
       } catch (error) {
         if (!controller.signal.aborted) {
           setError(error instanceof Error ? error.message : "Could not load the dashboard");
         }
+      } finally {
+        if (!controller.signal.aborted) timer = window.setTimeout(poll, 500);
       }
-    })();
-    const timer = window.setInterval(() => setNow(new Date()), 1000);
+    };
+    void poll();
+    const clock = window.setInterval(() => setNow(new Date()), 1000);
     return () => {
       controller.abort();
-      window.clearInterval(timer);
+      window.clearTimeout(timer);
+      window.clearInterval(clock);
     };
   }, []);
 

@@ -160,7 +160,7 @@ class Renderer(Protocol):
 
 
 class Carousel:
-    """Monotonic-time scheduler; renderer resources belong to exactly one scene."""
+    """Monotonic scheduler; start hands over without tearing down shared renderers."""
 
     def __init__(self, playlist: Playlist, renderer: Renderer):
         self.scenes = [scene for scene in playlist["scenes"] if scene["enabled"]]
@@ -193,7 +193,7 @@ class Carousel:
                 self.renderer.failure("Scene did not start within 30 seconds." if timed_out else None)
                 LOG.warning("Scene %s failed; retrying after cooldown", self.current["id"])
                 self.cooldowns[self.current["id"]] = now + RETRY_COOLDOWN
-            self.stop()
+            self.current = None
         for offset in range(1, len(self.scenes) + 1):
             index = (self.cursor + offset) % len(self.scenes)
             scene = self.scenes[index]

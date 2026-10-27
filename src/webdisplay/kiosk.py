@@ -11,6 +11,7 @@ import re
 import signal
 import socket
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -199,7 +200,9 @@ def clear_stale_profile_locks(profile: Path = PROFILE_DIR) -> None:
             LOG.warning("Could not remove %s", name)
 
 
-def launch(browser: str, destination: str) -> subprocess.Popen[bytes]:
+def launch(
+    browser: str, destination: str, control: tuple[int, int] | None = None,
+) -> subprocess.Popen[bytes]:
     clear_stale_profile_locks()
     arguments = [
         browser,
@@ -216,6 +219,19 @@ def launch(browser: str, destination: str) -> subprocess.Popen[bytes]:
     if size:
         arguments.append(f"--window-size={size}")
     arguments.append(destination)
+    if control:
+        arguments[1:1] = [
+            "--remote-debugging-pipe", "--disable-backgrounding-occluded-windows",
+            "--disable-renderer-backgrounding", "--disable-background-timer-throttling",
+            "--disable-session-crashed-bubble",
+        ]
+        return subprocess.Popen(
+            [
+                sys.executable, "-m", "webdisplay.browser",
+                "--pipe-in", str(control[0]), "--pipe-out", str(control[1]), "--", *arguments,
+            ],
+            pass_fds=control, start_new_session=True,
+        )
     return subprocess.Popen(arguments, start_new_session=True)
 
 
@@ -398,7 +414,7 @@ def main() -> None:
                     process = None
                     destination = ""
                     renderer = SceneRenderer(
-                        lambda url: launch(args.browser, url), fallback_path.parent, args.mpv
+                        lambda url, pipes: launch(args.browser, url, pipes), fallback_path.parent, args.mpv
                     )
                 if carousel is None or playlist != previous_playlist or revision != previous_revision:
                     if carousel:

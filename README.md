@@ -198,6 +198,39 @@ monitoring items, not guarantees of indefinite unattended operation. Plex
 playback has been validated on both devices; audio validation, image uploads
 and manager-side playlist editing remain deferred.
 
+### Carousel transitions and retained websites
+
+Carousel mode reuses one Chromium process and one mpv process rather than
+restarting them at every scene boundary. Dashboards update in place. Websites
+use normal top-level navigation, not iframes, so sites that block embedding
+remain supported. Chromium control uses private inherited pipes, with no
+remote-debugging network port.
+Cold browser startup has a separate 20-second control allowance; failed browser
+initialisation or control is discarded before preparing another scene, rather
+than retaining a broken tab cache. Playback status includes the active and
+preparing scene IDs so startup skips can be distinguished from playlist order.
+
+At most two website tabs are retained, in addition to the local dashboard and
+recovery tab. Revisiting a retained tab preserves its page state without
+reloading. Hidden website tabs are frozen; they resume when prepared for display.
+When a third website is needed, the least-recently-used non-current website is
+closed and must reload on its next visit. Saving a playlist, restarting the kiosk,
+or display-output recovery resets the cache. Retention is not an automatic refresh:
+sites that need fresh data should update themselves when resumed.
+
+The current scene remains visible while the next website loads or its video URL
+is resolved. The next scene's duration starts only after handover. Video uses one
+embedded output window, waits for decoded output before being raised, and enables
+audio only at handover. Leaving video pauses/mutes it during preparation and
+releases playback after the browser is visible. Consecutive videos reuse mpv via
+`loadfile`, but still need stream buffering and decoder reinitialisation: these
+transitions are not guaranteed gapless and do not preload a second video decoder.
+Animated fades and crossfades are not implemented.
+
+This transition path has automated coverage, including real desktop Chromium tab
+retention when Chromium is installed. Pi 2/Pi 3 visual, audio, memory and endurance
+acceptance of the persistent-renderer path is still required.
+
 ### Hostname
 
 The administration page has a **Hostname** card (`POST /api/hostname`, CSRF-protected).
