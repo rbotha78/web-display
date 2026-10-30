@@ -1,6 +1,6 @@
 # Copilot Session Handoff
 
-Last updated: 2026-10-11.
+Last updated: 2026-10-30.
 
 ## Start Here
 
@@ -10,16 +10,25 @@ and hardware status; distinguish user-reported hardware checks from local tests.
 
 ## Current Repository And Release
 
-- Branch `main`, latest recorded commit `ef66d11` (`Add repository Copilot
-  instructions`), following the `v0.5.8` release. The worktree was clean.
-- This handoff refresh also updates `PLAN.md` and the signed-update status in
-  `README.md`; these documentation changes are currently uncommitted.
-- The current application/manager release is **0.5.8**. Both the Pi 2 and Pi 3
-  were updated to 0.5.8 through the central manager and reported that version.
-- The manager UI, device-side key-revocation UI, and firmware-version alignment
-  are committed and pushed. No newer full SD-card image build is recorded for
-  this release; signed bundles update the Python application, not base-image
-  files or the OS.
+- Branch `main`, latest implementation commit `10b6de8` (`Bound carousel resource
+  use and harden renderer recovery`), committed and pushed. Persistent-renderer
+  work was introduced in `9df7105`.
+- The latest published release and version metadata are **0.5.11**, tagged
+  `v0.5.11`, with a signed application bundle, full release image and checksums.
+  The persistent-renderer changes are newer than that release; do not describe
+  them as released or release them before hardware acceptance.
+- Both Pis run the installed application under
+  `/var/lib/web-display-app/current`, pointing to the `versions/0.5.11` package.
+  Development patches were applied directly to that active package, not the
+  factory Python package. They are not signed update installations.
+- Pi 2 has the final renderer stabilization patch from `10b6de8`; Pi 3 has the
+  earlier persistent-renderer/cold-start recovery code, not that stabilization
+  patch. Do not compare the two as identical software or workloads.
+- Release 0.5.11 includes Plex bitrate fixes, expiring/dismissible notifications
+  and manager "Open admin page" login through short-lived single-use links.
+  Manager enrollment still stores an API key, not an administrator password.
+  HDMI audio permissions require the updated service unit/base image; a signed
+  application bundle does not update systemd units, root helpers or the OS.
 
 ## Milestone Status
 
@@ -46,16 +55,32 @@ and hardware status; distinguish user-reported hardware checks from local tests.
 
 ## Active Work
 
-Two tracked todos remain `in_progress`:
+Two tracked todos remain `in_progress`; carousel reliability is the immediate
+priority:
 
+- `verify-persistent-scenes`: Pi 2 no longer shows the earlier kiosk crashes or
+  browser-control timeout storm in the latest long observation, but repeatedly
+  skips the dashboard after a 30-second startup timeout. Hardware acceptance
+  remains incomplete; see the current carousel findings below.
 - `m2-pi2-wifi-dropout`: Pi 2 previously stopped finding networks (`ssid-not-found`
   and empty scans); a user-approved reboot restored scanning and connection to
   the configured network. A later short observation showed a connected interface and clean
   gateway pings, but does not establish long-term reliability.
-- `m2-pi3-wifi-client-reliability`: Pi 3 previously lost association during a
-  WPA handshake and NetworkManager reported that no interactive secrets agent
-  was available. The saved profile later reconnected and a short observation
-  was clean; long-term and cold-boot reliability remain unproven.
+
+Pending work:
+
+- `admin-ui-resume-session-resource-spike`: leaving the admin UI open and then
+  suspending/resuming the computer can produce repeated fetch-error notifications
+  instead of returning to login after session expiry, driving CPU/memory growth
+  and making the tab unresponsive. Tracking only; not fixed by toast expiry.
+  Investigate polling/effect lifecycle, cancellation, overlapping requests and
+  expired-session handling after the carousel issue.
+- `pi3-builtin-ap-phones`: built-in secured AP authentication remains unsupported
+  with phones; use the tested compatible USB adapter, never an open AP.
+- `verify-manager-address-fallback`: exercise an actual interface outage.
+- `phase-b-ab-images`: blocked/deferred, not implemented.
+
+### Historical Wi-Fi Observations
 
 Update 2026-10-12 (SSH now works on both Pis, ~26 h uptime, 60 pings each,
 Wi-Fi only): with Wi-Fi power saving off (`wifi.powersave = 2` in
@@ -67,20 +92,96 @@ in 26 h between two similarly strong APs of the same network (reason=4 locally g
 spikes to ~500 ms. Decision: keep roaming and do not pin a BSSID. If stalls
 become visible, move the displays to a dedicated Wi-Fi network. Note `iw` is in
 `/usr/sbin`, which is not on `webdebug`'s PATH. Still not a full observation
-window, so keep both todos open until a longer clean run or a recurrence.
+window; it is not evidence of present-day Wi-Fi reliability.
 
 The previous short checks were on 2026-10-10. Both Pis' Ethernet ports were
 re-enabled for manager multi-address testing, so Ethernet reachability alone is
 not evidence that Wi-Fi is healthy. Confirm the present device/link state before
 starting an observation; for Wi-Fi-only testing, disable the Ethernet switch
 ports and verify the Wi-Fi address directly. Capture relevant journal output
-before rebooting because the journal is not persistent. Do not close either
-todo without adequate observation or a documented recurrence/fix.
+before rebooting: on the latest Pi 2 check only the current boot was available,
+despite a persistent-journal directory existing. Do not assume previous-boot
+logs survive or close reliability work based on Ethernet reachability alone.
 
 Other useful but not yet hardware-verified cases: manager address fallback when
 one interface is actually down; the old-firmware warning on a real device; and
 the device-side key-revocation card on Pi 2. These are not blockers for the
 completed manager milestone.
+
+## Current Carousel Findings (2026-10-30)
+
+### Implementation And Deployment
+
+- Chromium is controlled through inherited DevTools pipes, not a debugging TCP
+  listener. Keep at most two website tabs with LRU eviction and preserve their
+  page state. Hidden website and local dashboard tabs are frozen and thawed
+  before readiness checks. Dashboards update in place rather than navigate.
+- Reuse mpv for consecutive videos, but stop it only after browser handover
+  makes the next scene visible. Retaining idle mpv grew its memory across loops.
+  Use one decoder, a 32 MiB forward/4 MiB back-cache limit and a 15-second
+  read-ahead target. Consecutive-video transitions are not guaranteed gapless.
+- The stabilization patch bounds pipe writes, checks active browser scenes every
+  five seconds and contains the second process-wait timeout after SIGKILL.
+  A process that has not exited remains tracked; recovery backs off for
+  60 seconds rather than launching overlapping replacements.
+- Preserve configuration and update state when applying a targeted development
+  patch. Back up the active installed modules first. The broad device-push script
+  replaces the factory package and clears installed versions/state, so it is
+  not interchangeable with these targeted patches.
+- Initial two-cycle Pi 2 observation followed configured scene order without
+  failures or restarts, retained one Chromium process, and had no idle mpv in
+  browser scenes. Minimum available RAM was 433 MiB and peak mpv PSS 86.5 MiB.
+  That short run did not establish endurance.
+
+### Endurance And Latest Vitals
+
+The original overnight run after `9df7105` failed on Pi 2: 965 scene failures,
+947 browser-control timeouts and two automatic kiosk restarts were recorded.
+The fatal path was an uncaught final `process.wait(timeout=5)` during browser
+shutdown. No kernel OOM kill was recorded. Pi 3 had one scene failure and no
+restarts in that comparison; workloads differed.
+
+The first overnight attempt after stabilization was interrupted by unplugged
+power at an unknown time, so it is inconclusive, not evidence of a kiosk crash.
+Power was restored on 2026-10-29 morning. A fresh baseline at 07:40 UTC had about
+four minutes of uptime. Pre-NTP timestamps in the current boot must not be
+mistaken for overnight runtime; previous-boot logs were unavailable.
+
+| Latest snapshot (UTC) | Pi 2, Oct 29 21:55 | Pi 3, Oct 30 09:31 |
+| --- | --- | --- |
+| Uptime | 14.3 hours | About 9.1 days |
+| Sampled system CPU | 3.2% | 12.7% |
+| Available RAM | 385 MiB | 273 MiB |
+| Swap used | 277 MiB | 149 MiB |
+| Temperature | 50-52 C | 64-66 C |
+| Service automatic restarts | 0 | 0 |
+| Throttling | None | Historical frequency cap only |
+
+These are different scenes/software and short CPU samples, not controlled
+performance comparisons. Pi 2 swap grew from zero at boot, but that alone does
+not prove a leak. Its post-restoration logs had no browser-control timeouts,
+tracebacks, OOM kills or undervoltage events at the evening check.
+
+**Remaining blocker:** Pi 2 logged 128 dashboard startup failures by Oct 29
+21:55, plus one Plex retry. Another 182 dashboard retries occurred between that
+snapshot and Oct 30 09:31. The recorded error is "Scene did not start within
+30 seconds." Other scene kinds continue playing, but the dashboard is skipped;
+zero service restarts must not be mistaken for correct carousel operation.
+The cause has not yet been established. Trace the local dashboard revision/ready
+acknowledgment and freeze/thaw lifecycle in `browser.py`, `scene_player.py` and
+`ui/src/SceneScreen.tsx`; do not merely increase timeouts or disable tab retention.
+
+Pi 2's fresh-boot 720p playback also showed rapidly increasing output-frame
+drops despite `v4l2m2m` and zero decoder drops; smooth playback remains unproven.
+Its evening mpv snapshot raced with transitions and could not assess playback.
+Pi 3's latest 640x352 hardware-decoded sample had zero output/decoder drops and
+no current scene failures. Do not infer visual acceptance from decoder counters.
+
+Next: fix dashboard startup/retry behavior, then run a comparable endurance
+observation with scene failure counts, order, memory/swap and playback metrics.
+The admin UI suspend/resume issue follows. No future sampling job is scheduled.
+Keep raw vitals/logs in session artifacts rather than committing LAN details,
+private configuration, Plex tokens or runtime capability URLs.
 
 ## Device And Network Notes
 
@@ -119,9 +220,12 @@ not automated tests.
   about 88% CPU and played well under real time with hundreds of dropped
   frames; software decode was no better. `--vo=xv` is unsupported, `--vo=drm`
   crawled, and `--vo=gpu` (DRM or X11/EGL) dropped over half the frames.
-- Conclusion: on Pi 2 keep video slides in Chromium at about 480p or lower and
-  load one live video at a time. A Plex token is a secret; keep it in private device config only.
-- `mpv` was installed by hand on the test Pi 2 and is not part of the image.
+- Historical fbdev conclusion: Chromium at about 480p or lower was preferred.
+  The accelerated-X retests below supersede that recommendation; the current
+  carousel uses native mpv. Load one live video at a time and keep Plex tokens
+  in private device configuration only.
+- At this historical test mpv was installed by hand; current image configuration
+  includes it.
 
 ## Development And Validation
 
@@ -134,7 +238,11 @@ PYTHONPATH=src python3 -m unittest discover -s tests
 python3 -m compileall -q src tests
 ```
 
-The last recorded run passed 164 Python tests and 14 UI tests. Building the UI
+The final renderer-stabilization regression passed **257 Python tests**, including
+real desktop Chromium retention and local-tab freeze/thaw coverage. The most
+recent recorded UI suite passed **33 tests**, before the Python-only stabilization
+changes. Desktop/file-fixture browser checks do not replace network/hardware
+acceptance. Building the UI
 updates both committed bundles: `src/webdisplay/static/` and
 `src/webdisplay_manager/static/`. CI checks bundle freshness.
 
