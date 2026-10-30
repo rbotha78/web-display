@@ -33,6 +33,10 @@ LOG = logging.getLogger(__name__)
 STALL_TIMEOUT = 30
 
 
+class RendererStopError(OSError):
+    pass
+
+
 def reachable(url: str) -> bool:
     if not url:
         return False
@@ -60,7 +64,11 @@ def stop_process(process: subprocess.Popen[bytes] | None) -> None:
         os.killpg(process.pid, signal.SIGKILL)
     except ProcessLookupError:
         pass
-    process.wait(timeout=5)
+    try:
+        process.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        # A task stuck in kernel I/O can remain alive even after SIGKILL.
+        raise RendererStopError("Renderer has not exited after SIGKILL") from None
 
 
 class SceneServer:
@@ -168,6 +176,8 @@ class SceneRenderer:
         self.error = ""
         self.failures: dict[str, dict[str, object]] = {}
         self.browser_failed = False
+        self.renderer_retry_at = 0.0
+        self.browser_check_at = 0.0
         self._publish_status()
 
     def failure(self, reason: str | None = None) -> None:
@@ -192,13 +202,32 @@ class SceneRenderer:
         )
 
     def start(self, scene: Scene) -> None:
+        try:
+            self._start(scene)
+        except (RendererStopError, BrowserError) as error:
+            if isinstance(error, RendererStopError):
+                self.renderer_retry_at = time.monotonic() + RETRY_COOLDOWN
+            self.scene = scene
+            self.activated = False
+            self.preparation_failed = True
+            self.error = "Renderer recovery is still in progress."
+            LOG.error("Scene %s could not recover its renderer: %s", scene["id"], error)
+            self._publish_status()
+
+    def _start(self, scene: Scene) -> None:
         self._cancel_pending()
+        if time.monotonic() < self.renderer_retry_at:
+            raise BrowserError("Renderer recovery is cooling down")
         self.recovery_retry_at = 0.0
         if self.browser_failed or (
             self.browser.process is not None and self.browser.process.poll() is not None
         ):
-            self.browser.close()
+            try:
+                self.browser.close()
+            finally:
+                self.renderer_retry_at = time.monotonic() + RETRY_COOLDOWN
             self.browser_failed = False
+            raise BrowserError("Renderer recovery is cooling down")
         if self.process is not None:
             if self.process.poll() is not None:
                 stop_process(self.process)
@@ -227,6 +256,7 @@ class SceneRenderer:
         self.preparation_failed = False
         self.recovering = False
         self.error = ""
+        self.browser_check_at = 0.0
         try:
             if scene["kind"] == "web":
                 self.pending_tab = self.browser.prepare(scene["id"], scene["url"])
@@ -291,6 +321,8 @@ class SceneRenderer:
         self.process = subprocess.Popen([
             self.mpv, "--no-config", "--load-scripts=no", "--ytdl=no",
             "--autoload-files=no",
+            "--demuxer-max-bytes=32MiB", "--demuxer-max-back-bytes=4MiB",
+            "--cache-secs=15",
             "--demuxer-lavf-o=protocol_whitelist=[http,https,tcp,tls,crypto,data]",
             "--no-terminal", f"--wid={self.windows.video_id()}",
             "--vo=gpu", "--gpu-context=x11egl", "--hwdec=v4l2m2m",
@@ -368,6 +400,7 @@ class SceneRenderer:
             self.windows.show_browser(self.browser.process.pid)
             if self.process is not None and self.ipc is not None:
                 self._command(["stop"])
+            self._stop_video()
         if self.active_scene:
             self._stop_plex(self.active_scene)
         self.active_scene = self.scene
@@ -465,11 +498,16 @@ class SceneRenderer:
             if self.pending_tab is None:
                 return "failed"
             try:
+                if self.browser.process is None or self.browser.process.poll() is not None:
+                    raise BrowserError("Browser exited unexpectedly")
+                if self.activated and time.monotonic() < self.browser_check_at:
+                    return "playing"
                 if not self.browser.ready(self.pending_tab):
                     return "starting"
                 if self.scene["kind"] == "dashboard" and not self.server.ready.is_set():
                     return "starting"
                 self._activate()
+                self.browser_check_at = time.monotonic() + 5
             except (OSError, ValueError, BrowserError) as error:
                 self.error = "Could not load or display the website."
                 self.browser_failed = isinstance(error, BrowserError)
@@ -539,37 +577,66 @@ class SceneRenderer:
         self.buffer = b""
         self.ipc_path.unlink(missing_ok=True)
 
-    def stop(self) -> None:
-        self._cancel_pending()
-        stop_process(self.process)
-        self.process = None
+    def _stop_video(self) -> None:
+        try:
+            stop_process(self.process)
+        except RendererStopError as error:
+            LOG.error("Could not stop video renderer: %s", error)
+            self.renderer_retry_at = time.monotonic() + RETRY_COOLDOWN
+        else:
+            self.process = None
         self._disconnect_ipc()
+
+    def stop(self) -> None:
+        try:
+            self._cancel_pending()
+        except RendererStopError as error:
+            LOG.error("Could not stop video resolver: %s", error)
+            self.renderer_retry_at = time.monotonic() + RETRY_COOLDOWN
+        self._stop_video()
         if self.active_scene is not None:
             self._stop_plex(self.active_scene)
         self.active_scene = self.scene = None
         self.recovering = False
-        self.browser.close()
-        self.browser_failed = False
-        self.windows.close()
+        try:
+            self.browser.close()
+        except BrowserError as error:
+            LOG.error("Could not stop browser renderer: %s", error)
+            self.browser_failed = True
+            self.renderer_retry_at = time.monotonic() + RETRY_COOLDOWN
+        else:
+            self.browser_failed = False
+        if self.process is None:
+            self.windows.close()
 
     def recovery(self) -> None:
         if self.recovering and self.browser.process is not None and self.browser.process.poll() is None:
+            if time.monotonic() < self.browser_check_at:
+                return
             try:
                 if self.browser.local is not None and self.browser.ready(self.browser.local):
                     self.browser.activate(self.browser.local)
                     self.windows.show_browser(self.browser.process.pid)
+                    self.browser_check_at = time.monotonic() + 5
                 return
             except (BrowserError, OSError):
                 LOG.error("Carousel recovery browser failed")
+                self.recovering = False
+                self.browser_failed = True
         if time.monotonic() < self.recovery_retry_at:
             return
+        if time.monotonic() < self.renderer_retry_at:
+            return
         self.stop()
+        if time.monotonic() < self.renderer_retry_at:
+            return
         self.server.show(None)
         self.recovering = True
         self.recovery_retry_at = time.monotonic() + RETRY_COOLDOWN
         try:
             self.pending_tab = self.browser.prepare(None, self.server.url)
-        except (OSError, subprocess.SubprocessError, BrowserError):
+        except (OSError, subprocess.SubprocessError, BrowserError) as error:
+            self.browser_failed = isinstance(error, BrowserError)
             LOG.error("Could not launch carousel recovery screen")
 
     def close(self) -> None:

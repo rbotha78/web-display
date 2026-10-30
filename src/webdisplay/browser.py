@@ -5,8 +5,10 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import select
 import subprocess
 import threading
+import time
 from collections import OrderedDict
 from dataclasses import dataclass
 from typing import Callable
@@ -20,6 +22,7 @@ class DevTools:
     def __init__(self, read_fd: int, write_fd: int):
         self.read_fd = read_fd
         self.write_fd = write_fd
+        os.set_blocking(write_fd, False)
         self.condition = threading.Condition()
         self.sequence = 0
         self.pending: dict[int, dict[str, object] | None] = {}
@@ -65,12 +68,20 @@ class DevTools:
                 message["sessionId"] = session
             self.pending[identifier] = None
             try:
-                data = json.dumps(message).encode() + b"\0"
+                data = memoryview(json.dumps(message).encode() + b"\0")
+                deadline = time.monotonic() + timeout
                 while data:
-                    written = os.write(self.write_fd, data)
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0 or not select.select([], [self.write_fd], [], remaining)[1]:
+                        raise BrowserError(f"Browser control timed out: {method}")
+                    try:
+                        written = os.write(self.write_fd, data)
+                    except BlockingIOError:
+                        continue
                     data = data[written:]
                 if not self.condition.wait_for(
-                    lambda: self.pending[identifier] is not None or self.closed, timeout,
+                    lambda: self.pending[identifier] is not None or self.closed,
+                    max(0, deadline - time.monotonic()),
                 ):
                     raise BrowserError(f"Browser control timed out: {method}")
                 reply = self.pending[identifier]
@@ -80,7 +91,13 @@ class DevTools:
                 if not isinstance(result, dict):
                     raise BrowserError("Invalid browser control reply")
                 return result
+            except BrowserError:
+                self.closed = True
+                self.condition.notify_all()
+                raise
             except OSError:
+                self.closed = True
+                self.condition.notify_all()
                 raise BrowserError("Browser control disconnected") from None
             finally:
                 del self.pending[identifier]
@@ -133,6 +150,8 @@ class PersistentBrowser:
         if self.process is not None:
             if self.process.poll() is not None:
                 raise BrowserError("Browser exited unexpectedly")
+            if self.control is None:
+                raise BrowserError("Browser shutdown is still in progress")
             return
         chrome_read, parent_write = os.pipe()
         parent_read, chrome_write = os.pipe()
@@ -181,6 +200,7 @@ class PersistentBrowser:
         if key is None:
             if self.local is None:
                 raise BrowserError("Local browser tab is missing")
+            self._call("Page.setWebLifecycleState", {"state": "active"}, self.local)
             return self.local
         cached = self.tabs.get(key)
         if cached and cached.url == url:
@@ -259,18 +279,22 @@ class PersistentBrowser:
         self.freeze(except_tab=tab)
 
     def freeze(self, except_tab: Tab | None = None) -> None:
-        for tab in self.tabs.values():
-            if tab is not except_tab:
+        for tab in [self.local, *self.tabs.values()]:
+            if tab is not None and tab is not except_tab:
                 self._call("Page.setWebLifecycleState", {"state": "frozen"}, tab)
 
     def close(self) -> None:
-        from .scene_player import stop_process
+        from .scene_player import RendererStopError, stop_process
 
-        stop_process(self.process)
+        try:
+            stop_process(self.process)
+        except RendererStopError:
+            raise BrowserError("Browser has not exited after SIGKILL") from None
+        finally:
+            if self.control:
+                self.control.close()
+                self.control = None
         self.process = None
-        if self.control:
-            self.control.close()
-            self.control = None
         self.tabs.clear()
         self.local = self.active = None
 

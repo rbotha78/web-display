@@ -3,8 +3,9 @@ import os
 import subprocess
 import sys
 import threading
+import time
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from webdisplay.browser import BrowserError, DevTools, PersistentBrowser, Tab
 
@@ -75,6 +76,28 @@ class DevToolsTests(unittest.TestCase):
             if process.poll() is None:
                 process.kill()
                 process.wait(timeout=5)
+            control.close()
+
+    def test_full_command_pipe_respects_timeout_and_cannot_be_reused(self):
+        read_fd, reply_fd = os.pipe()
+        command_fd, write_fd = os.pipe()
+        control = DevTools(read_fd, write_fd)
+        try:
+            while True:
+                try:
+                    os.write(write_fd, b"x" * 4096)
+                except BlockingIOError:
+                    break
+            started = time.monotonic()
+            with self.assertRaisesRegex(BrowserError, "timed out: Page.test"):
+                control.call("Page.test", timeout=0.05)
+            self.assertLess(time.monotonic() - started, 1)
+            self.assertEqual(control.pending, {})
+            with self.assertRaisesRegex(BrowserError, "disconnected"):
+                control.call("Page.test")
+        finally:
+            os.close(command_fd)
+            os.close(reply_fd)
             control.close()
 
 
@@ -149,6 +172,40 @@ class PersistentBrowserTests(unittest.TestCase):
         self.browser.prepare("a", "https://a.example")
         self.browser.control.call.assert_any_call("Page.setWebLifecycleState", {"state": "active"}, a.session)
         self.assertIs(self.browser.active, b)
+
+    def test_hidden_dashboard_freezes_and_thaws_before_readiness_check(self):
+        tab = self.browser.prepare("a", "https://a.example")
+        self.browser.activate(tab)
+        self.browser.control.call.assert_any_call(
+            "Page.setWebLifecycleState", {"state": "frozen"}, self.browser.local.session,
+        )
+        self.browser.control.call.reset_mock()
+        self.browser.prepare(None, self.browser.local_url)
+        self.browser.control.call.assert_any_call(
+            "Page.setWebLifecycleState", {"state": "active"}, self.browser.local.session,
+        )
+        self.browser.freeze()
+        self.browser.control.call.assert_any_call(
+            "Page.setWebLifecycleState", {"state": "frozen"}, self.browser.local.session,
+        )
+
+    def test_failed_shutdown_closes_control_but_keeps_process_until_reaped(self):
+        from webdisplay.scene_player import RendererStopError
+
+        process, control = self.browser.process, self.browser.control
+        with patch("webdisplay.scene_player.stop_process", side_effect=RendererStopError):
+            with self.assertRaisesRegex(BrowserError, "not exited"):
+                self.browser.close()
+        control.close.assert_called_once()
+        self.assertIs(self.browser.process, process)
+        self.assertIsNone(self.browser.control)
+        with self.assertRaisesRegex(BrowserError, "shutdown"):
+            self.browser.ensure()
+        self.browser.launch.assert_not_called()
+        with patch("webdisplay.scene_player.stop_process"):
+            self.browser.close()
+        self.assertIsNone(self.browser.process)
+        self.assertIsNone(self.browser.local)
 
     def test_navigation_changes_reload_only_changed_tab_and_popups_are_closed(self):
         a = self.browser.prepare("a", "https://a.example")

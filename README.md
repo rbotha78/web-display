@@ -200,19 +200,24 @@ and manager-side playlist editing remain deferred.
 
 ### Carousel transitions and retained websites
 
-Carousel mode reuses one Chromium process and one mpv process rather than
-restarting them at every scene boundary. Dashboards update in place. Websites
+Carousel mode reuses one Chromium process and reuses mpv for consecutive videos
+rather than restarting renderers at every scene boundary. Dashboards update in place. Websites
 use normal top-level navigation, not iframes, so sites that block embedding
 remain supported. Chromium control uses private inherited pipes, with no
 remote-debugging network port.
 Cold browser startup has a separate 20-second control allowance; failed browser
 initialisation or control is discarded before preparing another scene, rather
-than retaining a broken tab cache. Playback status includes the active and
+than retaining a broken tab cache. Renderer recovery waits 60 seconds before
+restarting to avoid repeated cold starts under memory pressure. A process that
+has not exited after termination is kept tracked; no replacement is started
+until it has been reaped. Playback status includes the active and
 preparing scene IDs so startup skips can be distinguished from playlist order.
 
 At most two website tabs are retained, in addition to the local dashboard and
 recovery tab. Revisiting a retained tab preserves its page state without
-reloading. Hidden website tabs are frozen; they resume when prepared for display.
+reloading. Hidden website and dashboard tabs are frozen; they resume when prepared
+for display. Active browser scenes are checked every five seconds rather than
+continuously polling Chromium.
 When a third website is needed, the least-recently-used non-current website is
 closed and must reload on its next visit. Saving a playlist, restarting the kiosk,
 or display-output recovery resets the cache. Retention is not an automatic refresh:
@@ -222,9 +227,12 @@ The current scene remains visible while the next website loads or its video URL
 is resolved. The next scene's duration starts only after handover. Video uses one
 embedded output window, waits for decoded output before being raised, and enables
 audio only at handover. Leaving video pauses/mutes it during preparation and
-releases playback after the browser is visible. Consecutive videos reuse mpv via
+releases playback and exits mpv after the browser is visible, returning its retained
+decoder and allocator memory to the system. Consecutive videos reuse mpv via
 `loadfile`, but still need stream buffering and decoder reinitialisation: these
 transitions are not guaranteed gapless and do not preload a second video decoder.
+Video buffering is limited to 32 MiB ahead and 4 MiB behind, with a 15-second
+read-ahead target, instead of mpv's larger desktop defaults.
 Animated fades and crossfades are not implemented.
 
 This transition path has automated coverage, including real desktop Chromium tab

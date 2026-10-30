@@ -10,7 +10,7 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 from webdisplay.carousel import validate_playlist
-from webdisplay.scene_player import SceneRenderer, SceneServer, stop_process
+from webdisplay.scene_player import RendererStopError, SceneRenderer, SceneServer, stop_process
 from webdisplay.browser import BrowserError
 
 
@@ -89,7 +89,8 @@ class RendererTests(unittest.TestCase):
              patch("webdisplay.scene_player.SceneWindows"):
             self.renderer = SceneRenderer(self.launch, Path(self.directory.name))
         self.browser = browser.return_value
-        self.browser.process = self.process
+        self.browser.process = Mock(pid=12346)
+        self.browser.process.poll.return_value = None
         self.browser.ready.return_value = True
         stop = patch("webdisplay.scene_player.stop_process")
         self.stop_process = stop.start()
@@ -101,7 +102,7 @@ class RendererTests(unittest.TestCase):
         self.assertEqual(self.renderer.state(), "starting")
         self.renderer.server.ready.set()
         self.assertEqual(self.renderer.state(), "playing")
-        self.process.poll.return_value = 0
+        self.browser.process.poll.return_value = 0
         self.browser.ready.side_effect = BrowserError("exited")
         self.assertEqual(self.renderer.state(), "failed")
 
@@ -295,6 +296,74 @@ class RendererTests(unittest.TestCase):
             stop_process(process)
         self.assertEqual(kill.call_count, 2)
 
+    def test_shutdown_reports_process_still_alive_after_kill(self):
+        process = Mock(pid=12345)
+        process.wait.side_effect = subprocess.TimeoutExpired("renderer", 5)
+        with patch("webdisplay.scene_player.os.killpg") as kill:
+            with self.assertRaisesRegex(RendererStopError, "not exited"):
+                stop_process(process)
+        self.assertEqual(kill.call_count, 2)
+
+    def test_failed_browser_shutdown_is_contained_and_backs_off_without_replacement(self):
+        self.renderer.browser_failed = True
+        self.browser.close.side_effect = BrowserError("Browser has not exited after SIGKILL")
+        with patch("webdisplay.scene_player.time.monotonic", return_value=100):
+            self.renderer.start(make_scene("web"))
+            self.assertEqual(self.renderer.state(), "failed")
+            self.renderer.start(make_scene("web"))
+            self.renderer.recovery()
+        self.browser.close.assert_called_once()
+        self.browser.prepare.assert_not_called()
+        self.assertTrue(self.renderer.browser_failed)
+        self.assertEqual(self.browser.process.pid, 12346)
+        self.browser.close.side_effect = None
+
+    def test_failed_video_shutdown_retains_process_and_prevents_replacement(self):
+        self.renderer.process = self.process
+        def stop(process):
+            if process is self.process:
+                raise RendererStopError("Renderer has not exited after SIGKILL")
+
+        self.stop_process.side_effect = stop
+        self.renderer.stop()
+        self.assertIs(self.renderer.process, self.process)
+        with patch("webdisplay.scene_player.subprocess.Popen") as spawn:
+            self.renderer.start(make_scene("video"))
+        self.assertEqual(self.renderer.state(), "failed")
+        spawn.assert_not_called()
+        self.stop_process.side_effect = None
+
+    def test_recovery_does_not_prepare_browser_after_shutdown_failure(self):
+        self.browser.close.side_effect = BrowserError("Browser has not exited after SIGKILL")
+        self.renderer.recovery()
+        self.browser.prepare.assert_not_called()
+        self.assertTrue(self.renderer.browser_failed)
+        self.browser.close.side_effect = None
+
+    def test_recovery_control_failure_is_not_polled_repeatedly_during_cooldown(self):
+        self.renderer.recovering = True
+        self.renderer.recovery_retry_at = 200
+        self.browser.ready.side_effect = BrowserError("Browser control disconnected")
+        with patch("webdisplay.scene_player.time.monotonic", return_value=100):
+            self.renderer.recovery()
+            self.renderer.recovery()
+        self.browser.ready.assert_called_once()
+        self.assertTrue(self.renderer.browser_failed)
+        self.assertFalse(self.renderer.recovering)
+
+    def test_active_browser_checks_are_bounded_but_exit_is_detected_immediately(self):
+        with patch("webdisplay.scene_player.time.monotonic", return_value=100):
+            self.renderer.start(make_scene("web"))
+            self.assertEqual(self.renderer.state(), "playing")
+            for _ in range(10):
+                self.assertEqual(self.renderer.state(), "playing")
+            self.browser.ready.assert_called_once()
+        with patch("webdisplay.scene_player.time.monotonic", return_value=106):
+            self.assertEqual(self.renderer.state(), "playing")
+        self.assertEqual(self.browser.ready.call_count, 2)
+        self.browser.process.poll.return_value = 1
+        self.assertEqual(self.renderer.state(), "failed")
+
     def test_video_reuses_player_and_applies_next_scene_settings(self):
         self.start_video()
         self.renderer.ipc = Mock()
@@ -344,7 +413,9 @@ class RendererTests(unittest.TestCase):
         self.browser.ready.return_value = True
         self.assertEqual(self.renderer.state(), "playing")
         self.renderer._command.assert_any_call(["stop"])
-        self.assertFalse(any(c.args == (self.process,) for c in self.stop_process.call_args_list))
+        self.stop_process.assert_any_call(self.process)
+        self.assertIsNone(self.renderer.process)
+        self.assertIsNone(self.renderer.ipc)
 
     def test_failed_preparation_cannot_activate_the_previous_video_as_the_new_scene(self):
         self.start_video()
@@ -376,14 +447,18 @@ class RendererTests(unittest.TestCase):
         ipc.recv.return_value = b'{"request_id":1,"error":"property unavailable"}\n'
         self.assertIsNone(self.renderer._command(["get_property", "video-out-params"]))
 
-    def test_browser_control_failure_restarts_browser_before_next_scene(self):
+    def test_browser_control_failure_restarts_browser_after_cooldown(self):
         self.browser.prepare.side_effect = BrowserError("Browser control disconnected")
         self.renderer.start(make_scene())
         self.assertEqual(self.renderer.state(), "failed")
         self.assertTrue(self.renderer.browser_failed)
         self.browser.prepare.side_effect = None
-        self.renderer.start(make_scene("web"))
+        with patch("webdisplay.scene_player.time.monotonic", return_value=100):
+            self.renderer.start(make_scene("web"))
         self.browser.close.assert_called_once()
+        self.assertEqual(self.renderer.state(), "failed")
+        with patch("webdisplay.scene_player.time.monotonic", return_value=161):
+            self.renderer.start(make_scene("web"))
         self.browser.ready.return_value = True
         self.assertEqual(self.renderer.state(), "playing")
         report = json.loads((Path(self.directory.name) / "carousel-status.json").read_text())
