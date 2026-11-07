@@ -1,17 +1,73 @@
 import { useEffect, useState } from "react";
 import type { Scene } from "./api";
+import { WeatherDisplay } from "./components/WeatherDisplay";
 
 interface DisplayScene {
-  kind: "dashboard" | "recovery";
+  kind: "dashboard" | "train" | "weather" | "recovery";
   revision: string;
   layout: Scene["layout"];
   text: string;
+  scene_id: string;
+  title: string;
+  station_crs: string;
+  show_weather?: boolean;
+}
+
+interface TrainRow {
+  scheduled: string;
+  estimated: string;
+  destination: string;
+  platform: string;
+  operator: string;
+  cancelled: boolean;
+  status?: string;
+  state?: "cancelled" | "delayed" | "on-time" | "";
+}
+
+interface CallingPoint {
+  station: string;
+  scheduled: string;
+  estimated: string;
+  actual: string;
+  cancelled: boolean;
+}
+
+interface TrainBoard {
+  crs?: string;
+  station?: string;
+  generated_at?: string;
+  services_available?: boolean;
+  platform_available?: boolean;
+  updated_at?: number;
+  rows?: TrainRow[];
+  alerts?: string[];
+  details_available?: boolean;
+  details_error?: string;
+  next?: {
+    status: string;
+    delay_minutes: number | null;
+    calling_at?: CallingPoint[][];
+    previous_stops?: CallingPoint[][];
+    last_seen?: { station: string; actual: string } | null;
+  };
+  stale?: boolean;
+  error?: string;
+}
+
+function callingPointText(point: CallingPoint): string {
+  const time = point.cancelled ? "Cancelled" :
+    point.actual ? `actual ${point.actual}` : point.scheduled;
+  const expected = !point.cancelled && !point.actual && point.estimated &&
+    point.estimated !== "On time" ? `; expected ${point.estimated}` : "";
+  return `${point.station} (${time}${expected})`;
 }
 
 export function SceneScreen() {
   const [scene, setScene] = useState<DisplayScene | null>(null);
   const [now, setNow] = useState(() => new Date());
   const [error, setError] = useState("");
+  const [trainBoard, setTrainBoard] = useState<TrainBoard | null>(null);
+  const [trainError, setTrainError] = useState("");
 
   useEffect(() => {
     const controller = new AbortController();
@@ -43,23 +99,181 @@ export function SceneScreen() {
   }, []);
 
   useEffect(() => {
+    if (scene?.kind !== "train") {
+      setTrainBoard(null);
+      setTrainError("");
+      return;
+    }
+    const controller = new AbortController();
+    let timer: number | undefined;
+    setTrainBoard(null);
+    const poll = async () => {
+      try {
+        const response = await fetch(
+          `/api/train?scene_id=${encodeURIComponent(scene.scene_id)}`,
+          { signal: controller.signal },
+        );
+        if (!response.ok) throw new Error("Could not load departure information");
+        const value: TrainBoard = await response.json();
+        if (!controller.signal.aborted) {
+          setTrainBoard(value);
+          setTrainError("");
+        }
+      } catch (error) {
+        if (!controller.signal.aborted) {
+          setTrainError(error instanceof Error ? error.message : "Could not load departure information");
+        }
+      } finally {
+        if (!controller.signal.aborted) timer = window.setTimeout(poll, 15000);
+      }
+    };
+    void poll();
+    return () => {
+      controller.abort();
+      window.clearTimeout(timer);
+    };
+  }, [scene]);
+
+  useEffect(() => {
     if (!scene) return;
     const controller = new AbortController();
-    fetch(`/api/scene/ready?revision=${encodeURIComponent(scene.revision)}`, { signal: controller.signal })
-      .then((response) => { if (!response.ok) throw new Error("Could not start the scene timer"); })
-      .catch((error: unknown) => {
+    let timer: number | undefined;
+    const acknowledge = async () => {
+      const request = new AbortController();
+      const abort = () => request.abort();
+      controller.signal.addEventListener("abort", abort, { once: true });
+      const timeout = window.setTimeout(abort, 2000);
+      try {
+        const response = await fetch(
+          `/api/scene/ready?revision=${encodeURIComponent(scene.revision)}`,
+          { signal: request.signal },
+        );
+        if (!response.ok) throw new Error("Could not start the scene timer");
+        if (!controller.signal.aborted) setError("");
+      } catch (error: unknown) {
         if (!controller.signal.aborted) {
-          setError(error instanceof Error ? error.message : "Could not start the scene timer");
+          if (!request.signal.aborted) {
+            setError(error instanceof Error ? error.message : "Could not start the scene timer");
+          }
+          timer = window.setTimeout(acknowledge, 1000);
         }
-      });
-    return () => controller.abort();
+      } finally {
+        window.clearTimeout(timeout);
+        controller.signal.removeEventListener("abort", abort);
+      }
+    };
+    void acknowledge();
+    return () => {
+      controller.abort();
+      window.clearTimeout(timer);
+    };
   }, [scene]);
 
   const size = (scene?.text.length ?? 0) > 500 ? "small" : (scene?.text.length ?? 0) > 200 ? "medium" : "large";
   return (
-    <main className={`scene-screen ${scene?.layout ?? ""}`}>
+    <main className={`scene-screen ${scene?.layout ?? ""}${scene?.show_weather ? " weather-dashboard" : ""}`}>
       {error ? <p role="alert">{error}</p> : !scene ? <p>Loading scene...</p> :
-        scene.kind === "recovery" ? (
+        scene.kind === "train" ? (
+          <section className="train-board">
+            <header>
+              <p className="train-eyebrow">Live departures</p>
+              <h1>{trainBoard?.station || scene.title || scene.station_crs}</h1>
+              {trainBoard?.generated_at && <p>Updated {trainBoard.generated_at}</p>}
+            </header>
+            {(trainBoard?.stale || trainError) && (
+              <p className="train-warning" role="status">
+                Data may be out of date{trainBoard?.error ? `: ${trainBoard.error}` : ""}
+              </p>
+            )}
+            {trainBoard && trainBoard.details_available === false && (
+              <p className="train-warning" role="status">
+                {trainBoard.details_error || "Detailed status is unavailable; showing the board estimate."}
+              </p>
+            )}
+            {trainError && !trainBoard && <p role="alert">{trainError}</p>}
+            {trainBoard?.error && !trainBoard.rows?.length && <p role="status">{trainBoard.error}</p>}
+            {trainBoard?.services_available === false && (
+              <p role="status">Services are currently unavailable at this station.</p>
+            )}
+            {trainBoard && trainBoard.services_available !== false &&
+              !trainBoard.rows?.length && !trainBoard.error && (
+                <p>No upcoming departures were returned.</p>
+              )}
+            {!!trainBoard?.rows?.length && (
+              <table>
+                <thead>
+                  <tr>
+                    <th>Time</th><th>Destination</th>
+                    {trainBoard.platform_available && <th>Platform</th>}
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {trainBoard.rows.map((row, index) => (
+                    <tr className={index === 0 ? "train-next" : ""} key={`${row.scheduled}-${index}`}>
+                      <td className={row.state === "on-time" ? "train-on-time" : ""}>{row.scheduled}</td>
+                      <td>
+                        {row.destination || "Destination unavailable"}
+                        {index === 0 && trainBoard.next && (
+                          <div className="train-calling">
+                            {trainBoard.next.previous_stops?.map((group, groupIndex) => (
+                              <p key={`previous-${groupIndex}`}>
+                                <strong>Previous stops: </strong>
+                                {group.map(callingPointText).join(", ")}
+                              </p>
+                            ))}
+                            {trainBoard.next.calling_at?.map((group, groupIndex) => (
+                              <p key={groupIndex}>
+                                <strong>Calling at: </strong>
+                                {group.map(callingPointText).join(", ")}
+                              </p>
+                            ))}
+                            {trainBoard.next.last_seen && (
+                              <p>
+                                <strong>Last reported at: </strong>
+                                {trainBoard.next.last_seen.station} at {trainBoard.next.last_seen.actual}
+                              </p>
+                            )}
+                          </div>
+                        )}
+                      </td>
+                      {trainBoard.platform_available && <td>{row.platform || "TBC"}</td>}
+                      <td className={row.state === "cancelled" || row.cancelled ? "train-cancelled" :
+                        row.state === "delayed" ? "train-delayed" : ""}>
+                        {row.status || (row.cancelled ? "Cancelled" : row.estimated || "Status unavailable")}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+            {!!trainBoard?.alerts?.length && (
+              <div className="train-alerts" aria-label="Station messages">
+                <strong>Station messages</strong>
+                {trainBoard.alerts.map((alert, index) => <p key={index}>{alert}</p>)}
+              </div>
+            )}
+            {trainBoard?.updated_at && (
+              <footer>Live data checked {new Date(trainBoard.updated_at * 1000).toLocaleTimeString()}</footer>
+            )}
+            <WeatherDisplay key={scene.revision} compact currentOnly />
+            <time className="train-current-time" dateTime={now.toISOString()}>
+              {now.toLocaleTimeString([], {
+                hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
+              })}
+            </time>
+          </section>
+        ) :
+        scene.kind === "weather" ? (
+          <>
+            <WeatherDisplay key={scene.revision} />
+            <time className="weather-current-time" dateTime={now.toISOString()}>
+              {now.toLocaleTimeString([], {
+                hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
+              })}
+            </time>
+          </>
+        ) : scene.kind === "recovery" ? (
           <div>
             <h1>No carousel scenes are currently available</h1>
             <p>Failed scenes will be retried automatically. Check the playlist in device administration.</p>
@@ -73,6 +287,7 @@ export function SceneScreen() {
               </div>
             )}
             {scene.layout !== "clock" && <p className={`scene-notice ${size}`}>{scene.text}</p>}
+            {scene.show_weather && <WeatherDisplay key={scene.revision} compact />}
           </>
         )}
     </main>

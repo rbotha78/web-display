@@ -169,6 +169,128 @@ body {
 .scene-notice.medium { font-size: 2vw; }
 .scene-notice.small { font-size: 1.3vw; }
 
+.train-board {
+  width: min(94vw, 1500px);
+  text-align: left;
+  padding-bottom: 6vh;
+}
+
+.train-current-time,
+.weather-current-time {
+  position: fixed;
+  bottom: 2vh;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 3vw;
+  font-variant-numeric: tabular-nums;
+}
+
+.weather-display {
+  width: 92vw;
+  font-size: 2vw;
+}
+
+.weather-display h2 { margin: 1vh 0; font-size: 4vw; }
+.weather-current { display: flex; justify-content: center; align-items: center; gap: 3vw; }
+.weather-current strong { font-size: 7vw; }
+.weather-measurements { font-size: 1.7vw; }
+.weather-forecast { display: grid; grid-template-columns: repeat(5, 1fr); gap: 1vw; }
+.weather-forecast > div { background: #253441; padding: 1vh 1vw; border-radius: .5vw; }
+.weather-forecast h3 { font-size: 1.8vw; }
+.weather-forecast p { font-size: 1.6vw; }
+.weather-display footer { color: #b7c8d6; font-size: 1.2vw; margin-top: 2vh; }
+.weather-dashboard { gap: 1vh; }
+.weather-dashboard .scene-clock time { font-size: 5vw; }
+.weather-dashboard .scene-clock p { font-size: 1.8vw; margin: .5vh; }
+.weather-dashboard .scene-notice { font-size: 1.8vw; max-height: 15vh; overflow: hidden; }
+.weather-widget h2 { font-size: 2.5vw; }
+.weather-widget .weather-current strong { font-size: 4vw; }
+.weather-summary { width: 100%; margin-top: 1vh; text-align: center; }
+.weather-summary h2 { font-size: 1.5vw; margin: .4vh 0; }
+.weather-summary .weather-current { gap: 1vw; font-size: 1.4vw; }
+.weather-summary .weather-current strong { font-size: 2vw; }
+.weather-summary .weather-measurements { font-size: 1.2vw; margin: .4vh 0; }
+.weather-summary footer { margin-top: .4vh; font-size: 1vw; }
+
+.train-board header {
+  margin-bottom: 2vh;
+  text-align: center;
+}
+
+.train-board h1 {
+  margin: 0;
+  font-size: 5vw;
+}
+
+.train-board header p,
+.train-board footer {
+  margin: .5vh 0;
+  color: #b7c8d6;
+  font-size: 1.4vw;
+}
+
+.train-board .train-eyebrow {
+  color: #ffd447;
+  font-size: 1.5vw;
+  font-weight: 700;
+  letter-spacing: .15em;
+  text-transform: uppercase;
+}
+
+.train-board table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 2.2vw;
+}
+
+.train-board th,
+.train-board td {
+  padding: 1.2vh 1vw;
+  border-bottom: 1px solid #53616b;
+  text-align: left;
+}
+
+.train-board th {
+  color: #ffd447;
+  font-size: 1.5vw;
+  text-transform: uppercase;
+}
+
+.train-board .train-next {
+  background: #253441;
+  font-weight: 700;
+}
+
+.train-cancelled { color: #ff5555; animation: train-cancellation-flash 1.5s infinite; }
+.train-delayed { color: #ffbf00; }
+.train-on-time { color: #54df83; }
+
+@keyframes train-cancellation-flash {
+  0%, 100% { opacity: 1; }
+  50% { opacity: .35; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .train-cancelled { animation: none; }
+}
+
+.train-calling {
+  font-size: 1.3vw;
+  font-weight: 400;
+  line-height: 1.4;
+  max-width: 48vw;
+}
+
+.train-calling p {
+  margin: .7vh 0;
+}
+
+.train-warning,
+.train-alerts {
+  color: #ffd447;
+  font-size: 1.5vw;
+}
+
 .card.narrow {
   max-width: 26rem;
   margin: 2rem auto;

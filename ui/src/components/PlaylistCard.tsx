@@ -100,7 +100,8 @@ export function PlaylistCard({ notify, fail }: Props) {
   function add() {
     const scene: Scene = {
       id: crypto.randomUUID(), kind, title: "", enabled: true,
-      duration: kind === "video" ? 300 : 60, url: "", layout: "clock-notice", text: "",
+      duration: kind === "video" || kind === "train" ? 300 : 60,
+      url: "", layout: "clock-notice", text: "", station_crs: "",
     };
     setPlaylist((current) => current && ({ ...current, scenes: [...current.scenes, scene] }));
   }
@@ -188,7 +189,8 @@ export function PlaylistCard({ notify, fail }: Props) {
                 </select>
               </label>
             )}
-            {scene.kind !== "dashboard" && !(scene.kind === "video" && scene.source === "plex") ? (
+            {(scene.kind === "web" || scene.kind === "video") &&
+            !(scene.kind === "video" && scene.source === "plex") ? (
               <label>
                 {scene.kind === "video" ? "Stream URL" : "Scene web page URL"}
                 <input type="url" required value={scene.url}
@@ -204,8 +206,25 @@ export function PlaylistCard({ notify, fail }: Props) {
                 {scene.plex_rating_key && <span className="muted">Selected from Plex: {scene.title}</span>}
                 {!plexConfigured && <span className="muted">Configure Plex above to browse media.</span>}
               </div>
+            ) : scene.kind === "train" ? (
+              <label>
+                Station CRS code
+                <input required maxLength={3} minLength={3} pattern="[A-Za-z]{3}"
+                  value={scene.station_crs ?? ""}
+                  placeholder="e.g. PAD"
+                  onChange={(event) => update(scene.id, {
+                    station_crs: event.target.value.toUpperCase(),
+                  })} />
+              </label>
+            ) : scene.kind === "weather" ? (
+              <p className="muted">Uses the city, country and API key in OpenWeather settings.</p>
             ) : (
               <>
+                <label className="check">
+                  <input type="checkbox" checked={scene.show_weather ?? false}
+                    onChange={(event) => update(scene.id, { show_weather: event.target.checked })} />
+                  Show weather widget
+                </label>
                 <label>
                   Dashboard layout
                   <select value={scene.layout}
@@ -278,6 +297,8 @@ export function PlaylistCard({ notify, fail }: Props) {
               <option value="web">Web page</option>
               <option value="dashboard">Widget dashboard</option>
               <option value="video">Streamed video</option>
+              <option value="train">Train departure board</option>
+              <option value="weather">Weather</option>
             </select>
           </label>
           <button type="button" disabled={(playlist?.scenes.length ?? 0) >= 30} onClick={add}>Add scene</button>

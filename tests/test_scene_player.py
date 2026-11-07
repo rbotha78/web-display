@@ -21,6 +21,24 @@ def make_scene(kind="dashboard", **changes):
 
 
 class SceneServerTests(unittest.TestCase):
+    def test_weather_scene_and_widget_expose_cached_weather(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "weather.json"
+            path.write_text(json.dumps({"location": "St Albans, GB", "temperature": 12}))
+            server = SceneServer(weather_data_path=path)
+            self.addCleanup(server.close)
+            server.show(make_scene(kind="weather"))
+            connection = http.client.HTTPConnection("127.0.0.1", server.server.server_port)
+            self.addCleanup(connection.close)
+            connection.request("GET", "/api/weather")
+            response = connection.getresponse()
+            self.assertEqual(response.status, 200)
+            self.assertEqual(json.loads(response.read())["temperature"], 12)
+            server.show(make_scene(show_weather=True))
+            connection.request("GET", "/api/scene")
+            response = connection.getresponse()
+            self.assertTrue(json.loads(response.read())["show_weather"])
+
     def test_only_display_data_is_exposed_and_ready_is_revision_bound(self):
         server = SceneServer()
         self.addCleanup(server.close)
@@ -77,6 +95,26 @@ class SceneServerTests(unittest.TestCase):
             )
             self.assertEqual(result.returncode, expected, result.stderr)
 
+    def test_train_data_endpoint_exposes_cached_display_data_only(self):
+        with tempfile.TemporaryDirectory() as directory:
+            data_path = Path(directory) / "train-board.json"
+            data_path.write_text(json.dumps({
+                "station-1": {"station": "Paddington", "rows": [{"scheduled": "10:00"}]},
+            }))
+            server = SceneServer(data_path)
+            self.addCleanup(server.close)
+            connection = http.client.HTTPConnection("127.0.0.1", server.server.server_port)
+            self.addCleanup(connection.close)
+            connection.request("GET", "/api/train?scene_id=station-1")
+            response = connection.getresponse()
+            payload = json.loads(response.read())
+            self.assertEqual(response.status, 200)
+            self.assertEqual(payload["station"], "Paddington")
+            connection.request("GET", "/api/train?scene_id=../../config")
+            response = connection.getresponse()
+            response.read()
+            self.assertEqual(response.status, 400)
+
 
 class RendererTests(unittest.TestCase):
     def setUp(self):
@@ -105,6 +143,44 @@ class RendererTests(unittest.TestCase):
         self.browser.process.poll.return_value = 0
         self.browser.ready.side_effect = BrowserError("exited")
         self.assertEqual(self.renderer.state(), "failed")
+
+    def test_weather_uses_local_browser_and_waits_for_render_acknowledgment(self):
+        self.renderer.start(make_scene(kind="weather"))
+        self.assertEqual(self.renderer.state(), "starting")
+        self.renderer.server.ready.set()
+        self.assertEqual(self.renderer.state(), "playing")
+
+    def test_countdown_formats_time_and_hides_during_recovery(self):
+        self.renderer.countdown(125)
+        self.renderer.windows.show_countdown.assert_called_with("Next scene: 02:05")
+        self.renderer.countdown(None)
+        self.renderer.windows.show_countdown.assert_called_with("Next scene: no cutoff")
+        self.renderer.countdown(None, starting=True)
+        self.renderer.windows.show_countdown.assert_called_with("Next scene: loading")
+        self.renderer.recovery()
+        self.renderer.windows.hide_countdown.assert_called()
+
+    def test_countdown_display_failure_is_logged_without_interrupting_playback(self):
+        self.renderer.windows.show_countdown.side_effect = OSError("display unavailable")
+        with self.assertLogs("webdisplay.scene_player", level="ERROR"):
+            self.renderer.countdown(5)
+        self.renderer.countdown(4)
+        self.renderer.windows.show_countdown.assert_called_once()
+
+    def test_dashboard_readiness_timeout_records_whether_document_or_render_ack_is_missing(self):
+        self.renderer.start(make_scene())
+        self.assertEqual(self.renderer.state(), "starting")
+        self.assertEqual(self.renderer.error, "Dashboard did not acknowledge its rendered revision.")
+        self.renderer.failure("Scene did not start within 30 seconds.")
+        status = json.loads((Path(self.directory.name) / "carousel-status.json").read_text())
+        self.assertEqual(
+            status["failures"]["scene"]["message"],
+            "Scene did not start within 30 seconds. Dashboard did not acknowledge its rendered revision.",
+        )
+        self.renderer.server.ready.set()
+        self.renderer.browser.ready.return_value = False
+        self.assertEqual(self.renderer.state(), "starting")
+        self.assertEqual(self.renderer.error, "Dashboard browser document is not ready.")
 
     def test_web_waits_for_browser_readiness_and_keeps_previous_scene_visible(self):
         self.renderer.start(make_scene())

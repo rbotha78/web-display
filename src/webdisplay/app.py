@@ -13,7 +13,6 @@ import secrets
 import socket
 import ssl
 import subprocess
-import tempfile
 import threading
 import time
 import uuid
@@ -35,6 +34,9 @@ from .carousel import (
 from .hostname_helper import validate_hostname
 from .network import default_route_interface, internet_status, website_status
 from .plex import PlexClient, PlexPlaybackProxy, validate_server_url, validate_token
+from .raildata import REFRESH_INTERVAL, RailDataWorker, validate_api_key, validate_refresh_interval
+from .weather import WeatherWorker, validate_weather_config
+from .storage import atomic_write
 from .updater import MAX_BUNDLE_BYTES, UpdateError, Updater, parse_version
 
 LOG = logging.getLogger("web-display")
@@ -47,26 +49,6 @@ WIFI_OPERATIONS = {
     "/api/wifi/connect": "connect",
     "/api/wifi/forget": "forget",
 }
-
-
-def atomic_write(path: Path, content: str, mode: int = 0o600) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
-    temporary_path = Path(temporary)
-    try:
-        os.fchmod(fd, mode)
-        with os.fdopen(fd, "w", encoding="utf-8") as stream:
-            stream.write(content)
-            stream.flush()
-            os.fsync(stream.fileno())
-        os.replace(temporary_path, path)
-        directory_fd = os.open(path.parent, os.O_DIRECTORY)
-        try:
-            os.fsync(directory_fd)
-        finally:
-            os.close(directory_fd)
-    finally:
-        temporary_path.unlink(missing_ok=True)
 
 
 def validate_flag(value: object) -> bool:
@@ -108,7 +90,10 @@ class ConfigStore:
                 return {"url": "", "password": None, "auto_ap": False,
                         "api_keys": [], "playlist": {"enabled": False, "scenes": []},
                         "plex_server_url": "", "plex_token": "", "plex_client_identifier": "",
-                        "plex_default_bitrate_kbps": DEFAULT_PLEX_BITRATE_KBPS}
+                        "plex_default_bitrate_kbps": DEFAULT_PLEX_BITRATE_KBPS,
+                        "raildata_api_key": "", "service_details_api_key": "",
+                        "raildata_refresh_seconds": REFRESH_INTERVAL,
+                        "weather": validate_weather_config({})}
             with self.path.open(encoding="utf-8") as stream:
                 data = json.load(stream)
             return {
@@ -124,6 +109,18 @@ class ConfigStore:
                 "plex_default_bitrate_kbps": validate_plex_bitrate(
                     data.get("plex_default_bitrate_kbps", DEFAULT_PLEX_BITRATE_KBPS)
                 ),
+                "raildata_api_key": (
+                    validate_api_key(data["raildata_api_key"])
+                    if data.get("raildata_api_key") else ""
+                ),
+                "service_details_api_key": (
+                    validate_api_key(data["service_details_api_key"])
+                    if data.get("service_details_api_key") else ""
+                ),
+                "raildata_refresh_seconds": validate_refresh_interval(
+                    data.get("raildata_refresh_seconds", REFRESH_INTERVAL)
+                ),
+                "weather": validate_weather_config(data.get("weather", {})),
             }
 
     def update(self, **changes: object) -> dict[str, object]:
@@ -142,6 +139,18 @@ class ConfigStore:
             data["plex_default_bitrate_kbps"] = validate_plex_bitrate(
                 data.get("plex_default_bitrate_kbps", DEFAULT_PLEX_BITRATE_KBPS)
             )
+            data["raildata_api_key"] = (
+                validate_api_key(data["raildata_api_key"])
+                if data.get("raildata_api_key") else ""
+            )
+            data["service_details_api_key"] = (
+                validate_api_key(data["service_details_api_key"])
+                if data.get("service_details_api_key") else ""
+            )
+            data["raildata_refresh_seconds"] = validate_refresh_interval(
+                data.get("raildata_refresh_seconds", REFRESH_INTERVAL)
+            )
+            data["weather"] = validate_weather_config(data.get("weather", {}))
             identifier = data.get("plex_client_identifier", "")
             if identifier and (not isinstance(identifier, str) or not re.fullmatch(r"[A-Za-z0-9_-]{16,128}", identifier)):
                 raise ValueError("Invalid Plex client identifier")
@@ -312,6 +321,9 @@ class Application:
         self.config = ConfigStore(state_path)
         self.plex_client_identifier = self.config.ensure_plex_client_identifier()
         self.plex_proxy = PlexPlaybackProxy(self.plex_client)
+        self.train_board_path = target_path.with_name("train-board.json")
+        self.raildata_worker = RailDataWorker(self.config.load, self.train_board_path)
+        self.weather_worker = WeatherWorker(self.config.load, target_path.with_name("weather.json"))
         self.sessions = SessionStore()
         self.throttle = LoginThrottle()
         self.pairing_path = pairing_path
@@ -397,7 +409,71 @@ class Application:
             )
 
     def close(self) -> None:
+        self.raildata_worker.close()
+        self.weather_worker.close()
         self.plex_proxy.close()
+
+    def raildata_config(self) -> dict[str, object]:
+        config = self.config.load()
+        return {
+            "board_configured": bool(config["raildata_api_key"]),
+            "details_configured": bool(config["service_details_api_key"]),
+            "refresh_seconds": config["raildata_refresh_seconds"],
+        }
+
+    def weather_config(self) -> dict[str, object]:
+        settings = self.config.load()["weather"]
+        return {
+            "city": settings["city"], "country": settings["country"],
+            "configured": bool(settings["api_key"]),
+        }
+
+    def save_weather_config(self, value: object) -> dict[str, object]:
+        if not isinstance(value, dict):
+            raise ValueError("Weather settings must be an object")
+        if not isinstance(value.get("clear_key", False), bool):
+            raise ValueError("clear_key must be true or false")
+        current = self.config.load()["weather"]
+        settings = validate_weather_config({
+            "city": value.get("city", current["city"]),
+            "country": value.get("country", current["country"]),
+            "api_key": value.get("api_key") or ("" if value.get("clear_key") else current["api_key"]),
+        })
+        self.config.update(weather=settings)
+        self.weather_worker.wake()
+        return self.weather_config()
+
+    def save_raildata_config(self, value: object) -> dict[str, object]:
+        if not isinstance(value, dict):
+            raise ValueError("National Rail settings must be an object")
+        clear_key = value.get("clear_key", False)
+        clear_details_key = value.get("clear_details_key", False)
+        if not isinstance(clear_key, bool) or not isinstance(clear_details_key, bool):
+            raise ValueError("clear_key and clear_details_key must be true or false")
+        current = self.config.load()
+        key_input = value.get("api_key", "")
+        if key_input:
+            api_key = validate_api_key(key_input)
+        elif clear_key:
+            api_key = ""
+        else:
+            api_key = str(current["raildata_api_key"])
+        details_key_input = value.get("service_details_api_key", "")
+        if details_key_input:
+            details_key = validate_api_key(details_key_input)
+        elif clear_details_key:
+            details_key = ""
+        else:
+            details_key = str(current["service_details_api_key"])
+        self.config.update(
+            raildata_api_key=api_key,
+            service_details_api_key=details_key,
+            raildata_refresh_seconds=validate_refresh_interval(
+                value.get("refresh_seconds", current["raildata_refresh_seconds"])
+            ),
+        )
+        self.raildata_worker.wake()
+        return self.raildata_config()
 
     def plex_client(self) -> PlexClient:
         config = self.config.load()
@@ -470,6 +546,8 @@ class Application:
         with self.playlist_lock:
             self.config.update(playlist=playlist, playlist_revision=secrets.token_hex(16))
             self.publish_target()
+            self.raildata_worker.wake()
+            self.weather_worker.wake()
         return dict(playlist)
 
     def run_action(self, action: str) -> None:
@@ -816,6 +894,14 @@ def make_handler(app: Application) -> type[BaseHTTPRequestHandler]:
                 )
                 return
             request_path = urlsplit(self.path)
+            if request_path.path == "/api/weather/config" and not request_path.query:
+                if self._require_session():
+                    self._json(HTTPStatus.OK, app.weather_config())
+                return
+            if request_path.path == "/api/raildata/config" and not request_path.query:
+                if self._require_session():
+                    self._json(HTTPStatus.OK, app.raildata_config())
+                return
             if request_path.path == "/api/plex/config" and not request_path.query:
                 if self._require_session():
                     self._json(HTTPStatus.OK, app.plex_config())
@@ -1023,9 +1109,17 @@ def make_handler(app: Application) -> type[BaseHTTPRequestHandler]:
 
         def do_PUT(self) -> None:
             try:
+                if self.path == "/api/weather/config":
+                    if self._require_session(csrf=True):
+                        self._json(HTTPStatus.OK, app.save_weather_config(self._body()))
+                    return
                 if self.path == "/api/plex/config":
                     if self._require_session(csrf=True):
                         self._json(HTTPStatus.OK, app.save_plex_config(self._body()))
+                    return
+                if self.path == "/api/raildata/config":
+                    if self._require_session(csrf=True):
+                        self._json(HTTPStatus.OK, app.save_raildata_config(self._body()))
                     return
                 if self.path == "/api/playlist":
                     if self._require_session(csrf=True):

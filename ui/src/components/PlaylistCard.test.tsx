@@ -69,6 +69,46 @@ test("adds and removes dashboard scenes without publishing partial changes", asy
   expect(save).not.toHaveBeenCalled();
 });
 
+test("adds a train board with an uppercase station CRS and saves it", async () => {
+  vi.spyOn(api, "playlist").mockResolvedValue({ enabled: false, scenes: [] });
+  vi.spyOn(api, "plexConfig").mockResolvedValue({
+    server_url: "", configured: false, default_bitrate_kbps: 4000,
+  });
+  const save = vi.spyOn(api, "savePlaylist").mockImplementation(async (playlist) => playlist);
+  render(<PlaylistCard notify={vi.fn()} fail={vi.fn()} />);
+  await waitFor(() => expect((screen.getByLabelText("New scene type") as HTMLSelectElement).disabled).toBe(false));
+  fireEvent.change(screen.getByLabelText("New scene type"), { target: { value: "train" } });
+  fireEvent.click(screen.getByText("Add scene"));
+  fireEvent.change(screen.getByLabelText("Station CRS code"), { target: { value: "pad" } });
+  expect(screen.getByLabelText("Station CRS code")).toHaveProperty("value", "PAD");
+  expect(screen.getByLabelText("Scene duration (seconds)")).toHaveProperty("value", "300");
+  fireEvent.click(screen.getByText("Save and apply"));
+  await waitFor(() => expect(save).toHaveBeenCalled());
+  expect(save.mock.calls[0][0].scenes[0]).toMatchObject({
+    kind: "train", station_crs: "PAD", duration: 300,
+  });
+});
+
+test("adds standalone weather and enables weather on a dashboard", async () => {
+  vi.spyOn(api, "playlist").mockResolvedValue({ enabled: false, scenes: [] });
+  vi.spyOn(api, "plexConfig").mockResolvedValue({
+    server_url: "", configured: false, default_bitrate_kbps: 4000,
+  });
+  const save = vi.spyOn(api, "savePlaylist").mockImplementation(async (playlist) => playlist);
+  render(<PlaylistCard notify={vi.fn()} fail={vi.fn()} />);
+  await waitFor(() => expect((screen.getByLabelText("New scene type") as HTMLSelectElement).disabled).toBe(false));
+  fireEvent.change(screen.getByLabelText("New scene type"), { target: { value: "weather" } });
+  fireEvent.click(screen.getByText("Add scene"));
+  expect(screen.queryByLabelText("Dashboard layout")).toBeNull();
+  fireEvent.change(screen.getByLabelText("New scene type"), { target: { value: "dashboard" } });
+  fireEvent.click(screen.getByText("Add scene"));
+  fireEvent.click(screen.getByLabelText("Show weather widget"));
+  fireEvent.click(screen.getByText("Save and apply"));
+  await waitFor(() => expect(save).toHaveBeenCalled());
+  expect(save.mock.calls[0][0].scenes[0].kind).toBe("weather");
+  expect(save.mock.calls[0][0].scenes[1].show_weather).toBe(true);
+});
+
 test("a rejected save keeps the draft and displays the server error", async () => {
   vi.spyOn(api, "playlist").mockResolvedValue({ enabled: false, scenes: [] });
   vi.spyOn(api, "plexConfig").mockResolvedValue({

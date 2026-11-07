@@ -7,9 +7,15 @@ type Handler = (init: RequestInit) => { status?: number; body: unknown };
 
 function mockFetch(routes: Record<string, Handler>) {
   routes = {
+    "GET /api/weather/config": () => ({
+      body: { city: "St Albans", country: "GB", configured: false },
+    }),
     "GET /api/playlist": () => ({ body: { enabled: false, scenes: [] } }),
     "GET /api/plex/config": () => ({
       body: { server_url: "", configured: false, default_bitrate_kbps: 4000 },
+    }),
+    "GET /api/raildata/config": () => ({
+      body: { board_configured: false, details_configured: false, refresh_seconds: 60 },
     }),
     ...routes,
   };

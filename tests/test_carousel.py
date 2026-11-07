@@ -13,14 +13,24 @@ def scene(scene_id, **changes):
 
 
 class PlaylistTests(unittest.TestCase):
+    def test_weather_scene_and_optional_dashboard_widget(self):
+        saved = playlist(scene("weather", kind="weather"), scene("widgets", show_weather=True))
+        self.assertEqual(saved["scenes"][0]["kind"], "weather")
+        self.assertTrue(saved["scenes"][1]["show_weather"])
+        self.assertFalse(playlist(scene("existing"))["scenes"][0]["show_weather"])
+        with self.assertRaises(ValueError):
+            playlist(scene("bad", show_weather="yes"))
+
     def test_defaults_and_no_cutoff_are_normalized(self):
         saved = playlist(
             scene("clock"),
             scene("web", kind="web", url="https://example.com/"),
             scene("video", kind="video", url="https://example.com/stream"),
+            scene("train", kind="train", station_crs="pad"),
             scene("live", kind="video", url="https://example.com/live", duration=None),
         )
-        self.assertEqual([item["duration"] for item in saved["scenes"]], [60, 60, 300, None])
+        self.assertEqual([item["duration"] for item in saved["scenes"]], [60, 60, 300, 300, None])
+        self.assertEqual(saved["scenes"][3]["station_crs"], "PAD")
         self.assertFalse(saved["scenes"][2]["audio_enabled"])
         self.assertFalse(validate_playlist({"enabled": False, "scenes": []})["enabled"])
 
@@ -69,6 +79,7 @@ class PlaylistTests(unittest.TestCase):
             scene("x", kind="web", url="https://example.com:99999"),
             scene("x", kind="video", url=""),
             scene("x", text="x" * 2001), scene("x", layout="arbitrary"),
+            scene("x", kind="train", station_crs=""),
         ])
         invalid.append({"enabled": True, "scenes": [scene("same"), scene("same")]})
         for value in invalid:
@@ -80,6 +91,31 @@ class CarouselTests(unittest.TestCase):
     def setUp(self):
         self.renderer = Mock()
         self.renderer.state.return_value = "playing"
+
+    def test_countdown_uses_playback_start_and_resets_at_scene_change(self):
+        carousel = Carousel(playlist(scene("a", duration=5), scene("b", duration=10)), self.renderer)
+        carousel.tick(0)
+        self.renderer.countdown.assert_called_with(None, starting=True)
+        self.renderer.state.return_value = "starting"
+        carousel.tick(3)
+        self.renderer.countdown.assert_called_with(None, starting=True)
+        self.renderer.state.return_value = "playing"
+        carousel.tick(4)
+        self.renderer.countdown.assert_called_with(5, starting=False)
+        carousel.tick(5.2)
+        self.renderer.countdown.assert_called_with(4, starting=False)
+        carousel.tick(9)
+        self.renderer.countdown.assert_called_with(None, starting=True)
+        carousel.tick(10)
+        self.renderer.countdown.assert_called_with(10, starting=False)
+
+    def test_uncapped_video_countdown_has_no_deadline(self):
+        carousel = Carousel(playlist(scene(
+            "video", kind="video", duration=None, url="https://example.com/live",
+        )), self.renderer)
+        carousel.tick(0)
+        carousel.tick(1)
+        self.renderer.countdown.assert_called_with(None, starting=False)
 
     def test_loops_in_order_skips_disabled_and_starts_timer_after_startup(self):
         carousel = Carousel(playlist(

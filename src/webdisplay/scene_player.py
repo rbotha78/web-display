@@ -4,6 +4,7 @@ import argparse
 import json
 import logging
 import os
+import re
 import secrets
 import signal
 import socket
@@ -18,7 +19,7 @@ from http.client import HTTPException
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Callable
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 from .app import atomic_write, static_file
 from .carousel import (
@@ -74,9 +75,14 @@ def stop_process(process: subprocess.Popen[bytes] | None) -> None:
 class SceneServer:
     """Read-only loopback UI. No config, administrator sessions or secrets are served."""
 
-    def __init__(self) -> None:
+    def __init__(
+        self, train_data_path: Path = Path("/run/web-display/train-board.json"),
+        weather_data_path: Path = Path("/run/web-display/weather.json"),
+    ) -> None:
         self._lock = threading.Lock()
         self._payload: dict[str, object] = {"kind": "recovery"}
+        self.train_data_path = train_data_path
+        self.weather_data_path = weather_data_path
         self.ready = threading.Event()
         owner = self
 
@@ -92,6 +98,44 @@ class SceneServer:
                 if path.path == "/api/scene":
                     with owner._lock:
                         body = json.dumps(owner._payload).encode()
+                    content_type = "application/json"
+                elif path.path == "/api/weather" and not path.query:
+                    try:
+                        weather = json.loads(owner.weather_data_path.read_text(encoding="utf-8"))
+                    except FileNotFoundError:
+                        weather = {"error": "Waiting for weather information", "stale": False}
+                    except (OSError, json.JSONDecodeError):
+                        LOG.exception("Could not read cached weather")
+                        self.send_error(HTTPStatus.INTERNAL_SERVER_ERROR)
+                        return
+                    if not isinstance(weather, dict):
+                        self.send_error(HTTPStatus.INTERNAL_SERVER_ERROR)
+                        return
+                    body = json.dumps(weather).encode()
+                    content_type = "application/json"
+                elif path.path == "/api/train":
+                    query = parse_qs(path.query, keep_blank_values=True)
+                    scene_ids = query.get("scene_id", [])
+                    if set(query) != {"scene_id"} or len(scene_ids) != 1 or not re.fullmatch(
+                        r"[A-Za-z0-9_-]{1,64}", scene_ids[0]
+                    ):
+                        self.send_error(HTTPStatus.BAD_REQUEST)
+                        return
+                    try:
+                        boards = json.loads(owner.train_data_path.read_text(encoding="utf-8"))
+                    except FileNotFoundError:
+                        boards = {}
+                    except (OSError, json.JSONDecodeError):
+                        LOG.exception("Could not read cached National Rail data")
+                        self.send_error(HTTPStatus.INTERNAL_SERVER_ERROR)
+                        return
+                    if not isinstance(boards, dict):
+                        self.send_error(HTTPStatus.INTERNAL_SERVER_ERROR)
+                        return
+                    board = boards.get(scene_ids[0], {
+                        "stale": False, "error": "Waiting for departure information",
+                    })
+                    body = json.dumps(board).encode()
                     content_type = "application/json"
                 elif path.path == "/api/scene/ready":
                     with owner._lock:
@@ -131,10 +175,14 @@ class SceneServer:
         with self._lock:
             self.ready.clear()
             self._payload = {
-                "kind": "dashboard" if scene else "recovery",
+                "kind": scene["kind"] if scene else "recovery",
                 "revision": secrets.token_hex(16),
                 "layout": scene["layout"] if scene else "notice",
                 "text": scene["text"] if scene else "",
+                "scene_id": scene["id"] if scene and scene["kind"] == "train" else "",
+                "title": scene["title"] if scene else "",
+                "station_crs": scene["station_crs"] if scene and scene["kind"] == "train" else "",
+                "show_weather": scene.get("show_weather", False) if scene else False,
             }
 
     def close(self) -> None:
@@ -178,17 +226,33 @@ class SceneRenderer:
         self.browser_failed = False
         self.renderer_retry_at = 0.0
         self.browser_check_at = 0.0
+        self.countdown_failed = False
         self._publish_status()
 
     def failure(self, reason: str | None = None) -> None:
         if self.scene is None:
             return
         message = reason or self.error or "Renderer failed before playback completed."
+        if reason and self.error and self.error not in reason:
+            message = f"{reason} {self.error}"
         self.failures[self.scene["id"]] = {"message": message, "time": int(time.time())}
         while len(self.failures) > 30:
             del self.failures[next(iter(self.failures))]
         LOG.warning("Scene %s: %s", self.scene["id"], message)
         self._publish_status()
+
+    def countdown(self, remaining: int | None, *, starting: bool = False) -> None:
+        if self.countdown_failed:
+            return
+        text = "Next scene: loading" if starting else (
+            "Next scene: no cutoff" if remaining is None
+            else f"Next scene: {remaining // 60:02d}:{remaining % 60:02d}"
+        )
+        try:
+            self.windows.show_countdown(text)
+        except OSError:
+            LOG.exception("Could not display carousel countdown")
+            self.countdown_failed = True
 
     def _publish_status(self) -> None:
         atomic_write(
@@ -260,7 +324,7 @@ class SceneRenderer:
         try:
             if scene["kind"] == "web":
                 self.pending_tab = self.browser.prepare(scene["id"], scene["url"])
-            elif scene["kind"] == "dashboard":
+            elif scene["kind"] in ("dashboard", "train", "weather"):
                 self.server.show(scene)
                 self.pending_tab = self.browser.prepare(None, self.server.url)
             else:
@@ -503,8 +567,11 @@ class SceneRenderer:
                 if self.activated and time.monotonic() < self.browser_check_at:
                     return "playing"
                 if not self.browser.ready(self.pending_tab):
+                    if self.scene["kind"] in ("dashboard", "train", "weather"):
+                        self.error = "Dashboard browser document is not ready."
                     return "starting"
-                if self.scene["kind"] == "dashboard" and not self.server.ready.is_set():
+                if self.scene["kind"] in ("dashboard", "train", "weather") and not self.server.ready.is_set():
+                    self.error = "Dashboard did not acknowledge its rendered revision."
                     return "starting"
                 self._activate()
                 self.browser_check_at = time.monotonic() + 5
@@ -588,6 +655,8 @@ class SceneRenderer:
         self._disconnect_ipc()
 
     def stop(self) -> None:
+        self.windows.hide_countdown()
+        self.countdown_failed = False
         try:
             self._cancel_pending()
         except RendererStopError as error:
@@ -610,6 +679,7 @@ class SceneRenderer:
             self.windows.close()
 
     def recovery(self) -> None:
+        self.windows.hide_countdown()
         if self.recovering and self.browser.process is not None and self.browser.process.poll() is None:
             if time.monotonic() < self.browser_check_at:
                 return

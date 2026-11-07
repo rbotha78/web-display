@@ -10,7 +10,7 @@ export interface Config {
 
 export interface Scene {
   id: string;
-  kind: "web" | "dashboard" | "video";
+  kind: "web" | "dashboard" | "video" | "train" | "weather";
   title: string;
   enabled: boolean;
   duration: number | null;
@@ -21,6 +21,20 @@ export interface Scene {
   plex_rating_key?: string;
   layout: "clock" | "notice" | "clock-notice";
   text: string;
+  station_crs?: string;
+  show_weather?: boolean;
+}
+
+export interface WeatherConfig {
+  city: string;
+  country: string;
+  configured: boolean;
+}
+
+export interface RailDataConfig {
+  board_configured: boolean;
+  details_configured: boolean;
+  refresh_seconds: number;
 }
 
 export interface PlexConfig {
@@ -183,6 +197,19 @@ export const api = {
   playlistStatus: () => request<PlaybackStatus>("/api/playlist/status"),
   savePlaylist: (playlist: Playlist) => request<Playlist>("/api/playlist", "PUT", playlist),
   plexConfig: () => request<PlexConfig>("/api/plex/config"),
+  railDataConfig: () => request<RailDataConfig>("/api/raildata/config"),
+  weatherConfig: () => request<WeatherConfig>("/api/weather/config"),
+  saveWeatherConfig: (config: {
+    city?: string; country?: string; api_key?: string; clear_key?: boolean;
+  }) => request<WeatherConfig>("/api/weather/config", "PUT", config),
+  saveRailDataConfig: (config: {
+    api_key?: string;
+    service_details_api_key?: string;
+    clear_key?: boolean;
+    clear_details_key?: boolean;
+    refresh_seconds?: number;
+  }) =>
+    request<RailDataConfig>("/api/raildata/config", "PUT", config),
   savePlexConfig: (config: {
     server_url: string;
     token?: string;

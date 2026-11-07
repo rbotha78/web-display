@@ -49,6 +49,18 @@ class ConfigTests(unittest.TestCase):
                 with self.subTest(value=value), self.assertRaises(ValueError):
                     store.update(plex_default_bitrate_kbps=value)
 
+    def test_raildata_key_is_validated_and_stored_privately(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "config.json"
+            store = ConfigStore(path)
+            store.update(raildata_api_key="test-key")
+            self.assertEqual(store.load()["raildata_api_key"], "test-key")
+            store.update(service_details_api_key="details-key")
+            self.assertEqual(store.load()["service_details_api_key"], "details-key")
+            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+            with self.assertRaises(ValueError):
+                store.update(service_details_api_key="bad key")
+
 
 class AuthenticationTests(unittest.TestCase):
     def test_password_hash(self):
@@ -277,6 +289,89 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.status, 200)
         self.assertNotIn("private-token", json.dumps(result))
         self.assertNotIn("token", result)
+
+    def test_raildata_key_configuration_is_private_and_csrf_protected(self):
+        response, _ = self.request("GET", "/api/raildata/config")
+        self.assertEqual(response.status, 401)
+        token, session = self.app.sessions.create()
+        cookie = {"Cookie": f"session={token}"}
+        response, config = self.request("GET", "/api/raildata/config", headers=cookie)
+        self.assertEqual(response.status, 200)
+        self.assertEqual(config, {
+            "board_configured": False, "details_configured": False, "refresh_seconds": 60,
+        })
+        response, _ = self.request(
+            "PUT", "/api/raildata/config", {
+                "api_key": "private-key",
+                "service_details_api_key": "private-details-key",
+            }, cookie,
+        )
+        self.assertEqual(response.status, 403)
+        response, result = self.request(
+            "PUT", "/api/raildata/config", {
+                "api_key": "private-key",
+                "service_details_api_key": "private-details-key",
+            },
+            {**cookie, "X-CSRF-Token": session.csrf},
+        )
+        self.assertEqual(response.status, 200)
+        self.assertEqual(result, {
+            "board_configured": True, "details_configured": True, "refresh_seconds": 60,
+        })
+        self.assertNotIn("private-key", json.dumps(result))
+        self.assertNotIn("private-details-key", json.dumps(result))
+        config_contents = (Path(self.directory.name) / "config.json").read_text()
+        self.assertIn("private-key", config_contents)
+        self.assertIn("private-details-key", config_contents)
+        self.assertNotIn("private-key", (Path(self.directory.name) / "playlist.json").read_text())
+        response, _ = self.request(
+            "PUT", "/api/raildata/config", {"service_details_api_key": "new-details-key"},
+            {**cookie, "X-CSRF-Token": session.csrf},
+        )
+        self.assertEqual(response.status, 200)
+        config = self.app.config.load()
+        self.assertEqual(config["raildata_api_key"], "private-key")
+        self.assertEqual(config["service_details_api_key"], "new-details-key")
+        response, result = self.request(
+            "PUT", "/api/raildata/config", {"refresh_seconds": 30},
+            {**cookie, "X-CSRF-Token": session.csrf},
+        )
+        self.assertEqual(response.status, 200)
+        self.assertEqual(result["refresh_seconds"], 30)
+        self.assertEqual(self.app.config.load()["raildata_refresh_seconds"], 30)
+        self.assertEqual(self.app.config.load()["raildata_api_key"], "private-key")
+        response, _ = self.request(
+            "PUT", "/api/raildata/config", {"refresh_seconds": 29},
+            {**cookie, "X-CSRF-Token": session.csrf},
+        )
+        self.assertEqual(response.status, 400)
+        self.assertEqual(self.app.config.load()["raildata_refresh_seconds"], 30)
+
+    def test_weather_configuration_is_private_and_csrf_protected(self):
+        response, _ = self.request("GET", "/api/weather/config")
+        self.assertEqual(response.status, 401)
+        token, session = self.app.sessions.create()
+        cookie = {"Cookie": f"session={token}"}
+        response, config = self.request("GET", "/api/weather/config", headers=cookie)
+        self.assertEqual(config, {"city": "St Albans", "country": "GB", "configured": False})
+        response, _ = self.request("PUT", "/api/weather/config", {"api_key": "private-key"}, cookie)
+        self.assertEqual(response.status, 403)
+        headers = {**cookie, "X-CSRF-Token": session.csrf}
+        response, result = self.request(
+            "PUT", "/api/weather/config",
+            {"city": "St Albans", "country": "gb", "api_key": "private-key"}, headers,
+        )
+        self.assertEqual(response.status, 200)
+        self.assertTrue(result["configured"])
+        self.assertNotIn("private-key", json.dumps(result))
+        response, _ = self.request("PUT", "/api/weather/config", {"city": "London"}, headers)
+        self.assertEqual(response.status, 200)
+        self.assertEqual(self.app.config.load()["weather"]["api_key"], "private-key")
+        response, _ = self.request("PUT", "/api/weather/config", {"country": "INVALID"}, headers)
+        self.assertEqual(response.status, 400)
+        response, result = self.request("PUT", "/api/weather/config", {"clear_key": True}, headers)
+        self.assertEqual(response.status, 200)
+        self.assertFalse(result["configured"])
 
     def test_plex_library_browsing_requires_authentication(self):
         response, _ = self.request("GET", "/api/plex/libraries")
