@@ -29,6 +29,7 @@ from .carousel import (
 from .hls import MAX_VIDEO_BITRATE, resolve_video_url
 from .browser import BrowserError, PersistentBrowser, Tab
 from .scene_windows import SceneWindows
+from .display import DEFAULT_SAFE_AREA_PERCENT
 
 LOG = logging.getLogger(__name__)
 STALL_TIMEOUT = 30
@@ -81,6 +82,7 @@ class SceneServer:
     ) -> None:
         self._lock = threading.Lock()
         self._payload: dict[str, object] = {"kind": "recovery"}
+        self.safe_area_percent = DEFAULT_SAFE_AREA_PERCENT
         self.train_data_path = train_data_path
         self.weather_data_path = weather_data_path
         self.ready = threading.Event()
@@ -183,6 +185,7 @@ class SceneServer:
                 "title": scene["title"] if scene else "",
                 "station_crs": scene["station_crs"] if scene and scene["kind"] == "train" else "",
                 "show_weather": scene.get("show_weather", False) if scene else False,
+                "safe_area_percent": self.safe_area_percent,
             }
 
     def close(self) -> None:
@@ -197,9 +200,11 @@ class SceneRenderer:
         launch_browser: Callable[[str, tuple[int, int]], subprocess.Popen[bytes]],
         runtime: Path,
         mpv: str = "/usr/bin/mpv",
+        music_pause: Callable[[bool], None] | None = None,
     ):
         self.runtime = runtime
         self.mpv = mpv
+        self.music_pause = music_pause or (lambda _: None)
         self.server = SceneServer()
         self.browser = PersistentBrowser(launch_browser, self.server.url)
         self.windows = SceneWindows()
@@ -252,6 +257,10 @@ class SceneRenderer:
         except OSError:
             LOG.exception("Could not display carousel countdown")
             self.countdown_failed = True
+
+    def set_safe_area(self, percent: int) -> None:
+        self.server.safe_area_percent = percent
+        self.windows.safe_area_percent = percent
 
     def _publish_status(self) -> None:
         atomic_write(
@@ -362,6 +371,8 @@ class SceneRenderer:
         return MAX_VIDEO_BITRATE
 
     def _launch_video(self, url: str) -> None:
+        if self.scene and self.scene.get("audio_enabled"):
+            self.music_pause(True)
         self.runtime.mkdir(parents=True, exist_ok=True)
         self.video_state = "starting"
         self.video_end = None
@@ -453,6 +464,8 @@ class SceneRenderer:
             self.windows.show_video()
             self._command(["set_property", "mute", not self.scene["audio_enabled"]])
             self._command(["set_property", "pause", False])
+            if not self.scene["audio_enabled"]:
+                self.music_pause(False)
             self.loading_video = False
             if self.browser.process is not None:
                 self.browser.freeze()
@@ -652,6 +665,8 @@ class SceneRenderer:
         else:
             self.process = None
         self._disconnect_ipc()
+        if self.process is None:
+            self.music_pause(False)
 
     def stop(self) -> None:
         self.windows.hide_countdown()

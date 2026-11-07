@@ -1,0 +1,224 @@
+from __future__ import annotations
+
+import json
+import re
+import socket
+import subprocess
+import threading
+import time
+import urllib.request
+from pathlib import Path
+from urllib.parse import urlsplit
+
+from .scene_player import stop_process
+
+
+def control_url(value: object) -> str:
+    if not isinstance(value, str):
+        raise ValueError("Invalid music endpoint")
+    url = urlsplit(value)
+    if (url.scheme != "http" or url.hostname != "127.0.0.1" or not url.port
+            or url.username or url.password or url.query or url.fragment
+            or not re.fullmatch(r"/music/[A-Za-z0-9_-]{32}/control", url.path)):
+        raise ValueError("Invalid music endpoint")
+    return value
+
+
+class MusicPlayer:
+    """An independent audio-only mpv, surviving carousel/browser transitions."""
+
+    def __init__(self, config_path: Path, runtime: Path, mpv: str = "/usr/bin/mpv"):
+        self.config_path, self.mpv = config_path, mpv
+        self.ipc_path = runtime / "music-mpv.sock"
+        self.lock = threading.RLock()
+        self.shutdown = threading.Event()
+        self.process = self.ipc = None
+        self.buffer = b""
+        self.request_id = 0
+        self.ended = None
+        self.paused = False
+        self.thread = threading.Thread(target=self._run, daemon=True)
+        self.thread.start()
+
+    def pause_for_video(self, paused: bool):
+        with self.lock:
+            self.paused = paused
+            if self.ipc is not None:
+                self._pause()
+
+    def _pause(self):
+        if self.paused:
+            self._command(["set_property", "pause", True])
+            # Pausing alone retains ALSA's device; release it for the video player.
+            self._command(["set_property", "aid", "no"])
+        else:
+            self._command(["set_property", "aid", "auto"])
+            self._command(["set_property", "pause", False])
+
+    def _command(self, command):
+        self.request_id += 1
+        request_id = self.request_id
+        self.ipc.sendall(json.dumps({"command": command, "request_id": request_id}).encode() + b"\n")
+        deadline = time.monotonic() + 2
+        while time.monotonic() < deadline:
+            while b"\n" in self.buffer:
+                line, self.buffer = self.buffer.split(b"\n", 1)
+                message = json.loads(line)
+                if message.get("event") == "end-file":
+                    self.ended = message.get("reason")
+                if message.get("request_id") == request_id:
+                    if message.get("error") != "success":
+                        if command[:2] == ["get_property", "time-pos"]:
+                            return None
+                        raise ValueError("Audio player command failed")
+                    return message.get("data")
+            chunk = self.ipc.recv(8192)
+            if not chunk:
+                raise OSError("Audio player disconnected")
+            self.buffer += chunk
+        raise OSError("Audio player timed out")
+
+    def _launch(self):
+        self.ipc_path.unlink(missing_ok=True)
+        self.process = subprocess.Popen([
+            self.mpv, "--no-config", "--no-terminal", "--no-video", "--idle=yes",
+            "--audio-device=alsa/hdmi:CARD=vc4hdmi,DEV=0",
+            "--pause=yes", "--volume=0", f"--input-ipc-server={self.ipc_path}",
+        ], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            start_new_session=True)
+        for _ in range(50):
+            if self.shutdown.wait(0.1):
+                raise OSError("Music stopped")
+            if self.process.poll() is not None:
+                raise OSError("Audio player exited")
+            if self.ipc_path.exists():
+                self.ipc = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                self.ipc.settimeout(2)
+                self.ipc.connect(str(self.ipc_path))
+                self.buffer = b""
+                return
+        raise OSError("Audio player did not start")
+
+    def _stop_player(self):
+        with self.lock:
+            stop_process(self.process)
+            self.process = None
+            if self.ipc is not None:
+                self.ipc.close()
+                self.ipc = None
+            self.ipc_path.unlink(missing_ok=True)
+            self.ended = None
+
+    @staticmethod
+    def _control(url, action, **kwargs):
+        request = urllib.request.Request(control_url(url), json.dumps({"action": action, **kwargs}).encode(),
+                                         {"Content-Type": "application/json"}, method="POST")
+        with urllib.request.urlopen(request, timeout=15) as response:
+            return json.loads(response.read(8192))
+
+    def _load(self, track, endpoint, volume):
+        url = urlsplit(track["url"])
+        base = urlsplit(endpoint)
+        if (url.scheme != base.scheme or url.netloc != base.netloc or url.query or url.fragment
+                or not url.path.startswith(base.path.removesuffix("control") + "stream/")):
+            raise ValueError("Invalid audio stream")
+        with self.lock:
+            if self.paused:
+                return False
+            if self.process is None:
+                self._launch()
+            self._command(["set_property", "pause", True])
+            self._command(["set_property", "aid", "no" if self.paused else "auto"])
+            self._command(["set_property", "volume", volume])
+            self._command(["loadfile", track["url"], "replace"])
+            self.ended = None
+            self._pause()
+            return True
+
+    def _run(self):
+        endpoint = ""
+        identity = None
+        track = None
+        failures, retry_at, timeline_at = 0, 0.0, 0.0
+        volume = None
+        pending_next = False
+        last_position, last_progress = None, time.monotonic()
+        try:
+            while not self.shutdown.is_set():
+                try:
+                    try:
+                        settings = json.loads(self.config_path.read_text())
+                    except (FileNotFoundError, ValueError):
+                        settings = {"enabled": False}
+                    new_identity = (settings.get("enabled"), settings.get("station_key"), settings.get("control_url"))
+                    if new_identity != identity:
+                        self._stop_player()
+                        if endpoint:
+                            try:
+                                self._control(endpoint, "stop")
+                            except (OSError, ValueError):
+                                pass
+                        identity, track = new_identity, None
+                        pending_next = False
+                        failures, retry_at = 0, 0.0
+                        endpoint = control_url(settings["control_url"]) if settings.get("enabled") else ""
+                    if not endpoint or failures >= 3 or time.monotonic() < retry_at:
+                        self.shutdown.wait(1)
+                        continue
+                    with self.lock:
+                        waiting_for_video = self.paused and (track is None or pending_next or self.process is None)
+                    if waiting_for_video:
+                        self.shutdown.wait(0.5)
+                        continue
+                    if track is None or pending_next or self.process is None:
+                        new_track = self._control(endpoint, "next" if pending_next else "current",
+                                                  track_id=track["track_id"] if track else "")
+                        if not self._load(new_track, endpoint, settings["volume"]):
+                            self.shutdown.wait(0.5)
+                            continue
+                        track, pending_next = new_track, False
+                        last_position, last_progress = None, time.monotonic()
+                        volume = settings["volume"]
+                        timeline_at = 0
+                    with self.lock:
+                        if self.process.poll() is not None:
+                            raise OSError("Audio player exited")
+                        position = self._command(["get_property", "time-pos"])
+                        if volume != settings["volume"]:
+                            self._command(["set_property", "volume", settings["volume"]])
+                            volume = settings["volume"]
+                        ended, paused = self.ended, self.paused
+                    if paused or (position is not None and position != last_position):
+                        last_position, last_progress = position, time.monotonic()
+                    elif ended is None and time.monotonic() - last_progress > 30:
+                        raise OSError("Audio playback stalled")
+                    if ended == "eof":
+                        pending_next = True
+                        failures = 0
+                    elif ended == "error":
+                        raise OSError("Audio playback failed")
+                    elif time.monotonic() >= timeline_at and (paused or position is not None):
+                        self._control(endpoint, "timeline", track_id=track["track_id"],
+                                      state="paused" if paused else "playing", time=int((position or 0) * 1000))
+                        timeline_at = time.monotonic() + 10
+                    self.shutdown.wait(0.5)
+                except (OSError, ValueError, KeyError, TypeError):
+                    self._stop_player()
+                    failures += 1
+                    retry_at = time.monotonic() + (5 if failures == 1 else 15)
+                    if failures >= 3 and endpoint:
+                        try:
+                            self._control(endpoint, "error")
+                        except (OSError, ValueError):
+                            pass
+        finally:
+            self._stop_player()
+            if endpoint:
+                try:
+                    self._control(endpoint, "stop")
+                except (OSError, ValueError):
+                    pass
+
+    def close(self):
+        self.shutdown.set()
+        self.thread.join()

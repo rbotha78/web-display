@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import type { Scene } from "./api";
 import { WeatherDisplay } from "./components/WeatherDisplay";
 
@@ -11,6 +11,7 @@ interface DisplayScene {
   title: string;
   station_crs: string;
   show_weather?: boolean;
+  safe_area_percent?: number;
 }
 
 interface TrainRow {
@@ -64,12 +65,63 @@ function callingPointText(point: CallingPoint): string {
   return `${point.station} (${time}${expected})`;
 }
 
+function StopLine({ label, groups }: { label: string; groups: CallingPoint[][] }) {
+  const ref = useRef<HTMLSpanElement>(null);
+  const text = groups.map((group) => group.map(callingPointText).join(", ")).join(" | ");
+  useEffect(() => {
+    let direction = 1;
+    let pause = 40;
+    if (ref.current) ref.current.scrollLeft = 0;
+    const timer = window.setInterval(() => {
+      const element = ref.current;
+      if (!element) return;
+      const maximum = element.scrollWidth - element.clientWidth;
+      if (maximum <= 1 || pause-- > 0) return;
+      element.scrollLeft += direction * 2;
+      if (element.scrollLeft >= maximum || element.scrollLeft <= 0) {
+        direction *= -1;
+        pause = 40;
+      }
+    }, 50);
+    return () => window.clearInterval(timer);
+  }, [text]);
+  if (!text) return null;
+  return (
+    <p className="train-stop-line">
+      <strong>{label}: </strong>
+      <span ref={ref} className="train-stop-scroll">{text}</span>
+    </p>
+  );
+}
+
 export function SceneScreen() {
   const [scene, setScene] = useState<DisplayScene | null>(null);
   const [now, setNow] = useState(() => new Date());
   const [error, setError] = useState("");
   const [trainBoard, setTrainBoard] = useState<TrainBoard | null>(null);
   const [trainError, setTrainError] = useState("");
+  const screenRef = useRef<HTMLElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const [scrolling, setScrolling] = useState(false);
+
+  useEffect(() => {
+    let direction = 1;
+    let pause = 40;
+    setScrolling(false);
+    const timer = window.setInterval(() => {
+      const element = contentRef.current ?? screenRef.current;
+      if (!element) return;
+      const maximum = element.scrollHeight - element.clientHeight;
+      setScrolling(maximum > 1);
+      if (maximum <= 1 || pause-- > 0) return;
+      element.scrollTop += direction * 4;
+      if (element.scrollTop >= maximum || element.scrollTop <= 0) {
+        direction *= -1;
+        pause = 40;
+      }
+    }, 100);
+    return () => window.clearInterval(timer);
+  }, [scene?.revision]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -172,8 +224,11 @@ export function SceneScreen() {
   }, [scene]);
 
   const size = (scene?.text.length ?? 0) > 500 ? "small" : (scene?.text.length ?? 0) > 200 ? "medium" : "large";
+  const publishedSafeArea = scene?.safe_area_percent ?? 5;
+  const safeArea = Number.isInteger(publishedSafeArea) &&
+    publishedSafeArea >= 0 && publishedSafeArea <= 10 ? publishedSafeArea : 5;
   return (
-    <main className={`scene-screen ${scene?.layout ?? ""}${scene?.show_weather ? " weather-dashboard" : ""}${scene?.kind === "train" ? " train-screen" : ""}`}>
+    <main ref={screenRef} className={`scene-screen safe-area-${safeArea} ${scene?.layout ?? ""}${scene?.show_weather ? " weather-dashboard" : ""}${scene?.kind === "train" ? " train-screen" : ""}`}>
       {error ? <p role="alert">{error}</p> : !scene ? <p>Loading scene...</p> :
         scene.kind === "train" ? (
           <section className="train-board">
@@ -181,6 +236,7 @@ export function SceneScreen() {
               <p className="train-eyebrow">Live departures</p>
               <h1>{trainBoard?.station || scene.title || scene.station_crs}</h1>
             </header>
+            <div ref={contentRef} className="train-content" tabIndex={0} aria-label="Departures and notices">
             {(trainBoard?.stale || trainError) && (
               <p className="train-warning" role="status">
                 Data may be out of date{trainBoard?.error ? `: ${trainBoard.error}` : ""}
@@ -240,18 +296,12 @@ export function SceneScreen() {
                       <tr className="train-next train-detail-row">
                         <td colSpan={trainBoard.platform_available ? 4 : 3}>
                           <div className="train-calling">
-                            {row.state !== "cancelled" && !row.cancelled && trainBoard.next.previous_stops?.map((group, groupIndex) => (
-                              <p key={`previous-${groupIndex}`}>
-                                <strong>Previous stops: </strong>
-                                {group.map(callingPointText).join(", ")}
-                              </p>
-                            ))}
-                            {row.state !== "cancelled" && !row.cancelled && trainBoard.next.calling_at?.map((group, groupIndex) => (
-                              <p key={groupIndex}>
-                                <strong>Calling at: </strong>
-                                {group.map(callingPointText).join(", ")}
-                              </p>
-                            ))}
+                            {row.state !== "cancelled" && !row.cancelled && (
+                              <>
+                                <StopLine label="Previous stops" groups={trainBoard.next.previous_stops ?? []} />
+                                <StopLine label="Calling at" groups={trainBoard.next.calling_at ?? []} />
+                              </>
+                            )}
                             {trainBoard.next.last_seen && (
                               <p>
                                 <strong>Last reported at: </strong>
@@ -276,6 +326,8 @@ export function SceneScreen() {
             {trainBoard?.updated_at && (
               <footer>Live data checked {new Date(trainBoard.updated_at * 1000).toLocaleTimeString()}</footer>
             )}
+            </div>
+            {scrolling && <p className="train-scroll-hint">More departures and notices — scrolling automatically</p>}
             <WeatherDisplay key={scene.revision} compact currentOnly />
             <time className="train-current-time" dateTime={now.toISOString()}>
               {now.toLocaleTimeString([], {

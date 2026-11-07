@@ -1,9 +1,33 @@
 # Raspberry Pi Web Display
 
-Milestone 1 builds a 32-bit Raspberry Pi OS appliance image for Raspberry Pi 2
-and Raspberry Pi 3. It boots to Chromium on HDMI and exposes authenticated HTTPS
-administration over DHCP Ethernet. Wi-Fi provisioning and remote firmware
-updates remain intentionally deferred.
+A 32-bit Raspberry Pi OS appliance for Raspberry Pi 2 and Raspberry Pi 3,
+with Chromium on HDMI, authenticated HTTPS administration, Wi-Fi provisioning,
+signed application updates and a PC display manager.
+
+## Display features
+
+The carousel supports websites, streamed/Plex video, clock/date/notice dashboards,
+live National Rail departure boards and OpenWeather scenes. Plex radio stations
+can play in the background across scene changes, pausing for videos with audio.
+
+Train boards show departures and clearly labelled rail replacement buses,
+platforms, station messages and per-service disruption notices. Status text is
+green for on-time services, amber for delays and flashing red for cancellations.
+Previous stops and calling-at lists each occupy one line, scrolling horizontally
+only when too long, with fixed labels and pauses at either end. Cancelled services
+hide these lists; actual last-reported observations remain visible when available.
+
+Weather appears in standalone scenes, optional dashboard widgets and a compact
+train-board widget, with local condition icons, Celsius temperatures and forecast
+data. Configure provider keys privately in administration on each device.
+Rail refresh timing is configurable (minimum 30 seconds); weather normally
+refreshes every 10 minutes. Failed fetches retry after 30 seconds.
+
+A transparent circle fills clockwise during timed scenes and is hidden while
+loading or playing uncapped videos. Local scenes and the circle respect an
+adjustable overscan safe area. Train boards include larger weather text/icons and
+a seconds clock in separate footer rows, preventing overlap. Oversized departure
+content scrolls vertically while the heading, weather and clock remain visible.
 
 ## Build
 
@@ -187,6 +211,38 @@ The authenticated Plex endpoints are `GET /api/plex/config`,
 address and whether a token is configured. A blank token on save keeps the
 current token; **Remove Plex settings** clears both server address and token.
 
+#### Background library radio
+
+The device administration page also offers **Background music**. Connect Plex,
+select an advertised music-library station (Library Radio, Deep Cuts Radio,
+Time Travel Radio, or Random Album Radio), choose volume, and explicitly enable
+playback. Music defaults **off**, including on existing installations; selecting
+a station alone does not enable it. Settings are private and independent of the
+carousel playlist. Removing Plex credentials disables music.
+
+A separate audio-only persistent mpv plays through HDMI across web, dashboard,
+weather, train and muted-video scenes, including single-page mode. Videos with
+audio pause music and release its ALSA device, then music resumes at the same
+position. The kiosk sees only scoped loopback control/stream URLs in
+`/run/web-display/music.json`; Plex tokens remain in the HTTPS service and never
+appear in player arguments. Tracks stream directly through a range-capable
+private relay using mpv's installed audio decoders; no Plex audio transcode or
+additional OS packages are required.
+
+The service owns a server-generated station queue, reports playing/paused/stopped
+timelines and retrieves a window centered on the completed track to find the
+next item. Station queues on the tested server are finite: reaching their actual
+end creates a **new queue for the same station**, rather than assuming Plex
+automatically refills them indefinitely. New queue creation may briefly interrupt
+audio, and stations may repeat tracks. Playback is not gapless or crossfaded.
+Up to three attempts handle connection,
+decoder and stalled-player failures; afterwards disable and re-enable music to
+retry. The card reports sanitized playback state/errors.
+
+Authenticated endpoints: `GET /api/plex/stations`, `GET /api/plex/music` and
+`PUT /api/plex/music` (session mutations require CSRF). Music settings are
+`enabled`, `station_key`, and integer `volume` (0–100, default 30).
+
 Slice 1 was accepted on 2026-10-19 after physical video playback confirmation on
 Pi 2 and Pi 3, unavailable-content and browser/player-crash recovery checks,
 single-URL restoration, and physical screen power-off/on recovery confirmation.
@@ -349,6 +405,26 @@ cd ui && npm install && npm run typecheck && npm test && npm run build
 and commit the regenerated `src/webdisplay/static/`. `npm run dev` runs a hot-reload
 server that proxies `/api` to a service on `https://localhost:8443`. The page is
 served with a strict Content-Security-Policy (no inline scripts or styles).
+
+### Overscan and local scene readability
+
+In device administration, open **Display → Overscan safe area (% each edge)**,
+then **Save settings**. The per-device setting defaults to **5%** on each edge,
+including existing devices, accepts whole percentages **0–10**, and survives
+restarts. It affects locally rendered train, weather, dashboard and recovery
+screens and the X11 countdown only; external web pages and video stay full-screen.
+Changes take effect shortly without rebooting.
+
+Train boards use larger departure, route-detail and notice text. Their heading,
+enlarged current-weather widget and clock stay visible while oversized departure tables
+and station/service notices scroll automatically, with a visible scrolling hint
+and pauses at each end. Long dashboard content also scrolls rather than being
+silently truncated. All content remains available, but arbitrarily long provider
+notices/routes cannot fit simultaneously on a finite screen, and a short scene
+duration may end before a complete scrolling pass. Previous-stop and calling-at
+lists scroll horizontally on separate single lines. Increase scene duration when
+needed. Layouts target both 1920×1080 and 1152×864; TV/hardware readability still
+requires checking on the actual display.
 
 ## Signed updates (milestone 3, Phase A implemented)
 

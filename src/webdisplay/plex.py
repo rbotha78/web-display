@@ -29,6 +29,7 @@ HLS_PROFILE_EXTRA = (
 RATING_KEY = re.compile(r"[0-9]{1,20}\Z")
 LIBRARY_KEY = re.compile(r"[0-9]{1,10}\Z")
 METADATA_KEY = re.compile(r"/library/metadata/[0-9]{1,20}/children\Z")
+STATION_KEY = re.compile(r"/library/sections/[0-9]{1,10}/stations/(?:1|2|3|8)\Z")
 LOG = logging.getLogger(__name__)
 
 
@@ -106,17 +107,20 @@ class PlexClient:
             url += "?" + urllib.parse.urlencode(query)
         return url
 
-    def open(self, path: str, query: dict[str, object] | None = None, timeout: int = 10):
-        request = urllib.request.Request(self.url(path, query), headers=self.headers)
+    def open(self, path: str, query: dict[str, object] | None = None, timeout: int = 10,
+             method: str = "GET", headers: dict[str, str] | None = None):
+        request = urllib.request.Request(self.url(path, query), headers={**self.headers, **(headers or {})},
+                                         method=method)
         response = self.opener.open(request, timeout=timeout)
         if _origin(response.geturl()) != _origin(self.server_url):
             response.close()
             raise ValueError("Plex server redirected to another host")
         return response
 
-    def xml(self, path: str, query: dict[str, object] | None = None) -> ET.Element:
+    def xml(self, path: str, query: dict[str, object] | None = None,
+            method: str = "GET") -> ET.Element:
         try:
-            with self.open(path, query) as response:
+            with self.open(path, query, method=method) as response:
                 data = response.read(MAX_XML_BYTES + 1)
                 if len(data) > MAX_XML_BYTES:
                     raise ValueError("Plex response exceeds the size limit")
@@ -147,6 +151,20 @@ class PlexClient:
             if item.attrib.get("type") in {"movie", "show"}
             and LIBRARY_KEY.fullmatch(item.attrib.get("key", ""))
         ]
+
+    def stations(self) -> list[dict[str, str]]:
+        result = []
+        for section in self.xml("/library/sections").findall("Directory"):
+            key = section.get("key", "")
+            if section.get("type") != "artist" or not LIBRARY_KEY.fullmatch(key):
+                continue
+            hubs = self.xml(f"/hubs/sections/{key}", {"includeStations": 1})
+            for item in hubs.iter("Playlist"):
+                station_key = item.get("key", "")
+                if STATION_KEY.fullmatch(station_key):
+                    result.append({"key": station_key, "title": item.get("title", "Radio"),
+                                   "library": section.get("title", "Music")})
+        return result
 
     def browse(self, key: str | None = None) -> list[dict[str, object]]:
         if key is None:

@@ -10,6 +10,7 @@ interface Props {
 export function DisplayCard({ notify, fail }: Props) {
   const [url, setUrl] = useState("");
   const [autoAp, setAutoAp] = useState(false);
+  const [safeArea, setSafeArea] = useState(5);
   const [loaded, setLoaded] = useState(false);
   const [busy, setBusy] = useState(false);
 
@@ -19,6 +20,7 @@ export function DisplayCard({ notify, fail }: Props) {
       .then((config) => {
         setUrl(config.url);
         setAutoAp(config.auto_ap);
+        setSafeArea(config.safe_area_percent ?? 5);
         setLoaded(true);
       })
       .catch(fail);
@@ -28,9 +30,10 @@ export function DisplayCard({ notify, fail }: Props) {
     event.preventDefault();
     setBusy(true);
     try {
-      const config = await api.saveConfig({ url, auto_ap: autoAp });
+      const config = await api.saveConfig({ url, auto_ap: autoAp, safe_area_percent: safeArea });
       setUrl(config.url);
       setAutoAp(config.auto_ap);
+      setSafeArea(config.safe_area_percent ?? 5);
       notify("Settings saved. The display will update shortly.", "success");
     } catch (error) {
       fail(error);
@@ -62,6 +65,14 @@ export function DisplayCard({ notify, fail }: Props) {
           disabled={!loaded}
         />
       </label>
+      <label>
+        Overscan safe area (% each edge)
+        <input type="number" min="0" max="10" step="1" required
+          value={safeArea} onChange={(event) => setSafeArea(event.target.valueAsNumber)}
+          disabled={!loaded} />
+      </label>
+      <p className="hint">Default 5%. Applies to local train, weather, dashboard and recovery screens
+        and the countdown, not web pages or video.</p>
       <label className="check">
         <input
           type="checkbox"

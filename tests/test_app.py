@@ -23,6 +23,22 @@ from http.server import ThreadingHTTPServer
 
 
 class ConfigTests(unittest.TestCase):
+    def test_safe_area_defaults_migrates_and_persists_without_accepting_invalid_values(self):
+        with tempfile.TemporaryDirectory(dir=".") as directory:
+            path = Path(directory) / "config.json"
+            store = ConfigStore(path)
+            self.assertEqual(store.load()["safe_area_percent"], 5)
+            path.write_text('{"url": ""}')
+            self.assertEqual(store.load()["safe_area_percent"], 5)
+            for percent in (0, 10, 5):
+                store.update(safe_area_percent=percent)
+                self.assertEqual(ConfigStore(path).load()["safe_area_percent"], percent)
+            for value in (-1, 11, True, 5.0, "5", None):
+                with self.subTest(value=value), self.assertRaises(ValueError):
+                    store.update(safe_area_percent=value)
+            self.assertEqual(store.load()["safe_area_percent"], 5)
+            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+
     def test_atomic_round_trip(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "config.json"
@@ -196,6 +212,19 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.status, 200)
         self.assertEqual(payload["url"], "https://example.com")
         self.assertFalse(payload["auto_ap"])
+        self.assertEqual(payload["safe_area_percent"], 5)
+        headers = {"Cookie": cookie, "X-CSRF-Token": csrf}
+        response, _ = self.request("PUT", "/api/config", {"safe_area_percent": 8}, {"Cookie": cookie})
+        self.assertEqual(response.status, 403)
+        response, payload = self.request("PUT", "/api/config", {"safe_area_percent": 8}, headers)
+        self.assertEqual(response.status, 200)
+        self.assertEqual(payload["safe_area_percent"], 8)
+        published = json.loads((Path(self.directory.name) / "playlist.json").read_text())
+        self.assertEqual(published["safe_area_percent"], 8)
+        self.assertNotIn("password", published)
+        response, _ = self.request("PUT", "/api/config", {"safe_area_percent": 11}, headers)
+        self.assertEqual(response.status, 400)
+        self.assertEqual(self.app.config.load()["safe_area_percent"], 8)
 
         response, payload = self.request(
             "PUT",
@@ -240,7 +269,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(saved["scenes"][0]["duration"], 60)
         path = Path(self.directory.name) / "playlist.json"
         published = json.loads(path.read_text())
-        self.assertEqual(published, {**saved, "revision": published["revision"]})
+        self.assertEqual(published, {**saved, "revision": published["revision"], "safe_area_percent": 5})
         self.assertTrue(published["revision"])
         self.assertEqual(path.stat().st_mode & 0o777, 0o640)
         private = Path(self.directory.name) / "config.json"
@@ -288,6 +317,25 @@ class ApiTests(unittest.TestCase):
         )
         self.assertEqual(response.status, 200)
         self.assertNotIn("private-token", json.dumps(result))
+        self.assertNotIn("token", result)
+
+    def test_music_settings_and_stations_require_authentication_and_csrf(self):
+        for path in ("/api/plex/music", "/api/plex/stations"):
+            response, _ = self.request("GET", path)
+            self.assertEqual(response.status, 401)
+        token, session = self.app.sessions.create()
+        cookie = {"Cookie": f"session={token}"}
+        response, config = self.request("GET", "/api/plex/music", headers=cookie)
+        self.assertEqual(response.status, 200)
+        self.assertFalse(config["enabled"])
+        body = {"enabled": False, "station_key": "", "volume": 40}
+        response, _ = self.request("PUT", "/api/plex/music", body, cookie)
+        self.assertEqual(response.status, 403)
+        response, result = self.request("PUT", "/api/plex/music", body,
+                                       {**cookie, "X-CSRF-Token": session.csrf})
+        self.assertEqual(response.status, 200)
+        self.assertEqual(result["volume"], 40)
+        self.assertNotIn("control_url", result)
         self.assertNotIn("token", result)
 
     def test_raildata_key_configuration_is_private_and_csrf_protected(self):

@@ -20,6 +20,7 @@ from pathlib import Path
 from .app import local_addresses
 from .carousel import Carousel, Playlist, validate_playlist
 from .scene_player import SceneRenderer, reachable, stop_process
+from .display import DEFAULT_SAFE_AREA_PERCENT, validate_safe_area
 
 LOG = logging.getLogger(__name__)
 
@@ -72,7 +73,9 @@ def fallback_html(
     certificate_path: Path,
     port: int,
     setup_ap_path: Path | None = None,
+    safe_area_percent: int = DEFAULT_SAFE_AREA_PERCENT,
 ) -> str:
+    safe = validate_safe_area(safe_area_percent)
     addresses = local_addresses()
     address = addresses[0] if addresses else socket.gethostname()
     setup_ap = read_setup_ap(setup_ap_path)
@@ -98,8 +101,9 @@ def fallback_html(
 <meta http-equiv="refresh" content="5"><style>
 html,body{{height:100%}}
 body{{margin:0;background:#111;color:#eee;font:2.2vw/1.25 system-ui,sans-serif;
-display:grid;place-items:center;overflow:hidden;text-align:center}}
-.wrap{{display:flex;align-items:center;justify-content:center;gap:4vw;max-width:96vw;max-height:96vh}}
+display:flex;flex-direction:column;justify-content:safe center;overflow:auto;text-align:center;
+box-sizing:border-box;padding:{safe}vh {safe}vw}}
+.wrap{{display:flex;flex-shrink:0;align-items:center;justify-content:center;gap:4vw;max-width:100%}}
 main{{flex:1 1 auto;min-width:0}} h1{{font-size:1.6em;margin:.2em 0}} p{{margin:.4em 0}}
 strong{{font-size:1.5em;letter-spacing:.15em}} small{{font-size:.7em;word-break:break-all}}
 aside{{flex:0 0 auto}} .qr svg{{display:block;width:min(40vh,30vw);height:min(40vh,30vw)}}
@@ -115,13 +119,16 @@ def write_fallback(
     certificate_path: Path,
     port: int,
     setup_ap_path: Path | None = None,
+    safe_area_percent: int = DEFAULT_SAFE_AREA_PERCENT,
 ) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, temporary = tempfile.mkstemp(prefix=".fallback.", dir=path.parent)
     temporary_path = Path(temporary)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as stream:
-            stream.write(fallback_html(pairing_path, certificate_path, port, setup_ap_path))
+            stream.write(fallback_html(
+                pairing_path, certificate_path, port, setup_ap_path, safe_area_percent,
+            ))
         os.replace(temporary_path, path)
     finally:
         temporary_path.unlink(missing_ok=True)
@@ -241,6 +248,13 @@ OFFLINE_HTML = (
     'display:grid;place-items:center;min-height:100vh">Waiting for network connection</body></html>'
 )
 FAILURE_THRESHOLD = 2
+
+
+def offline_html(safe_area_percent: int = DEFAULT_SAFE_AREA_PERCENT) -> str:
+    safe = validate_safe_area(safe_area_percent)
+    return OFFLINE_HTML.replace(
+        "min-height:100vh", f"min-height:100vh;box-sizing:border-box;padding:{safe}vh {safe}vw",
+    )
 
 
 def choose_destination(
@@ -378,6 +392,8 @@ def main() -> None:
     previous_revision = ""
     playlist_error = False
     display_recovery = DisplayRecovery()
+    from .music_player import MusicPlayer
+    music = MusicPlayer(target_path.with_name("music.json"), fallback_path.parent, args.mpv)
 
     def stop(*_: object) -> None:
         raise SystemExit
@@ -395,10 +411,12 @@ def main() -> None:
                     carousel.stop()
                     carousel = None
             revision = ""
+            safe_area = DEFAULT_SAFE_AREA_PERCENT
             try:
                 published = json.loads(Path(args.playlist).read_text(encoding="utf-8"))
                 playlist = validate_playlist(published, allow_runtime=True)
-                revision = published.get("revision", "")
+                safe_area = validate_safe_area(published.get("safe_area_percent", DEFAULT_SAFE_AREA_PERCENT))
+                revision = f"{published.get('revision', '')}:{safe_area}"
                 playlist_error = False
             except FileNotFoundError:
                 playlist = Playlist(enabled=False, scenes=[])
@@ -414,11 +432,13 @@ def main() -> None:
                     process = None
                     destination = ""
                     renderer = SceneRenderer(
-                        lambda url, pipes: launch(args.browser, url, pipes), fallback_path.parent, args.mpv
+                        lambda url, pipes: launch(args.browser, url, pipes), fallback_path.parent, args.mpv,
+                        music.pause_for_video,
                     )
                 if carousel is None or playlist != previous_playlist or revision != previous_revision:
                     if carousel:
                         carousel.stop()
+                    renderer.set_safe_area(safe_area)
                     carousel = Carousel(playlist, renderer)
                     previous_playlist = playlist
                     previous_revision = revision
@@ -432,12 +452,15 @@ def main() -> None:
                 carousel = None
                 previous_playlist = None
             target = target_path.read_text(encoding="utf-8").strip() if target_path.exists() else ""
-            fallback = fallback_html(pairing_path, certificate_path, args.admin_port, setup_ap_path)
+            fallback = fallback_html(
+                pairing_path, certificate_path, args.admin_port, setup_ap_path, safe_area,
+            )
             if fallback != last_fallback:
                 write_fallback(
-                    fallback_path, pairing_path, certificate_path, args.admin_port, setup_ap_path
+                    fallback_path, pairing_path, certificate_path, args.admin_port, setup_ap_path,
+                    safe_area,
                 )
-                offline_path.write_text(OFFLINE_HTML, encoding="utf-8")
+                offline_path.write_text(offline_html(safe_area), encoding="utf-8")
                 last_fallback = fallback
             desired, show_icon = choose_destination(
                 target,
@@ -455,6 +478,7 @@ def main() -> None:
             icon.set_visible(show_icon)
             time.sleep(1)
     finally:
+        music.close()
         stop_process(process)
         if renderer is not None:
             renderer.close()

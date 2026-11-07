@@ -10,6 +10,7 @@ from pathlib import Path
 from webdisplay.app import Application, ConfigStore
 from webdisplay.carousel import validate_playlist
 from webdisplay.plex import PlexClient, PlexPlaybackProxy, validate_server_url, validate_token
+from webdisplay.music import MusicRelay, validate_music
 
 
 class FakePlexHandler(http.server.BaseHTTPRequestHandler):
@@ -18,6 +19,9 @@ class FakePlexHandler(http.server.BaseHTTPRequestHandler):
     identifiers = []
     profiles = []
     transcode_params = []
+    timelines = []
+    queues_created = 0
+    queue_queries = []
     token = "private-test-token"
 
     def log_message(self, *_):
@@ -31,8 +35,33 @@ class FakePlexHandler(http.server.BaseHTTPRequestHandler):
             body = b'<MediaContainer friendlyName="Test Plex" machineIdentifier="machine-1" version="1" />'
             content_type = "application/xml"
         elif parsed.path == "/library/sections":
-            body = b'<MediaContainer><Directory key="1" title="Movies" type="movie" /></MediaContainer>'
+            body = b'<MediaContainer><Directory key="1" title="Movies" type="movie" /><Directory key="3" title="Music" type="artist" /></MediaContainer>'
             content_type = "application/xml"
+        elif parsed.path == "/hubs/sections/3":
+            self.assertEqual_query(urllib.parse.parse_qs(parsed.query), "includeStations", "1")
+            body = (b'<MediaContainer><Hub><Playlist key="/library/sections/3/stations/1" title="Library Radio" />'
+                    b'<Playlist key="/library/sections/3/stations/8" title="Deep Cuts Radio" />'
+                    b'<Playlist key="/library/metadata/42/station/x" title="Not a library station" />'
+                    b'</Hub></MediaContainer>')
+            content_type = "application/xml"
+        elif parsed.path == "/:/timeline":
+            self.timelines.append(urllib.parse.parse_qs(parsed.query))
+            body, content_type = b"<MediaContainer />", "application/xml"
+        elif parsed.path.startswith("/playQueues/"):
+            query = urllib.parse.parse_qs(parsed.query)
+            self.queue_queries.append(query)
+            center = int(query["center"][0])
+            body, content_type = self.queue_xml(int(parsed.path.rsplit("/", 1)[1]), center), "application/xml"
+        elif parsed.path.startswith("/library/parts/"):
+            body, content_type = b"test music bytes", "audio/mpeg"
+            if self.headers.get("Range") == "bytes=5-":
+                body = body[5:]
+                self.send_response(206)
+                self.send_header("Content-Range", "bytes 5-15/16")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
         elif parsed.path == "/library/sections/1/all":
             body = b'<MediaContainer><Video ratingKey="42" title="Example" type="movie" /></MediaContainer>'
             content_type = "application/xml"
@@ -57,6 +86,38 @@ class FakePlexHandler(http.server.BaseHTTPRequestHandler):
             return
         self.send_response(200)
         self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    @staticmethod
+    def assertEqual_query(query, key, expected):
+        if query.get(key) != [expected]:
+            raise AssertionError("missing station discovery option")
+
+    @staticmethod
+    def queue_xml(queue_id, center=1):
+        tracks = "".join(
+            f'<Track ratingKey="{i}" key="/library/metadata/{i}" playQueueItemID="{i}" title="Track {i}" duration="5000">'
+            f'<Media><Part key="/library/parts/{i}/1/file.mp3" /></Media></Track>'
+            for i in range(max(1, center - 5), min(32, center + 5) + 1)
+        )
+        return (f'<MediaContainer playQueueID="{queue_id}" playQueueVersion="1" playQueueSelectedItemID="1"'
+                f' playQueueTotalCount="32">{tracks}</MediaContainer>').encode()
+
+    def do_POST(self):
+        self.assert_token()
+        parsed = urllib.parse.urlsplit(self.path)
+        if parsed.path != "/playQueues":
+            self.send_error(404)
+            return
+        query = urllib.parse.parse_qs(parsed.query)
+        self.assertEqual_query(query, "type", "audio")
+        self.assertEqual_query(query, "uri",
+                               "server://machine-1/com.plexapp.plugins.library/library/sections/3/stations/1")
+        self.__class__.queues_created += 1
+        body = self.queue_xml(self.queues_created)
+        self.send_response(200)
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
@@ -129,6 +190,86 @@ class PlexTests(unittest.TestCase):
             "id": "42", "title": "Example", "type": "movie",
             "container": False, "duration": None,
         }])
+
+    def test_station_discovery_uses_advertised_library_stations_only(self):
+        self.assertEqual(self.client().stations(), [
+            {"key": "/library/sections/3/stations/1", "title": "Library Radio", "library": "Music"},
+            {"key": "/library/sections/3/stations/8", "title": "Deep Cuts Radio", "library": "Music"},
+        ])
+
+    def test_music_defaults_off_and_requires_valid_station_and_volume(self):
+        self.assertEqual(validate_music({}), {"enabled": False, "station_key": "", "volume": 30})
+        for value in ({"enabled": True}, {"volume": True}, {"volume": 101},
+                      {"station_key": "/library/metadata/42"}, {"enabled": "true"}):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                validate_music(value)
+
+    def test_music_relay_ranges_queue_window_renewal_and_idempotent_next(self):
+        FakePlexHandler.queues_created = 0
+        FakePlexHandler.queue_queries = []
+        FakePlexHandler.timelines = []
+        relay = MusicRelay(self.client)
+        try:
+            runtime = relay.configure({"enabled": True, "station_key": "/library/sections/3/stations/1",
+                                       "volume": 15}, "identity")
+            self.assertNotIn(FakePlexHandler.token, json.dumps(runtime))
+            control = lambda value: relay.control(value)
+            current = control({"action": "current"})
+            self.assertEqual(FakePlexHandler.queues_created, 1)
+            request = urllib.request.Request(current["url"], headers={"Range": "bytes=5-"})
+            with urllib.request.urlopen(request) as response:
+                self.assertEqual(response.status, 206)
+                self.assertEqual(response.read(), b"music bytes")
+            for _ in range(31):
+                previous = current
+                control({"action": "timeline", "track_id": current["track_id"], "state": "playing", "time": 100})
+                current = control({"action": "next", "track_id": previous["track_id"]})
+                self.assertEqual(control({"action": "next", "track_id": previous["track_id"]}), current)
+            self.assertEqual(current["track_id"], "32")
+            renewed = control({"action": "next", "track_id": "32"})
+            self.assertEqual(renewed["track_id"], "1")
+            self.assertEqual(FakePlexHandler.queues_created, 2)
+            self.assertEqual(FakePlexHandler.queue_queries[-1]["center"], ["32"])
+            self.assertEqual(FakePlexHandler.queue_queries[-1]["window"], ["5"])
+            self.assertTrue(any(q.get("state") == ["stopped"] and q.get("time") == ["5000"]
+                                for q in FakePlexHandler.timelines))
+            old_url = renewed["url"]
+            relay.configure({"enabled": False, "station_key": "/library/sections/3/stations/1",
+                             "volume": 15}, "identity")
+            with self.assertRaises(urllib.error.HTTPError) as error:
+                urllib.request.urlopen(old_url)
+            self.assertEqual(error.exception.code, 404)
+            error.exception.close()
+        finally:
+            relay.close()
+
+    def test_music_application_settings_private_and_independent_of_playlist(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            app = Application(root / "config.json", root / "pairing", root / "target", Path("/bin/true"))
+            try:
+                self.assertFalse(app.music_config()["enabled"])
+                app.save_plex_config({"server_url": self.url, "token": FakePlexHandler.token})
+                app.save_music_config({"enabled": True, "station_key": "/library/sections/3/stations/1",
+                                       "volume": 20})
+                published = (root / "music.json").read_text()
+                self.assertNotIn(FakePlexHandler.token, published)
+                self.assertNotIn(self.url, published)
+                app.music.control({"action": "current"})
+                queue = app.music.queue
+                app.save_playlist({"enabled": False, "scenes": []})
+                self.assertIs(app.music.queue, queue)
+                app.save_music_config({"enabled": True, "station_key": "/library/sections/3/stations/1",
+                                       "volume": 50})
+                self.assertIs(app.music.queue, queue)
+                app.save_plex_config({"clear_token": True})
+                self.assertFalse(app.music_config()["enabled"])
+                self.assertIsNone(app.music.queue)
+                with self.assertRaises(ValueError):
+                    app.save_music_config({"enabled": True, "station_key": "/library/sections/3/stations/2",
+                                           "volume": 20})
+            finally:
+                app.close()
 
     def test_proxy_keeps_token_out_of_stream_urls_and_stops_session(self):
         FakePlexHandler.sessions = []

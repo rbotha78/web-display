@@ -31,9 +31,11 @@ from .carousel import (
     validate_playlist,
     validate_url,
 )
+from .display import DEFAULT_SAFE_AREA_PERCENT, validate_safe_area
 from .hostname_helper import validate_hostname
 from .network import default_route_interface, internet_status, website_status
 from .plex import PlexClient, PlexPlaybackProxy, validate_server_url, validate_token
+from .music import MusicRelay, validate_music
 from .raildata import REFRESH_INTERVAL, RailDataWorker, validate_api_key, validate_refresh_interval
 from .weather import WeatherWorker, validate_weather_config
 from .storage import atomic_write
@@ -88,9 +90,11 @@ class ConfigStore:
         with self._lock:
             if not self.path.exists():
                 return {"url": "", "password": None, "auto_ap": False,
+                        "safe_area_percent": DEFAULT_SAFE_AREA_PERCENT,
                         "api_keys": [], "playlist": {"enabled": False, "scenes": []},
                         "plex_server_url": "", "plex_token": "", "plex_client_identifier": "",
                         "plex_default_bitrate_kbps": DEFAULT_PLEX_BITRATE_KBPS,
+                        "music": validate_music({}),
                         "raildata_api_key": "", "service_details_api_key": "",
                         "raildata_refresh_seconds": REFRESH_INTERVAL,
                         "weather": validate_weather_config({})}
@@ -100,6 +104,9 @@ class ConfigStore:
                 "url": validate_url(data.get("url", "")),
                 "password": data.get("password"),
                 "auto_ap": data.get("auto_ap") is True,
+                "safe_area_percent": validate_safe_area(
+                    data.get("safe_area_percent", DEFAULT_SAFE_AREA_PERCENT)
+                ),
                 "api_keys": valid_keys(data.get("api_keys")),
                 "playlist": validate_playlist(data.get("playlist", {"enabled": False, "scenes": []})),
                 "playlist_revision": data.get("playlist_revision", ""),
@@ -109,6 +116,7 @@ class ConfigStore:
                 "plex_default_bitrate_kbps": validate_plex_bitrate(
                     data.get("plex_default_bitrate_kbps", DEFAULT_PLEX_BITRATE_KBPS)
                 ),
+                "music": validate_music(data.get("music", {})),
                 "raildata_api_key": (
                     validate_api_key(data["raildata_api_key"])
                     if data.get("raildata_api_key") else ""
@@ -133,12 +141,16 @@ class ConfigStore:
             data.update(changes)
             data["url"] = validate_url(data.get("url", ""))
             data["auto_ap"] = validate_flag(data.get("auto_ap", False))
+            data["safe_area_percent"] = validate_safe_area(
+                data.get("safe_area_percent", DEFAULT_SAFE_AREA_PERCENT)
+            )
             data["playlist"] = validate_playlist(data.get("playlist", {"enabled": False, "scenes": []}))
             data["plex_server_url"] = validate_server_url(data["plex_server_url"]) if data.get("plex_server_url") else ""
             data["plex_token"] = validate_token(data["plex_token"]) if data.get("plex_token") else ""
             data["plex_default_bitrate_kbps"] = validate_plex_bitrate(
                 data.get("plex_default_bitrate_kbps", DEFAULT_PLEX_BITRATE_KBPS)
             )
+            data["music"] = validate_music(data.get("music", {}))
             data["raildata_api_key"] = (
                 validate_api_key(data["raildata_api_key"])
                 if data.get("raildata_api_key") else ""
@@ -321,6 +333,7 @@ class Application:
         self.config = ConfigStore(state_path)
         self.plex_client_identifier = self.config.ensure_plex_client_identifier()
         self.plex_proxy = PlexPlaybackProxy(self.plex_client)
+        self.music = MusicRelay(self.plex_client)
         self.train_board_path = target_path.with_name("train-board.json")
         self.raildata_worker = RailDataWorker(self.config.load, self.train_board_path)
         self.weather_worker = WeatherWorker(self.config.load, target_path.with_name("weather.json"))
@@ -382,6 +395,8 @@ class Application:
     def publish_target(self) -> None:
         with self.publish_lock:
             config = self.config.load()
+            music = self.music.configure(config["music"], (config["plex_server_url"], config["plex_token"]))
+            atomic_write(self.target_path.with_name("music.json"), json.dumps(music) + "\n", mode=0o640)
             playlist = validate_playlist(config["playlist"])
             self.plex_proxy.clear()
             runtime_scenes = []
@@ -404,6 +419,7 @@ class Application:
                 json.dumps({
                     **playlist, "scenes": runtime_scenes,
                     "revision": config.get("playlist_revision", ""),
+                    "safe_area_percent": config["safe_area_percent"],
                 }) + "\n",
                 mode=0o640,
             )
@@ -412,6 +428,23 @@ class Application:
         self.raildata_worker.close()
         self.weather_worker.close()
         self.plex_proxy.close()
+        self.music.close()
+
+    def music_config(self) -> dict[str, object]:
+        return {**self.config.load()["music"], "status": self.music.get_status()}
+
+    def save_music_config(self, value: object) -> dict[str, object]:
+        with self.publish_lock:
+            settings = validate_music(value)
+            if settings["station_key"] and (settings["enabled"] or
+                    settings["station_key"] != self.config.load()["music"]["station_key"]):
+                if settings["station_key"] not in {s["key"] for s in self.plex_client().stations()}:
+                    raise ValueError("Select a station advertised by this Plex server")
+            self.config.update(music=settings)
+            config = self.config.load()
+            runtime = self.music.configure(settings, (config["plex_server_url"], config["plex_token"]))
+            atomic_write(self.target_path.with_name("music.json"), json.dumps(runtime) + "\n", mode=0o640)
+        return self.music_config()
 
     def raildata_config(self) -> dict[str, object]:
         config = self.config.load()
@@ -512,6 +545,7 @@ class Application:
             self.config.update(
                 plex_server_url="",
                 plex_token="",
+                music={**current["music"], "enabled": False},
                 plex_default_bitrate_kbps=default_bitrate,
                 playlist_revision=secrets.token_hex(16),
             )
@@ -890,7 +924,8 @@ def make_handler(app: Application) -> type[BaseHTTPRequestHandler]:
                 config = app.config.load()
                 self._json(
                     HTTPStatus.OK,
-                    {"url": config["url"], "auto_ap": config["auto_ap"]},
+                    {"url": config["url"], "auto_ap": config["auto_ap"],
+                     "safe_area_percent": config["safe_area_percent"]},
                 )
                 return
             request_path = urlsplit(self.path)
@@ -905,6 +940,15 @@ def make_handler(app: Application) -> type[BaseHTTPRequestHandler]:
             if request_path.path == "/api/plex/config" and not request_path.query:
                 if self._require_session():
                     self._json(HTTPStatus.OK, app.plex_config())
+                return
+            if request_path.path in ("/api/plex/music", "/api/plex/stations") and not request_path.query:
+                if not self._require_session():
+                    return
+                try:
+                    self._json(HTTPStatus.OK, app.music_config() if request_path.path.endswith("/music")
+                               else {"items": app.plex_client().stations()})
+                except ValueError as error:
+                    self._json(HTTPStatus.BAD_GATEWAY, {"error": str(error)})
                 return
             if request_path.path in ("/api/plex/libraries", "/api/plex/browse"):
                 if not self._require_session():
@@ -1117,6 +1161,10 @@ def make_handler(app: Application) -> type[BaseHTTPRequestHandler]:
                     if self._require_session(csrf=True):
                         self._json(HTTPStatus.OK, app.save_plex_config(self._body()))
                     return
+                if self.path == "/api/plex/music":
+                    if self._require_session(csrf=True):
+                        self._json(HTTPStatus.OK, app.save_music_config(self._body()))
+                    return
                 if self.path == "/api/raildata/config":
                     if self._require_session(csrf=True):
                         self._json(HTTPStatus.OK, app.save_raildata_config(self._body()))
@@ -1136,13 +1184,16 @@ def make_handler(app: Application) -> type[BaseHTTPRequestHandler]:
                     changes["url"] = validate_url(body["url"])
                 if "auto_ap" in body:
                     changes["auto_ap"] = validate_flag(body["auto_ap"])
+                if "safe_area_percent" in body:
+                    changes["safe_area_percent"] = validate_safe_area(body["safe_area_percent"])
                 if not changes:
                     raise ValueError("No settings supplied")
                 config = app.config.update(**changes)
                 app.publish_target()
                 self._json(
                     HTTPStatus.OK,
-                    {"url": config["url"], "auto_ap": config["auto_ap"]},
+                    {"url": config["url"], "auto_ap": config["auto_ap"],
+                     "safe_area_percent": config["safe_area_percent"]},
                 )
             except ValueError as error:
                 self._json(HTTPStatus.BAD_REQUEST, {"error": str(error)})

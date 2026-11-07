@@ -4,10 +4,22 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-from webdisplay.kiosk import DisplayRecovery, clear_stale_profile_locks, main
+from webdisplay.kiosk import DisplayRecovery, clear_stale_profile_locks, fallback_html, offline_html, main
 
 
 class DisplayRecoveryTests(unittest.TestCase):
+    @patch("webdisplay.kiosk.local_addresses", return_value=["192.0.2.1"])
+    def test_setup_and_waiting_pages_use_the_same_safe_area(self, _addresses):
+        with tempfile.TemporaryDirectory(dir=".") as directory:
+            root = Path(directory)
+            for percent in (0, 5, 10):
+                with self.subTest(percent=percent):
+                    setup = fallback_html(root / "pairing", root / "cert", 8443,
+                                          safe_area_percent=percent)
+                    self.assertIn(f"padding:{percent}vh {percent}vw", setup)
+                    self.assertIn(f"padding:{percent}vh {percent}vw", offline_html(percent))
+                    self.assertNotIn("overflow:hidden", setup)
+
     @patch("webdisplay.kiosk.subprocess.run")
     def test_reconnect_enables_output_and_resets_ctm_once(self, run):
         recovery = DisplayRecovery()

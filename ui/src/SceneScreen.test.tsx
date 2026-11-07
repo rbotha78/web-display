@@ -9,6 +9,74 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+test("scrolls overflowing stop lists on one line but leaves short lists stationary", async () => {
+  vi.useFakeTimers();
+  vi.spyOn(HTMLElement.prototype, "scrollWidth", "get").mockImplementation(function (this: HTMLElement) {
+    return this.className === "train-stop-scroll" && this.textContent?.includes("Long station") ? 200 : 100;
+  });
+  vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(100);
+  vi.stubGlobal("fetch", vi.fn(async (path: string) => ({
+    ok: true,
+    json: async () => path === "/api/scene"
+      ? { kind: "train", revision: "scroll", scene_id: "hww", title: "How Wood", text: "" }
+      : path === "/api/weather" ? {}
+      : { rows: [{ scheduled: "12:00", destination: "Watford" }],
+          next: {
+            previous_stops: [[{ station: "Short station", scheduled: "11:50" }]],
+            calling_at: [
+              [{ station: "Long station", scheduled: "12:10" }],
+              [{ station: "Branch station", scheduled: "12:15" }],
+            ],
+          } },
+  })));
+  render(<SceneScreen />);
+  await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+  const lines = document.querySelectorAll(".train-stop-scroll");
+  expect(lines).toHaveLength(2);
+  expect(lines[1].textContent).toContain(" | Branch station");
+  await act(async () => { await vi.advanceTimersByTimeAsync(2500); });
+  expect(lines[0].scrollLeft).toBe(0);
+  expect(lines[1].scrollLeft).toBeGreaterThan(0);
+});
+
+test.each([["train", 0], ["weather", 10], ["dashboard", 5], ["recovery", 8]])(
+  "applies the published safe area to %s scenes without inline styles", async (kind, percent) => {
+    vi.stubGlobal("fetch", vi.fn(async (path: string) => ({
+      ok: true,
+      json: async () => path === "/api/scene"
+        ? { kind, revision: "safe", layout: "notice", text: "Local notice", safe_area_percent: percent }
+        : {},
+    })));
+    render(<SceneScreen />);
+    await waitFor(() => expect(screen.getByRole("main").classList.contains(`safe-area-${percent}`)).toBe(true));
+    expect(screen.getByRole("main").getAttribute("style")).toBeNull();
+  },
+);
+
+test("automatically scrolls overflowing departures and notices rather than dropping content", async () => {
+  vi.useFakeTimers();
+  vi.stubGlobal("fetch", vi.fn(async (path: string) => ({
+    ok: true,
+    json: async () => path === "/api/scene"
+      ? { kind: "train", revision: "long", scene_id: "station", title: "Station", text: "" }
+      : path === "/api/train?scene_id=station"
+        ? { rows: [{ scheduled: "12:00", destination: "Long destination", status: "On time" }],
+            alerts: ["Full station notice"], next: { calling_at: [[{ station: "Last calling point" }]] } }
+        : {},
+  })));
+  await act(async () => { render(<SceneScreen />); });
+  const content = screen.getByLabelText("Departures and notices");
+  Object.defineProperties(content, {
+    scrollHeight: { configurable: true, value: 1200 },
+    clientHeight: { configurable: true, value: 300 },
+  });
+  await act(async () => { vi.advanceTimersByTime(6000); });
+  expect(content.scrollTop).toBeGreaterThan(0);
+  expect(screen.getByText(/scrolling automatically/)).toBeTruthy();
+  expect(screen.getByText("Full station notice")).toBeTruthy();
+  expect(screen.getByText(/Last calling point/)).toBeTruthy();
+});
+
 test.each(["weather", "dashboard"])("shows current weather and forecast in %s scenes", async (kind) => {
   const fetch = vi.fn(async (path: string) => ({
     ok: true,

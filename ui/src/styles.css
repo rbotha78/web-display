@@ -131,19 +131,33 @@ body {
   text-align: left;
 }
 
+.safe-area-0 { --safe-x: 0vw; --safe-y: 0vh; }
+.safe-area-1 { --safe-x: 1vw; --safe-y: 1vh; }
+.safe-area-2 { --safe-x: 2vw; --safe-y: 2vh; }
+.safe-area-3 { --safe-x: 3vw; --safe-y: 3vh; }
+.safe-area-4 { --safe-x: 4vw; --safe-y: 4vh; }
+.safe-area-5 { --safe-x: 5vw; --safe-y: 5vh; }
+.safe-area-6 { --safe-x: 6vw; --safe-y: 6vh; }
+.safe-area-7 { --safe-x: 7vw; --safe-y: 7vh; }
+.safe-area-8 { --safe-x: 8vw; --safe-y: 8vh; }
+.safe-area-9 { --safe-x: 9vw; --safe-y: 9vh; }
+.safe-area-10 { --safe-x: 10vw; --safe-y: 10vh; }
+
 .scene-screen {
   position: fixed;
-  inset: 0;
+  inset: var(--safe-y, 5vh) var(--safe-x, 5vw);
+  box-shadow: 0 0 0 100vmax #101820;
   display: flex;
   flex-direction: column;
-  justify-content: center;
+  justify-content: safe center;
   align-items: center;
   gap: 4vh;
-  overflow: hidden;
-  padding: 4vh 4vw;
+  overflow: auto;
+  padding: 1vh 1vw;
   background: #101820;
   color: #f3f6f9;
   text-align: center;
+  overflow-wrap: anywhere;
 }
 
 .scene-clock time {
@@ -160,6 +174,7 @@ body {
 }
 
 .scene-notice {
+  flex-shrink: 0;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   max-width: 100%;
@@ -170,26 +185,39 @@ body {
 .scene-notice.small { font-size: 1.3vw; }
 
 .train-board {
-  width: 94vw;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
   text-align: left;
-  padding-bottom: 6vh;
+  padding-bottom: 0;
 }
 
-.train-screen { padding: 2vh 3vw 7vh; gap: 0; }
+.train-screen { gap: 0; overflow: hidden; }
 .train-screen .train-board { padding-bottom: 0; }
+.train-board > header { flex-shrink: 0; padding: 0 64px; overflow-wrap: anywhere; }
+.train-content { min-height: 0; flex: 1; overflow: auto; scrollbar-width: thin; }
+.train-scroll-hint { font-size: min(1.6vw, 2vh); margin: .3vh 0; color: #ffd447; }
+.train-board > .weather-summary, .train-current-time { flex-shrink: 0; }
 
 .train-current-time,
 .weather-current-time {
   position: fixed;
-  bottom: 2vh;
+  bottom: calc(var(--safe-y, 5vh) + 1vh);
   left: 50%;
   transform: translateX(-50%);
   font-size: 3vw;
   font-variant-numeric: tabular-nums;
 }
+.train-current-time { position: static; transform: none; align-self: center; font-size: min(3.4vw, 4vh); line-height: 1.2; margin-top: .6vh; }
+.weather-current-time { font-size: min(3vw, 4vh); line-height: 1.2; }
+.scene-screen:has(> .weather-current-time) { padding-bottom: 6vh; }
+.scene-screen > .weather-display { flex-shrink: 0; }
+.scene-clock { flex-shrink: 0; }
 
 .weather-display {
-  width: 92vw;
+  width: 100%;
   font-size: 2vw;
 }
 
@@ -205,7 +233,7 @@ body {
 .weather-dashboard { gap: 1vh; }
 .weather-dashboard .scene-clock time { font-size: 5vw; }
 .weather-dashboard .scene-clock p { font-size: 1.8vw; margin: .5vh; }
-.weather-dashboard .scene-notice { font-size: 1.8vw; max-height: 15vh; overflow: hidden; }
+.weather-dashboard .scene-notice { font-size: 1.8vw; }
 .weather-widget h2 { font-size: 2.5vw; }
 .weather-widget .weather-current strong { font-size: 4vw; }
 .weather-icon { width: min(5vw, 7vh); height: min(5vw, 7vh); flex-shrink: 0; }
@@ -239,12 +267,12 @@ body {
 .train-board footer {
   margin: .5vh 0;
   color: #b7c8d6;
-  font-size: min(1.4vw, 1.6vh);
+  font-size: min(1.6vw, 2vh);
 }
 
 .train-board .train-eyebrow {
   color: #ffd447;
-  font-size: min(1.5vw, 1.7vh);
+  font-size: min(1.8vw, 2.2vh);
   font-weight: 700;
   letter-spacing: .15em;
   text-transform: uppercase;
@@ -253,9 +281,14 @@ body {
 .train-board table {
   width: 100%;
   border-collapse: collapse;
-  font-size: min(2.2vw, 2.6vh);
+  font-size: min(3vw, 4vh);
   line-height: 1.2;
+  table-layout: fixed;
+  overflow-wrap: anywhere;
 }
+.train-board th:first-child { width: 13%; }
+.train-board th:nth-last-child(2):not(:nth-child(2)) { width: 15%; }
+.train-board th:last-child { width: 25%; }
 
 .train-board th,
 .train-board td {
@@ -266,7 +299,7 @@ body {
 
 .train-board th {
   color: #ffd447;
-  font-size: min(1.5vw, 1.7vh);
+  font-size: min(1.8vw, 2.4vh);
   text-transform: uppercase;
 }
 
@@ -281,7 +314,7 @@ body {
 .train-bus-label {
   display: block;
   color: #ffd447;
-  font-size: min(1.4vw, 1.6vh);
+  font-size: min(1.8vw, 2.4vh);
   font-weight: 700;
 }
 
@@ -295,7 +328,7 @@ body {
 }
 
 .train-calling {
-  font-size: min(1.3vw, 1.7vh);
+  font-size: min(2vw, 2.8vh);
   font-weight: 400;
   line-height: 1.3;
   overflow-wrap: anywhere;
@@ -305,9 +338,13 @@ body {
   margin: .4vh 0;
 }
 
+.train-stop-line { display: flex; gap: .4em; min-width: 0; }
+.train-stop-line > strong { flex-shrink: 0; white-space: nowrap; }
+.train-stop-scroll { min-width: 0; white-space: nowrap; overflow: hidden; }
+
 .train-service-notices {
   color: #ffd447;
-  font-size: min(1.3vw, 1.7vh);
+  font-size: min(2vw, 2.8vh);
   font-weight: 400;
   line-height: 1.3;
   overflow-wrap: anywhere;
@@ -318,17 +355,17 @@ body {
 .train-warning,
 .train-alerts {
   color: #ffd447;
-  font-size: min(1.5vw, 1.8vh);
+  font-size: min(2vw, 2.8vh);
 }
 
 .train-alerts p,
 .train-warning { margin: .5vh 0; }
-.train-screen .weather-summary h2 { font-size: min(1.5vw, 1.7vh); }
-.train-screen .weather-summary .weather-current { font-size: min(1.4vw, 1.7vh); }
-.train-screen .weather-summary .weather-current strong { font-size: min(2vw, 2.5vh); }
-.train-screen .weather-summary .weather-measurements { font-size: min(1.2vw, 1.5vh); }
-.train-screen .weather-summary footer { font-size: min(1vw, 1.3vh); }
-.train-current-time { font-size: min(3vw, 3.5vh); bottom: 1vh; }
+.train-screen .weather-summary h2 { font-size: min(2.3vw, 2.7vh); }
+.train-screen .weather-summary .weather-current { font-size: min(2.2vw, 2.7vh); }
+.train-screen .weather-summary .weather-current strong { font-size: min(3.2vw, 4vh); }
+.train-screen .weather-summary .weather-icon { width: min(3.2vw, 4.5vh); height: min(3.2vw, 4.5vh); }
+.train-screen .weather-summary .weather-measurements { font-size: min(1.9vw, 2.4vh); }
+.train-screen .weather-summary footer { font-size: min(1.5vw, 2vh); }
 
 .card.narrow {
   max-width: 26rem;

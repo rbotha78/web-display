@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from .display import DEFAULT_SAFE_AREA_PERCENT, countdown_position
+
 
 class SceneWindows:
     def __init__(self) -> None:
@@ -12,6 +14,7 @@ class SceneWindows:
         self.countdown_gc = None
         self.countdown_mask = None
         self.countdown_mask_gc = None
+        self.safe_area_percent = DEFAULT_SAFE_AREA_PERCENT
 
     def _connect(self):
         if self.display is None:
@@ -85,6 +88,9 @@ class SceneWindows:
             raise OSError("The display server does not support transparent countdown shapes")
         screen = display.screen()
         size = 48
+        x, y = countdown_position(
+            screen.width_in_pixels, screen.height_in_pixels, self.safe_area_percent,
+        )
         if self.countdown_window is None:
             self.countdown_pixmap = screen.root.create_pixmap(size, size, screen.root_depth)
             self.countdown_gc = self.countdown_pixmap.create_gc(
@@ -96,7 +102,7 @@ class SceneWindows:
                 foreground=1, background=0, line_width=2, arc_mode=X.ArcPieSlice,
             )
             self.countdown_window = screen.root.create_window(
-                max(0, screen.width_in_pixels - size - 16), 16, size, size, 0,
+                x, y, size, size, 0,
                 screen.root_depth, X.InputOutput, X.CopyFromParent,
                 background_pixmap=self.countdown_pixmap, override_redirect=True,
             )
@@ -119,7 +125,7 @@ class SceneWindows:
         self.countdown_window.shape_mask(shape.SO.Set, shape.SK.Bounding, 0, 0, self.countdown_mask)
         self.countdown_window.clear_area()
         self.countdown_window.map()
-        self.countdown_window.configure(stack_mode=X.Above)
+        self.countdown_window.configure(x=x, y=y, stack_mode=X.Above)
         display.sync()
 
     def hide_countdown(self) -> None:

@@ -52,6 +52,7 @@ class SceneServerTests(unittest.TestCase):
         self.assertNotIn("unsafe-inline", response.getheader("Content-Security-Policy"))
         self.assertEqual(payload["text"], "<script>not markup</script>")
         self.assertNotIn("url", payload)
+        self.assertEqual(payload["safe_area_percent"], 5)
         connection.request("GET", "/scene")
         response = connection.getresponse()
         index = response.read().decode()
@@ -80,6 +81,11 @@ class SceneServerTests(unittest.TestCase):
         self.assertTrue(server.ready.is_set())
         server.show(None)
         self.assertFalse(server.ready.is_set())
+        server.safe_area_percent = 8
+        server.show(None)
+        connection.request("GET", "/api/scene")
+        response = connection.getresponse()
+        self.assertEqual(json.loads(response.read())["safe_area_percent"], 8)
         connection.request("GET", "/api/scene", headers={"Host": "untrusted.example"})
         response = connection.getresponse()
         response.read()
@@ -151,6 +157,9 @@ class RendererTests(unittest.TestCase):
         self.assertEqual(self.renderer.state(), "playing")
 
     def test_countdown_shows_progress_and_hides_without_a_deadline(self):
+        self.renderer.set_safe_area(8)
+        self.assertEqual(self.renderer.server.safe_area_percent, 8)
+        self.assertEqual(self.renderer.windows.safe_area_percent, 8)
         self.renderer.countdown(0.25)
         self.renderer.windows.show_countdown.assert_called_with(0.25)
         self.renderer.countdown(None)
@@ -439,6 +448,7 @@ class RendererTests(unittest.TestCase):
         self.assertEqual(self.renderer.state(), "failed")
 
     def test_video_reuses_player_and_applies_next_scene_settings(self):
+        self.renderer.music_pause = Mock()
         self.start_video()
         self.renderer.ipc = Mock()
         self.renderer._command = Mock(return_value=False)
@@ -455,6 +465,9 @@ class RendererTests(unittest.TestCase):
         self.renderer._activate()
         self.renderer.windows.show_video.assert_called_once()
         self.renderer._command.assert_any_call(["set_property", "mute", False])
+        self.renderer.music_pause.assert_called_with(True)
+        self.renderer._stop_video()
+        self.renderer.music_pause.assert_called_with(False)
 
     def test_video_handover_waits_for_decoded_output_and_ignores_outgoing_stop(self):
         self.start_video()

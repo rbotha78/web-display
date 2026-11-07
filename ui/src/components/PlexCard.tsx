@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { api, type PlexConfig } from "../api";
 import type { Notice } from "./Toast";
+import { MusicCard } from "./MusicCard";
 
 interface Props {
   notify: (text: string, kind?: Notice["kind"]) => void;
@@ -61,6 +62,7 @@ export function PlexCard({ notify, fail }: Props) {
   }
 
   return (
+    <>
     <form className="card wide" onSubmit={save}>
       <h2>Plex Media Server</h2>
       <p className="muted">
@@ -98,5 +100,7 @@ export function PlexCard({ notify, fail }: Props) {
         )}
       </div>
     </form>
+    {config && <MusicCard key={config.server_url} configured={config.configured} notify={notify} fail={fail} />}
+    </>
   );
 }

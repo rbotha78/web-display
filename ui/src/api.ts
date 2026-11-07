@@ -6,6 +6,7 @@ export interface Session {
 export interface Config {
   url: string;
   auto_ap: boolean;
+  safe_area_percent: number;
 }
 
 export interface Scene {
@@ -42,6 +43,19 @@ export interface PlexConfig {
   configured: boolean;
   default_bitrate_kbps: number;
   server_name?: string;
+}
+
+export interface MusicConfig {
+  enabled: boolean;
+  station_key: string;
+  volume: number;
+  status: { state: string; title: string; error: string };
+}
+
+export interface MusicStation {
+  key: string;
+  title: string;
+  library: string;
 }
 
 export interface PlexBrowseItem {
@@ -197,6 +211,10 @@ export const api = {
   playlistStatus: () => request<PlaybackStatus>("/api/playlist/status"),
   savePlaylist: (playlist: Playlist) => request<Playlist>("/api/playlist", "PUT", playlist),
   plexConfig: () => request<PlexConfig>("/api/plex/config"),
+  musicConfig: () => request<MusicConfig>("/api/plex/music"),
+  musicStations: () => request<{ items: MusicStation[] }>("/api/plex/stations"),
+  saveMusicConfig: (config: { enabled: boolean; station_key: string; volume: number }) =>
+    request<MusicConfig>("/api/plex/music", "PUT", config),
   railDataConfig: () => request<RailDataConfig>("/api/raildata/config"),
   weatherConfig: () => request<WeatherConfig>("/api/weather/config"),
   saveWeatherConfig: (config: {

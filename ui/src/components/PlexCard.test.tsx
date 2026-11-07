@@ -9,6 +9,11 @@ afterEach(() => {
 });
 
 test("saves a write-only token and never renders the saved token", async () => {
+  vi.spyOn(api, "musicConfig").mockResolvedValue({
+    enabled: false, station_key: "", volume: 30,
+    status: { state: "disabled", title: "", error: "" },
+  });
+  vi.spyOn(api, "musicStations").mockResolvedValue({ items: [] });
   vi.spyOn(api, "plexConfig").mockResolvedValue({
     server_url: "http://plex.local:32400", configured: true, default_bitrate_kbps: 4000,
   });

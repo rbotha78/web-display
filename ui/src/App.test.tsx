@@ -14,6 +14,11 @@ function mockFetch(routes: Record<string, Handler>) {
     "GET /api/plex/config": () => ({
       body: { server_url: "", configured: false, default_bitrate_kbps: 4000 },
     }),
+    "GET /api/plex/music": () => ({
+      body: { enabled: false, station_key: "", volume: 30,
+        status: { state: "disabled", title: "", error: "" } },
+    }),
+    "GET /api/plex/stations": () => ({ body: { items: [] } }),
     "GET /api/raildata/config": () => ({
       body: { board_configured: false, details_configured: false, refresh_seconds: 60 },
     }),
@@ -120,7 +125,7 @@ test("dashboard loads settings and saves them with the CSRF token", async () => 
       },
     }),
     "GET /api/config": () => ({ body: { url: "https://example.com", auto_ap: false } }),
-    "PUT /api/config": () => ({ body: { url: "https://example.com", auto_ap: true } }),
+    "PUT /api/config": () => ({ body: { url: "https://example.com", auto_ap: true, safe_area_percent: 8 } }),
   });
   render(<App />);
   const url = (await screen.findByLabelText("Web page URL")) as HTMLInputElement;
@@ -129,14 +134,19 @@ test("dashboard loads settings and saves them with the CSRF token", async () => 
 
   const checkbox = screen.getByLabelText(/Start the setup access point automatically/) as HTMLInputElement;
   expect(checkbox.checked).toBe(false);
+  const safeArea = screen.getByLabelText("Overscan safe area (% each edge)") as HTMLInputElement;
+  expect(safeArea.value).toBe("5");
+  fireEvent.change(safeArea, { target: { value: "8" } });
   fireEvent.click(checkbox);
   fireEvent.click(screen.getByText("Save settings"));
   expect(await screen.findByText(/Settings saved/)).toBeTruthy();
+  expect(safeArea.value).toBe("8");
 
   const save = calls.find((call) => call.init.method === "PUT")!;
   expect(JSON.parse(save.init.body as string)).toEqual({
     url: "https://example.com",
     auto_ap: true,
+    safe_area_percent: 8,
   });
   expect((save.init.headers as Record<string, string>)["X-CSRF-Token"]).toBe("token-1");
 });
