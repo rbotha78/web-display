@@ -81,6 +81,14 @@ class UpdaterCase(unittest.TestCase):
 
 
 class InstallTests(UpdaterCase):
+    def test_repository_payload_installs_with_font_license(self):
+        bundle = builder.build_bundle(
+            self.directory / "repository.wdupdate", self.private, "1.1.0", 1, builder.PACKAGE,
+        )
+        self.updater.install(bundle)
+        license_path = self.root / "current" / "webdisplay" / "static" / "fonts" / "OFL.txt"
+        self.assertIn("SIL OPEN FONT LICENSE", license_path.read_text())
+
     def test_install_switches_current_and_marks_pending(self):
         result = self.install()
         self.assertEqual(result["version"], "1.1.0")

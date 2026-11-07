@@ -13,7 +13,8 @@ live National Rail departure boards and OpenWeather scenes. Plex radio stations
 can play in the background across scene changes, pausing for videos with audio.
 
 Train boards use locally bundled D-DIN regular and bold fonts (SIL Open Font
-License). They show departures and clearly labelled rail replacement buses,
+License, bundled as `fonts/OFL.txt` with update-compatible filenames).
+They show departures and clearly labelled rail replacement buses,
 platforms, station messages and per-service disruption notices. Status text is
 green for on-time services, amber for delays and flashing red for cancellations.
 Previous stops and calling-at lists each occupy one line, scrolling horizontally
