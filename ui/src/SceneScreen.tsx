@@ -23,6 +23,7 @@ interface TrainRow {
   status?: string;
   state?: "cancelled" | "delayed" | "on-time" | "";
   service_type?: "train" | "bus";
+  alerts?: string[];
 }
 
 interface CallingPoint {
@@ -217,6 +218,13 @@ export function SceneScreen() {
                         {row.destination || "Destination unavailable"}
                         {row.service_type === "bus" && (
                           <span className="train-bus-label">Rail replacement bus</span>
+                        )}
+                        {!!row.alerts?.length && (
+                          <div className="train-service-notices" aria-label={`Service notices for ${row.scheduled}`}>
+                            {row.alerts.map((notice, noticeIndex) => (
+                              <p key={noticeIndex}><strong>Service notice: </strong>{notice}</p>
+                            ))}
+                          </div>
                         )}
                       </td>
                       {trainBoard.platform_available && (

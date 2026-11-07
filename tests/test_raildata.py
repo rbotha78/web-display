@@ -19,6 +19,24 @@ from webdisplay.raildata import (
 
 
 class RailDataTests(unittest.TestCase):
+    def test_service_notices_include_board_and_details_reasons_without_duplicates(self):
+        board = {"trainServices": [
+            {"std": "12:00", "etd": "Cancelled", "serviceID": "next",
+             "adhocAlerts": ["<p>Use replacement buses</p>"], "cancelReason": "Staff shortage"},
+            {"std": "12:30", "etd": "Delayed", "delayReason": "Signal failure"},
+        ]}
+        details = {
+            "adhocAlerts": ["Use replacement buses", "Tickets accepted on local buses"],
+            "cancelReason": "Staff shortage", "overdueMessage": "Awaiting an update",
+        }
+        with patch("webdisplay.raildata._request", side_effect=[board, details]):
+            result = RailDataClient("key", "details-key").fetch("HWW")
+        self.assertEqual(result["rows"][0]["alerts"], [
+            "Use replacement buses", "Cancellation reason: Staff shortage",
+            "Tickets accepted on local buses", "Service update: Awaiting an update",
+        ])
+        self.assertEqual(result["rows"][1]["alerts"], ["Delay reason: Signal failure"])
+
     def test_replacement_buses_merge_with_trains_in_departure_order_across_midnight(self):
         board = {
             "generatedAt": "2026-11-07T23:50:00+00:00",

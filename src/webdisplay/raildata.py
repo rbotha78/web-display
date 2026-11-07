@@ -164,6 +164,18 @@ def _service_state(cancelled: bool, scheduled: str, estimated: str) -> str:
     return ""
 
 
+def _service_notices(service: dict[str, object]) -> list[str]:
+    notices = _station_messages(service.get("adhocAlerts", []))
+    for field, label in (
+        ("cancelReason", "Cancellation reason"),
+        ("delayReason", "Delay reason"),
+        ("overdueMessage", "Service update"),
+    ):
+        messages = _station_messages([service.get(field)])
+        notices.extend(f"{label}: {message}" for message in messages)
+    return list(dict.fromkeys(notices))
+
+
 def _calling_points(value: object) -> list[list[dict[str, object]]]:
     groups = []
     for group in value if isinstance(value, list) else []:
@@ -250,10 +262,7 @@ class RailDataClient:
                 "cancelled": cancelled,
                 "state": _service_state(cancelled, scheduled, estimated),
                 "service_type": "bus" if service.get("serviceType") == "bus" else "train",
-                "alerts": [
-                    item for item in service.get("adhocAlerts", [])
-                    if isinstance(item, str)
-                ] if isinstance(service.get("adhocAlerts", []), list) else [],
+                "alerts": _service_notices(service),
             })
 
         details: dict[str, object] = {}
@@ -295,6 +304,9 @@ class RailDataClient:
         else:
             status = "Status unavailable"
         if rows:
+            rows[0]["alerts"] = list(dict.fromkeys([
+                *rows[0]["alerts"], *_service_notices(details),
+            ]))
             rows[0]["status"] = status
             rows[0]["state"] = _service_state(cancelled, scheduled, compare_time)
             if estimated.lower() == "on time" and not actual and not cancelled:

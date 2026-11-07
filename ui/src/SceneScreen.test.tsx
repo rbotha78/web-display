@@ -47,7 +47,8 @@ test.each(["state", "flag"])("hides cancelled-service stops using the %s and dis
           rows: [
             { scheduled: "12:00", destination: "A", status: "Cancelled",
               state: cancellation === "state" ? "cancelled" : "",
-              cancelled: cancellation === "flag", service_type: "bus" },
+              cancelled: cancellation === "flag", service_type: "bus",
+              alerts: ["Cancellation reason: Staff shortage", "<b>Use local buses</b>"] },
             { scheduled: "12:10", destination: "B", estimated: "12:15", state: "delayed" },
             { scheduled: "12:20", destination: "C", estimated: "On time", state: "on-time" },
           ],
@@ -61,6 +62,9 @@ test.each(["state", "flag"])("hides cancelled-service stops using the %s and dis
   expect(screen.getByText("On time").className).toBe("train-on-time");
   expect(screen.getByText("Rail replacement bus")).toBeTruthy();
   expect(screen.getByText("Bus stop")).toBeTruthy();
+  expect(screen.getByText("Cancellation reason: Staff shortage")).toBeTruthy();
+  expect(screen.getByText("<b>Use local buses</b>")).toBeTruthy();
+  expect(document.querySelector(".train-service-notices b")).toBeNull();
   expect(screen.queryByText("Previous stops:")).toBeNull();
   expect(screen.queryByText("Calling at:")).toBeNull();
   expect(screen.queryByText(/Previous stop \(/)).toBeNull();
