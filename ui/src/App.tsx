@@ -12,6 +12,7 @@ export function App() {
   const [canManageKeys, setCanManageKeys] = useState(true);
   const initialSession = useRef<Promise<Session> | null>(null);
   const managerLogin = useRef(false);
+  const onExpired = useCallback(() => setView("login"), []);
 
   const notify = useCallback((text: string, kind: Notice["kind"] = "info") => {
     setNotice({ text, kind, id: Date.now() });
@@ -90,7 +91,7 @@ export function App() {
             notify={notify}
           />
         )}
-        {view === "admin" && <Dashboard notify={notify} onExpired={() => setView("login")} canManageKeys={canManageKeys} />}
+        {view === "admin" && <Dashboard notify={notify} onExpired={onExpired} canManageKeys={canManageKeys} />}
       </main>
       <Toast notice={notice} />
     </div>

@@ -3,6 +3,8 @@
 A 32-bit Raspberry Pi OS appliance for Raspberry Pi 2 and Raspberry Pi 3,
 with Chromium on HDMI, authenticated HTTPS administration, Wi-Fi provisioning,
 signed application updates and a PC display manager.
+Saving settings retains the saved values when confirmation notifications appear,
+without reloading stale configuration into the editor.
 
 ## Display features
 
