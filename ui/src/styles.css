@@ -1,3 +1,19 @@
+@font-face {
+  font-family: "D-DIN";
+  src: url("./fonts/D-DIN.otf") format("opentype");
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "D-DIN";
+  src: url("./fonts/D-DIN-Bold.otf") format("opentype");
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+}
+
 :root {
   color-scheme: dark light;
   --bg: #0f1419;
@@ -194,7 +210,7 @@ body {
   padding-bottom: 0;
 }
 
-.train-screen { gap: 0; overflow: hidden; }
+.train-screen { gap: 0; overflow: hidden; font-family: "D-DIN", sans-serif; font-variant-numeric: tabular-nums; }
 .train-screen .train-board { padding-bottom: 0; }
 .train-board > header { flex-shrink: 0; padding: 0 64px; overflow-wrap: anywhere; }
 .train-content { min-height: 0; flex: 1; overflow: auto; scrollbar-width: thin; }

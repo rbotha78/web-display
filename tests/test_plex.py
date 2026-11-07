@@ -6,11 +6,14 @@ import urllib.parse
 import urllib.request
 import unittest
 from pathlib import Path
+from unittest.mock import Mock, patch
 
 from webdisplay.app import Application, ConfigStore
 from webdisplay.carousel import validate_playlist
 from webdisplay.plex import PlexClient, PlexPlaybackProxy, validate_server_url, validate_token
 from webdisplay.music import MusicRelay, validate_music
+from webdisplay.sleep import DAYS, default_schedule
+from webdisplay.storage import atomic_write
 
 
 class FakePlexHandler(http.server.BaseHTTPRequestHandler):
@@ -22,6 +25,7 @@ class FakePlexHandler(http.server.BaseHTTPRequestHandler):
     timelines = []
     queues_created = 0
     queue_queries = []
+    slow_music = None
     token = "private-test-token"
 
     def log_message(self, *_):
@@ -53,6 +57,19 @@ class FakePlexHandler(http.server.BaseHTTPRequestHandler):
             center = int(query["center"][0])
             body, content_type = self.queue_xml(int(parsed.path.rsplit("/", 1)[1]), center), "application/xml"
         elif parsed.path.startswith("/library/parts/"):
+            if self.slow_music is not None:
+                started, closed = self.slow_music
+                self.send_response(200)
+                self.send_header("Content-Type", "audio/mpeg")
+                self.send_header("Content-Length", "131072")
+                self.end_headers()
+                self.wfile.write(b"x")
+                self.wfile.flush()
+                started.set()
+                self.connection.settimeout(3)
+                if self.connection.recv(1) == b"":
+                    closed.set()
+                return
             body, content_type = b"test music bytes", "audio/mpeg"
             if self.headers.get("Range") == "bytes=5-":
                 body = body[5:]
@@ -242,6 +259,82 @@ class PlexTests(unittest.TestCase):
             error.exception.close()
         finally:
             relay.close()
+
+    def test_sleep_stops_relay_upstream_queue_and_timeline_and_wake_creates_new_queue(self):
+        FakePlexHandler.queues_created = 0
+        FakePlexHandler.timelines = []
+        with tempfile.TemporaryDirectory(dir=".") as directory:
+            sleep_path = Path(directory) / "sleep.json"
+            schedule = default_schedule()
+            atomic_write(sleep_path, json.dumps({**schedule, "wake_until": None}))
+            relay = MusicRelay(self.client, sleep_path)
+            try:
+                relay.configure({"enabled": True, "station_key": "/library/sections/3/stations/1",
+                                 "volume": 30}, "identity")
+                current = relay.control({"action": "current"})
+                self.assertEqual(FakePlexHandler.queues_created, 1)
+                upstream = Mock()
+                with relay.streams_lock:
+                    relay.streams.add(upstream)
+                stopped = threading.Event()
+                original_stop = relay._stop
+
+                def stop():
+                    original_stop()
+                    stopped.set()
+
+                for day in DAYS:
+                    schedule["days"][day] = {"enabled": True, "start": "00:00", "end": "23:59"}
+                with patch.object(relay, "_stop", side_effect=stop), \
+                     patch("webdisplay.sleep.time.time", return_value=1793660400):
+                    atomic_write(sleep_path, json.dumps({**schedule, "wake_until": None}))
+                    self.assertTrue(stopped.wait(2), "Sleep monitor did not stop the upstream relay")
+                    self.assertIsNone(relay.queue)
+                    self.assertIsNone(relay.track)
+                    upstream.fp.raw._sock.shutdown.assert_called_once()
+                    upstream.close.assert_called_once()
+                    self.assertEqual(relay.get_status()["state"], "sleeping")
+                    self.assertTrue(any(t["state"] == ["stopped"] for t in FakePlexHandler.timelines))
+                    with self.assertRaises(ValueError):
+                        relay.control({"action": "current"})
+                    self.assertEqual(FakePlexHandler.queues_created, 1)
+                    with self.assertRaises(urllib.error.HTTPError) as error:
+                        urllib.request.urlopen(current["url"])
+                    self.assertEqual(error.exception.code, 404)
+                    error.exception.close()
+                    atomic_write(sleep_path, json.dumps({**schedule, "wake_until": 1793664000}))
+                    renewed = relay.control({"action": "current"})
+                    self.assertEqual(FakePlexHandler.queues_created, 2)
+                    self.assertNotEqual(renewed["url"], current["url"])
+                    self.assertTrue(relay.settings["enabled"])
+            finally:
+                relay.close()
+
+    def test_sleep_interrupts_a_live_stalled_upstream_audio_read(self):
+        started, closed = threading.Event(), threading.Event()
+        FakePlexHandler.slow_music = (started, closed)
+        with tempfile.TemporaryDirectory(dir=".") as directory:
+            sleep_path = Path(directory) / "sleep.json"
+            schedule = default_schedule()
+            atomic_write(sleep_path, json.dumps({**schedule, "wake_until": None}))
+            relay = MusicRelay(self.client, sleep_path)
+            response = None
+            try:
+                relay.configure({"enabled": True, "station_key": "/library/sections/3/stations/1",
+                                 "volume": 30}, "identity")
+                current = relay.control({"action": "current"})
+                response = urllib.request.urlopen(current["url"], timeout=3)
+                self.assertTrue(started.wait(1))
+                for day in DAYS:
+                    schedule["days"][day] = {"enabled": True, "start": "00:00", "end": "23:59"}
+                with patch("webdisplay.sleep.time.time", return_value=1793660400):
+                    atomic_write(sleep_path, json.dumps({**schedule, "wake_until": None}))
+                    self.assertTrue(closed.wait(2), "The upstream audio socket remained open during sleep")
+            finally:
+                if response is not None:
+                    response.close()
+                relay.close()
+                FakePlexHandler.slow_music = None
 
     def test_music_application_settings_private_and_independent_of_playlist(self):
         with tempfile.TemporaryDirectory() as directory:

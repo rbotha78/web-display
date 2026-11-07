@@ -12,6 +12,7 @@ import type { Notice } from "./Toast";
 import { ManagerKeysCard } from "./ManagerKeysCard";
 import { UpdatesCard } from "./UpdatesCard";
 import { WifiCard } from "./WifiCard";
+import { SleepCard } from "./SleepCard";
 
 interface Props {
   notify: (text: string, kind?: Notice["kind"]) => void;
@@ -54,6 +55,7 @@ export function Dashboard({ notify, onExpired, canManageKeys }: Props) {
     <div className="grid">
       <StatusCard status={status} network={network} />
       <DisplayCard notify={notify} fail={fail} />
+      <SleepCard notify={notify} fail={fail} />
       <PlexCard notify={notify} fail={fail} />
       <RailDataCard notify={notify} fail={fail} />
       <WeatherCard notify={notify} fail={fail} />

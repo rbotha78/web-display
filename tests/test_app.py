@@ -20,9 +20,55 @@ from webdisplay.app import (
 )
 from webdisplay.kiosk import screen_size
 from http.server import ThreadingHTTPServer
+from webdisplay.sleep import default_schedule
 
 
 class ConfigTests(unittest.TestCase):
+    def test_wake_survives_application_restart_and_republishes_the_same_deadline(self):
+        with tempfile.TemporaryDirectory(dir=".") as directory:
+            root = Path(directory)
+            paths = (root / "config", root / "pairing", root / "target", Path("/bin/true"))
+            first = Application(*paths)
+            schedule = default_schedule()
+            schedule["days"]["monday"]["enabled"] = True
+            try:
+                first.save_sleep_config(schedule)
+                deadline = first.wake({"duration_minutes": 60})["wake_until"]
+            finally:
+                first.close()
+            second = Application(*paths)
+            try:
+                status = second.sleep_config()
+                self.assertEqual(status["wake_until"], deadline)
+                self.assertEqual(status["days"], schedule["days"])
+                published = json.loads((root / "sleep.json").read_text())
+                self.assertEqual(published, {**schedule, "wake_until": deadline})
+                self.assertFalse(status["sleeping"])
+            finally:
+                second.close()
+
+    def test_sleep_migration_private_persistence_and_invalid_update_is_atomic(self):
+        with tempfile.TemporaryDirectory(dir=".") as directory:
+            path = Path(directory) / "config.json"
+            store = ConfigStore(path)
+            self.assertEqual(store.load()["sleep"], default_schedule())
+            path.write_text('{"url": "https://example.com", "password": null}')
+            self.assertIsNone(store.load()["sleep_wake_until"])
+            self.assertEqual(store.load()["sleep"], default_schedule())
+            schedule = default_schedule()
+            schedule["days"]["sunday"]["enabled"] = True
+            store.update(sleep=schedule, sleep_wake_until=1793650000)
+            reloaded = ConfigStore(path).load()
+            self.assertEqual(reloaded["sleep"], schedule)
+            self.assertEqual(reloaded["sleep_wake_until"], 1793650000)
+            self.assertEqual(reloaded["url"], "https://example.com")
+            before = path.read_bytes()
+            schedule["days"]["sunday"]["end"] = "22:00"
+            with self.assertRaises(ValueError):
+                store.update(sleep=schedule)
+            self.assertEqual(path.read_bytes(), before)
+            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+
     def test_safe_area_defaults_migrates_and_persists_without_accepting_invalid_values(self):
         with tempfile.TemporaryDirectory(dir=".") as directory:
             path = Path(directory) / "config.json"
@@ -107,6 +153,55 @@ class AuthenticationTests(unittest.TestCase):
 
 
 class ApiTests(unittest.TestCase):
+    def test_sleep_api_requires_auth_csrf_validates_and_publishes_private_runtime(self):
+        schedule = default_schedule()
+        schedule["days"]["monday"]["enabled"] = True
+        for method, route, body in (
+            ("GET", "/api/sleep", None), ("PUT", "/api/sleep", schedule),
+            ("POST", "/api/sleep/wake", {"duration_minutes": 15}),
+        ):
+            response, _ = self.request(method, route, body)
+            self.assertEqual(response.status, 401)
+        token, session = self.app.sessions.create()
+        cookie = {"Cookie": f"session={token}"}
+        for method, route, body in (
+            ("PUT", "/api/sleep", schedule), ("POST", "/api/sleep/wake", {"duration_minutes": 15}),
+        ):
+            response, _ = self.request(method, route, body, cookie)
+            self.assertEqual(response.status, 403)
+        headers = {**cookie, "X-CSRF-Token": session.csrf}
+        response, status = self.request("PUT", "/api/sleep", schedule, headers)
+        self.assertEqual(response.status, 200)
+        self.assertEqual(status["days"], schedule["days"])
+        self.assertTrue({"sleeping", "scheduled_sleep", "wake_until", "device_time", "timezone"} <= status.keys())
+        for duration in (15, 30, 60, 120, 240):
+            before = webdisplay_app.time.time()
+            response, status = self.request("POST", "/api/sleep/wake", {"duration_minutes": duration}, headers)
+            self.assertEqual(response.status, 200)
+            self.assertGreaterEqual(status["wake_until"], before + duration * 60)
+            self.assertFalse(status["sleeping"])
+        deadline = self.app.config.load()["sleep_wake_until"]
+        self.app.publish_target()
+        runtime_path = self.app.target_path.with_name("sleep.json")
+        runtime = json.loads(runtime_path.read_text())
+        self.assertEqual(runtime, {**schedule, "wake_until": deadline})
+        self.assertEqual(runtime_path.stat().st_mode & 0o777, 0o640)
+        self.assertEqual(ConfigStore(self.app.config.path).load()["sleep_wake_until"], deadline)
+        for duration in (True, 15.0, "15", 1, -1, None):
+            response, _ = self.request("POST", "/api/sleep/wake", {"duration_minutes": duration}, headers)
+            self.assertEqual(response.status, 400)
+        response, _ = self.request("PUT", "/api/sleep", {"days": {}}, headers)
+        self.assertEqual(response.status, 400)
+        self.assertEqual(json.loads(runtime_path.read_text()), runtime)
+        response, status = self.request("POST", "/api/sleep/wake", {"duration_minutes": 0}, headers)
+        self.assertEqual(response.status, 200)
+        self.assertIsNone(status["wake_until"])
+        self.assertEqual(status["days"], schedule["days"])
+        self.assertIsNone(json.loads(runtime_path.read_text())["wake_until"])
+        key = self.app.create_key("Sleep manager")["key"]
+        response, _ = self.request("PUT", "/api/sleep", schedule, {"Authorization": f"Bearer {key}"})
+        self.assertEqual(response.status, 200)
+
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         root = Path(self.directory.name)
@@ -251,6 +346,31 @@ class ApiTests(unittest.TestCase):
             "https://example.com",
         )
 
+    def test_audio_output_auth_availability_and_runtime_publication(self):
+        output = "alsa/plughw:CARD=USB,DEV=0"
+        response, _ = self.request("GET", "/api/audio/outputs")
+        self.assertEqual(response.status, 401)
+        token, session = self.app.sessions.create()
+        cookie = {"Cookie": f"session={token}"}
+        headers = {**cookie, "X-CSRF-Token": session.csrf}
+        with patch("webdisplay.app.audio_outputs", return_value=[{"id": output, "label": "USB"}]):
+            response, payload = self.request("GET", "/api/audio/outputs", headers=cookie)
+            self.assertEqual(payload["items"][0]["id"], output)
+            response, _ = self.request("PUT", "/api/config", {"audio_output": output}, cookie)
+            self.assertEqual(response.status, 403)
+            response, payload = self.request("PUT", "/api/config", {"audio_output": output}, headers)
+            self.assertEqual(response.status, 200)
+            self.assertEqual(payload["audio_output"], output)
+        for name in ("playlist.json", "music.json"):
+            self.assertEqual(json.loads((Path(self.directory.name) / name).read_text())["audio_output"], output)
+        with patch("webdisplay.app.audio_outputs", return_value=[]):
+            response, _ = self.request("PUT", "/api/config", {"audio_output": output}, headers)
+            self.assertEqual(response.status, 200)
+            response, _ = self.request("PUT", "/api/config",
+                                       {"audio_output": "alsa/plughw:CARD=Missing,DEV=0"}, headers)
+            self.assertEqual(response.status, 400)
+        self.assertEqual(self.app.config.load()["audio_output"], output)
+
     def test_playlist_auth_validation_and_atomic_publication(self):
         response, _ = self.request("GET", "/api/playlist")
         self.assertEqual(response.status, 401)
@@ -269,7 +389,8 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(saved["scenes"][0]["duration"], 60)
         path = Path(self.directory.name) / "playlist.json"
         published = json.loads(path.read_text())
-        self.assertEqual(published, {**saved, "revision": published["revision"], "safe_area_percent": 5})
+        self.assertEqual(published, {**saved, "revision": published["revision"], "safe_area_percent": 5,
+                                     "audio_output": "alsa/hdmi:CARD=vc4hdmi,DEV=0"})
         self.assertTrue(published["revision"])
         self.assertEqual(path.stat().st_mode & 0o777, 0o640)
         private = Path(self.directory.name) / "config.json"
@@ -481,9 +602,11 @@ class StaticUiTests(unittest.TestCase):
             (root / "assets").mkdir(parents=True)
             (root / "index.html").write_text("<html></html>")
             (root / "assets" / "app.js").write_text("1")
+            (root / "assets" / "rail.otf").write_bytes(b"font")
             (Path(directory) / "secret.html").write_text("secret")
             self.assertEqual(static_file("/", root), (b"<html></html>", "text/html"))
             self.assertEqual(static_file("/assets/app.js?x=1", root), (b"1", "text/javascript"))
+            self.assertEqual(static_file("/assets/rail.otf", root), (b"font", "font/otf"))
             self.assertIsNone(static_file("/../secret.html", root))
             self.assertIsNone(static_file("/assets/../../secret.html", root))
             self.assertIsNone(static_file("/%2e%2e/secret.html", root))

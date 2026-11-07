@@ -4,3 +4,10 @@ __pycache__/
 *.py[cod]
 
 ui/node_modules/
+
+android/.gradle/
+android/.kotlin/
+android/**/build/
+android/local.properties
+android/*.jks
+android/*.keystore

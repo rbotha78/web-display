@@ -30,6 +30,7 @@ from .hls import MAX_VIDEO_BITRATE, resolve_video_url
 from .browser import BrowserError, PersistentBrowser, Tab
 from .scene_windows import SceneWindows
 from .display import DEFAULT_SAFE_AREA_PERCENT
+from .audio import DEFAULT_AUDIO_OUTPUT, audio_outputs
 
 LOG = logging.getLogger(__name__)
 STALL_TIMEOUT = 30
@@ -204,6 +205,7 @@ class SceneRenderer:
     ):
         self.runtime = runtime
         self.mpv = mpv
+        self.audio_output = DEFAULT_AUDIO_OUTPUT
         self.music_pause = music_pause or (lambda _: None)
         self.server = SceneServer()
         self.browser = PersistentBrowser(launch_browser, self.server.url)
@@ -400,7 +402,7 @@ class SceneRenderer:
             "--demuxer-lavf-o=protocol_whitelist=[http,https,tcp,tls,crypto,data]",
             "--no-terminal", f"--wid={self.windows.video_id()}",
             "--vo=gpu", "--gpu-context=x11egl", "--hwdec=v4l2m2m",
-            "--audio-device=alsa/hdmi:CARD=vc4hdmi,DEV=0",
+            "--ao=alsa", f"--audio-device={self.audio_output}",
             *audio_options, "--idle=yes", "--force-window=immediate",
             "--pause=yes", "--keep-open=always",
             f"--hls-bitrate={self._video_bitrate()}",
@@ -545,6 +547,16 @@ class SceneRenderer:
     def state(self) -> PlaybackState:
         if self.scene is None or self.preparation_failed:
             return "failed"
+        if self.scene["kind"] == "video" and self.scene.get("audio_enabled"):
+            try:
+                available = {item["id"] for item in audio_outputs()}
+            except OSError:
+                LOG.exception("Could not check audio output availability")
+                self.error = "Could not check audio output availability."
+                return "failed"
+            if self.audio_output not in available:
+                self.error = "Selected audio output is unavailable."
+                return "failed"
         if self.resolve_process is not None:
             result = self.resolve_process.poll()
             if result is None:
@@ -671,12 +683,12 @@ class SceneRenderer:
     def stop(self) -> None:
         self.windows.hide_countdown()
         self.countdown_failed = False
+        self._stop_video()
         try:
             self._cancel_pending()
         except RendererStopError as error:
             LOG.error("Could not stop video resolver: %s", error)
             self.renderer_retry_at = time.monotonic() + RETRY_COOLDOWN
-        self._stop_video()
         if self.active_scene is not None:
             self._stop_plex(self.active_scene)
         self.active_scene = self.scene = None

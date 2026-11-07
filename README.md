@@ -2,7 +2,7 @@
 
 A 32-bit Raspberry Pi OS appliance for Raspberry Pi 2 and Raspberry Pi 3,
 with Chromium on HDMI, authenticated HTTPS administration, Wi-Fi provisioning,
-signed application updates and a PC display manager.
+signed application updates and PC and Android display managers.
 Saving settings retains the saved values when confirmation notifications appear,
 without reloading stale configuration into the editor.
 
@@ -12,7 +12,8 @@ The carousel supports websites, streamed/Plex video, clock/date/notice dashboard
 live National Rail departure boards and OpenWeather scenes. Plex radio stations
 can play in the background across scene changes, pausing for videos with audio.
 
-Train boards show departures and clearly labelled rail replacement buses,
+Train boards use locally bundled D-DIN regular and bold fonts (SIL Open Font
+License). They show departures and clearly labelled rail replacement buses,
 platforms, station messages and per-service disruption notices. Status text is
 green for on-time services, amber for delays and flashing red for cancellations.
 Previous stops and calling-at lists each occupy one line, scrolling horizontally
@@ -222,14 +223,22 @@ playback. Music defaults **off**, including on existing installations; selecting
 a station alone does not enable it. Settings are private and independent of the
 carousel playlist. Removing Plex credentials disables music.
 
-A separate audio-only persistent mpv plays through HDMI across web, dashboard,
-weather, train and muted-video scenes, including single-page mode. Videos with
+A separate audio-only persistent mpv plays through the selected audio output
+across web, dashboard, weather, train and muted-video scenes, including single-page mode. Videos with
 audio pause music and release its ALSA device, then music resumes at the same
 position. The kiosk sees only scoped loopback control/stream URLs in
 `/run/web-display/music.json`; Plex tokens remain in the HTTPS service and never
 appear in player arguments. Tracks stream directly through a range-capable
 private relay using mpv's installed audio decoders; no Plex audio transcode or
 additional OS packages are required.
+
+**Display → Audio output** selects the device-wide output for both background
+music and video audio. HDMI is the default; available playback devices include
+the Pi's 3.5 mm jack and connected USB audio devices. Reload the administration
+page after connecting a device. Selection uses stable ALSA card identifiers,
+not card numbers; changing output restarts playback. A disconnected selected
+device is shown as unavailable and playback fails visibly rather than silently
+switching outputs. This setting does not enable audio on muted video scenes.
 
 The service owns a server-generated station queue, reports playing/paused/stopped
 timelines and retrieves a window centered on the completed track to find the
@@ -255,6 +264,30 @@ failures occurred and later cleared. Pi 3 temperature and Pi 2 swap growth remai
 monitoring items, not guarantees of indefinite unattended operation. Plex
 playback has been validated on both devices; audio validation, image uploads
 and manager-side playlist editing remain deferred.
+
+### Weekly sleep mode
+
+The administration page's **Weekly sleep** card configures one enabled sleep
+window per weekday, using the **display's local timezone**, not the phone or
+browser timezone. Each day can be disabled. An end time earlier than its start
+continues into the following day, including Sunday into Monday; disabling that
+following day does not truncate the previous day's overnight window. Enabled
+windows must have different start and end times. Existing devices default to
+no scheduled sleep.
+
+During sleep, background music stops completely and video scenes are stopped
+and skipped, including videos already playing or being prepared. Web pages,
+train boards, weather and dashboard scenes continue normally; sleep does not
+turn off the screen. A playlist containing only videos shows carousel recovery
+while asleep. Music and eligible videos return when the sleep window ends,
+subject to their normal enabled settings.
+
+**Wake temporarily** overrides scheduled sleep for 15 minutes, 30 minutes,
+1 hour, 2 hours or 4 hours. It does not change the weekly schedule. Cancel the
+override to return immediately to the schedule; otherwise it expires
+automatically. A saved override deadline survives service/device restarts.
+Check the displayed device time and timezone when scheduling; correct device
+time is required, and daylight-saving transitions follow its local wall clock.
 
 ### Carousel transitions and retained websites
 
@@ -521,3 +554,48 @@ Rebuild the manager UI with `cd ui && npm run build`.
 The manager shares the firmware version (`WEB_DISPLAY_VERSION`; `--version` prints it). When releasing, bump
 `WEB_DISPLAY_VERSION` and `version` in `pyproject.toml` together (a test enforces this). The manager refuses to
 enrol, and warns about, devices older than `MIN_FIRMWARE` in `src/webdisplay_manager/version.py` (0.5.7).
+
+### Standalone Android manager
+
+`android/` contains a native Kotlin/Jetpack Compose manager for **Android 10
+(API 29) or newer**. It connects directly to displays over the local network;
+neither the PC manager nor a cloud account is needed. Keep the phone and displays
+on a network that permits peer-to-peer traffic. mDNS discovers
+`_web-display._tcp` devices; manual hostname/IP and port entry is also available
+when multicast is blocked.
+
+The app supports the same operations as the PC manager: device enrollment,
+online/offline and network status, URL changes, restart, individual and fleet
+update checks/installations, SSH public-key management on development images,
+and automatic or manual browser administration links. Installation does not
+automatically reboot a display. Detailed device settings and carousel editing
+remain in the device's administration page, as with the PC manager.
+
+Enrollment shows the certificate's SHA-256 fingerprint for confirmation before
+sending the administrator password. Subsequent connections verify the saved
+fingerprint even when trying alternative addresses. API keys and device records
+are encrypted using an Android Keystore key and excluded from Android backups;
+administrator passwords are not saved. Changed certificates or rejected keys
+require explicit re-enrollment. Removing a device locally **does not revoke**
+the app's API key; revoke it in the device's **Manager access** card.
+
+Browser administration uses the browser's own TLS trust rules. A confirmed pin
+in the app does not suppress the browser's self-signed-certificate warning;
+use manual administration to confirm the certificate when necessary. Devices
+need firmware 0.5.7 or newer; automatic administration links need newer firmware
+that supports single-use login tokens.
+
+Build with JDK 17 and an Android SDK containing platform 36 and build tools
+35.0.0. Set `ANDROID_HOME` to the SDK location (or use an ignored
+`android/local.properties` with `sdk.dir=...`):
+
+```sh
+cd android
+./gradlew testDebugUnitTest lintDebug assembleDebug
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+```
+
+The **Android manager** GitHub Actions workflow builds an installable debug APK
+artifact. Debug APKs are for development/sideloading, not Play Store release
+distribution; production signing is not configured. Phone-side discovery,
+enrollment and visual acceptance need testing on an Android device.

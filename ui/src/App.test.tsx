@@ -2,11 +2,21 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { App } from "./App";
 import { StrictMode } from "react";
+import { sleepDays } from "./api";
 
 type Handler = (init: RequestInit) => { status?: number; body: unknown };
 
 function mockFetch(routes: Record<string, Handler>) {
   routes = {
+    "GET /api/sleep": () => ({ body: {
+      days: Object.fromEntries(sleepDays.map((day) => [day, { enabled: false, start: "22:00", end: "07:00" }])),
+      sleeping: false, scheduled_sleep: false, wake_until: null,
+      device_time: "2026-11-07T22:00:00+00:00", timezone: "GMT",
+    } }),
+    "GET /api/audio/outputs": () => ({ body: { items: [
+      { id: "alsa/hdmi:CARD=vc4hdmi,DEV=0", label: "HDMI" },
+      { id: "alsa/plughw:CARD=Headphones,DEV=0", label: "3.5 mm headphones" },
+    ] } }),
     "GET /api/weather/config": () => ({
       body: { city: "St Albans", country: "GB", configured: false },
     }),
@@ -125,7 +135,8 @@ test("dashboard loads settings and saves them with the CSRF token", async () => 
       },
     }),
     "GET /api/config": () => ({ body: { url: "https://example.com", auto_ap: false } }),
-    "PUT /api/config": () => ({ body: { url: "https://example.com", auto_ap: true, safe_area_percent: 8 } }),
+    "PUT /api/config": () => ({ body: { url: "https://example.com", auto_ap: true, safe_area_percent: 8,
+      audio_output: "alsa/plughw:CARD=Headphones,DEV=0" } }),
   });
   render(<App />);
   const url = (await screen.findByLabelText("Web page URL")) as HTMLInputElement;
@@ -137,16 +148,21 @@ test("dashboard loads settings and saves them with the CSRF token", async () => 
   const safeArea = screen.getByLabelText("Overscan safe area (% each edge)") as HTMLInputElement;
   expect(safeArea.value).toBe("5");
   fireEvent.change(safeArea, { target: { value: "8" } });
+  const audio = screen.getByLabelText("Audio output") as HTMLSelectElement;
+  await waitFor(() => expect(audio.disabled).toBe(false));
+  fireEvent.change(audio, { target: { value: "alsa/plughw:CARD=Headphones,DEV=0" } });
   fireEvent.click(checkbox);
   fireEvent.click(screen.getByText("Save settings"));
   expect(await screen.findByText(/Settings saved/)).toBeTruthy();
   expect(safeArea.value).toBe("8");
+  expect(audio.value).toBe("alsa/plughw:CARD=Headphones,DEV=0");
 
   const save = calls.find((call) => call.init.method === "PUT")!;
   expect(JSON.parse(save.init.body as string)).toEqual({
     url: "https://example.com",
     auto_ap: true,
     safe_area_percent: 8,
+    audio_output: "alsa/plughw:CARD=Headphones,DEV=0",
   });
   expect((save.init.headers as Record<string, string>)["X-CSRF-Token"]).toBe("token-1");
 });

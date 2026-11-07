@@ -124,6 +124,10 @@ class SceneServerTests(unittest.TestCase):
 
 class RendererTests(unittest.TestCase):
     def setUp(self):
+        outputs = patch("webdisplay.scene_player.audio_outputs",
+                        return_value=[{"id": "alsa/hdmi:CARD=vc4hdmi,DEV=0"}])
+        outputs.start()
+        self.addCleanup(outputs.stop)
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
         self.process = Mock(pid=12345)
@@ -280,6 +284,20 @@ class RendererTests(unittest.TestCase):
         self.renderer.ipc = Mock()
         self.renderer.ipc.recv.return_value = b"not json\n"
         self.assertEqual(self.renderer.state(), "failed")
+
+    def test_video_uses_selected_output_without_other_audio_backends(self):
+        self.renderer.audio_output = "alsa/plughw:CARD=USB,DEV=0"
+        self.renderer.scene = make_scene("video", audio_enabled=True)
+        with patch("webdisplay.scene_player.subprocess.Popen") as spawn:
+            self.renderer._launch_video("https://example.com/stream")
+        self.assertIn("--audio-device=alsa/plughw:CARD=USB,DEV=0", spawn.call_args.args[0])
+        self.assertIn("--ao=alsa", spawn.call_args.args[0])
+
+    def test_missing_audio_output_fails_audible_video_without_fallback(self):
+        self.renderer.scene = make_scene("video", audio_enabled=True)
+        with patch("webdisplay.scene_player.audio_outputs", return_value=[]):
+            self.assertEqual(self.renderer.state(), "failed")
+        self.assertEqual(self.renderer.error, "Selected audio output is unavailable.")
 
     def test_plex_bitrate_reaches_resolver_and_player_without_changing_direct_streams(self):
         for source, expected in (("plex", 8_000_000), ("url", 4_000_000)):

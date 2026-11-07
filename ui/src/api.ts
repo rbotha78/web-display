@@ -7,6 +7,24 @@ export interface Config {
   url: string;
   auto_ap: boolean;
   safe_area_percent: number;
+  audio_output: string;
+}
+
+export const sleepDays = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"] as const;
+export interface SleepWindow {
+  enabled: boolean;
+  start: string;
+  end: string;
+}
+export interface SleepSchedule {
+  days: Record<(typeof sleepDays)[number], SleepWindow>;
+}
+export interface SleepConfig extends SleepSchedule {
+  sleeping: boolean;
+  scheduled_sleep: boolean;
+  wake_until: number | null;
+  device_time: string;
+  timezone: string;
 }
 
 export interface Scene {
@@ -206,7 +224,11 @@ export const api = {
     request<Session>("/api/pair", "POST", { code, password }),
   logout: () => request<object>("/api/logout", "POST"),
   config: () => request<Config>("/api/config"),
+  audioOutputs: () => request<{ items: { id: string; label: string }[] }>("/api/audio/outputs"),
   saveConfig: (config: Partial<Config>) => request<Config>("/api/config", "PUT", config),
+  sleep: () => request<SleepConfig>("/api/sleep"),
+  saveSleep: (schedule: SleepSchedule) => request<SleepConfig>("/api/sleep", "PUT", schedule),
+  wake: (duration_minutes: number) => request<SleepConfig>("/api/sleep/wake", "POST", { duration_minutes }),
   playlist: () => request<Playlist>("/api/playlist"),
   playlistStatus: () => request<PlaybackStatus>("/api/playlist/status"),
   savePlaylist: (playlist: Playlist) => request<Playlist>("/api/playlist", "PUT", playlist),

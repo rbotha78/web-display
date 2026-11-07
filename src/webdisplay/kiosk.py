@@ -19,8 +19,10 @@ from pathlib import Path
 
 from .app import local_addresses
 from .carousel import Carousel, Playlist, validate_playlist
+from .sleep import SleepRuntime
 from .scene_player import SceneRenderer, reachable, stop_process
 from .display import DEFAULT_SAFE_AREA_PERCENT, validate_safe_area
+from .audio import DEFAULT_AUDIO_OUTPUT, validate_audio_output
 
 LOG = logging.getLogger(__name__)
 
@@ -394,6 +396,7 @@ def main() -> None:
     display_recovery = DisplayRecovery()
     from .music_player import MusicPlayer
     music = MusicPlayer(target_path.with_name("music.json"), fallback_path.parent, args.mpv)
+    sleep_runtime = SleepRuntime(target_path.with_name("sleep.json"))
 
     def stop(*_: object) -> None:
         raise SystemExit
@@ -412,11 +415,13 @@ def main() -> None:
                     carousel = None
             revision = ""
             safe_area = DEFAULT_SAFE_AREA_PERCENT
+            audio_output = DEFAULT_AUDIO_OUTPUT
             try:
                 published = json.loads(Path(args.playlist).read_text(encoding="utf-8"))
                 playlist = validate_playlist(published, allow_runtime=True)
                 safe_area = validate_safe_area(published.get("safe_area_percent", DEFAULT_SAFE_AREA_PERCENT))
-                revision = f"{published.get('revision', '')}:{safe_area}"
+                audio_output = validate_audio_output(published.get("audio_output", DEFAULT_AUDIO_OUTPUT))
+                revision = f"{published.get('revision', '')}:{safe_area}:{audio_output}"
                 playlist_error = False
             except FileNotFoundError:
                 playlist = Playlist(enabled=False, scenes=[])
@@ -426,6 +431,11 @@ def main() -> None:
                 playlist_error = True
                 playlist = Playlist(enabled=True, scenes=[])
             ap_active = read_setup_ap(setup_ap_path) is not None
+            if sleep_runtime.sleeping():
+                playlist = Playlist(
+                    enabled=playlist["enabled"],
+                    scenes=[scene for scene in playlist["scenes"] if scene["kind"] != "video"],
+                )
             if playlist["enabled"] and not ap_active:
                 if renderer is None:
                     stop_process(process)
@@ -439,6 +449,7 @@ def main() -> None:
                     if carousel:
                         carousel.stop()
                     renderer.set_safe_area(safe_area)
+                    renderer.audio_output = audio_output
                     carousel = Carousel(playlist, renderer)
                     previous_playlist = playlist
                     previous_revision = revision

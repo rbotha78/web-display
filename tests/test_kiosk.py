@@ -75,6 +75,71 @@ class ProfileLockTests(unittest.TestCase):
 
 
 class CarouselModeTests(unittest.TestCase):
+    def run_sleep_transition(self, scenes, states, playback_state="playing"):
+        with tempfile.TemporaryDirectory(dir=".") as directory:
+            root = Path(directory).resolve()
+            target, playlist_path = root / "target", root / "playlist.json"
+            target.write_text("")
+            playlist_path.write_text(json.dumps({"enabled": True, "scenes": scenes}))
+            renderer = Mock()
+            renderer.state.return_value = playback_state
+            iterations = 0
+
+            def next_iteration(_):
+                nonlocal iterations
+                iterations += 1
+                if iterations == len(states):
+                    raise KeyboardInterrupt
+
+            arguments = ["kiosk", "--target", str(target), "--playlist", str(playlist_path),
+                         "--setup-ap", str(root / "ap"), "--fallback", str(root / "fallback")]
+            with patch("sys.argv", arguments), \
+                 patch("webdisplay.kiosk.Reachability"), \
+                 patch("webdisplay.kiosk.SceneRenderer", return_value=renderer), \
+                 patch("webdisplay.music_player.MusicPlayer"), \
+                 patch("webdisplay.kiosk.SleepRuntime") as sleep_runtime, \
+                 patch("webdisplay.kiosk.stop_process"), \
+                 patch("webdisplay.kiosk.OfflineIcon"), \
+                 patch("webdisplay.kiosk.DisplayRecovery") as display, \
+                 patch("webdisplay.kiosk.signal.signal"), \
+                 patch("webdisplay.kiosk.time.sleep", side_effect=next_iteration):
+                display.return_value.check.return_value = False
+                sleep_runtime.return_value.sleeping.side_effect = states
+                with self.assertRaises(KeyboardInterrupt):
+                    main()
+            return renderer
+
+    def test_sleep_stops_active_or_preparing_video_and_does_not_rebuild_each_poll(self):
+        scenes = [{"id": "video", "kind": "video", "url": "https://example.com/live", "duration": None},
+                  {"id": "web", "kind": "web", "url": "https://example.com/"}]
+        for state in ("starting", "playing"):
+            with self.subTest(state=state):
+                renderer = self.run_sleep_transition(scenes, [False, True, True, False], state)
+                self.assertEqual([call.args[0]["kind"] for call in renderer.start.call_args_list],
+                                 ["video", "web", "video"])
+                self.assertEqual(renderer.stop.call_count, 2)
+
+    def test_all_video_playlist_uses_recovery_without_starting_video(self):
+        renderer = self.run_sleep_transition(
+            [{"id": "video", "kind": "video", "url": "https://example.com/live"}], [True, True],
+        )
+        renderer.start.assert_not_called()
+        self.assertEqual(renderer.recovery.call_count, 2)
+        renderer.stop.assert_not_called()
+
+    def test_nonvideo_scenes_are_not_restarted_by_sleep_or_wake(self):
+        for kind, changes in (
+            ("dashboard", {}), ("weather", {}), ("train", {"station_crs": "PAD"}),
+            ("web", {"url": "https://example.com/"}),
+        ):
+            with self.subTest(kind=kind):
+                renderer = self.run_sleep_transition(
+                    [{"id": kind, "kind": kind, **changes}], [False, True, True, False],
+                )
+                self.assertEqual(renderer.start.call_count, 1)
+                self.assertEqual(renderer.start.call_args.args[0]["kind"], kind)
+                renderer.stop.assert_not_called()
+
     def test_apply_ap_override_resume_and_disable_restore_single_page(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

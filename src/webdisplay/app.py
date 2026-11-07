@@ -32,6 +32,7 @@ from .carousel import (
     validate_url,
 )
 from .display import DEFAULT_SAFE_AREA_PERCENT, validate_safe_area
+from .audio import DEFAULT_AUDIO_OUTPUT, audio_outputs, validate_audio_output
 from .hostname_helper import validate_hostname
 from .network import default_route_interface, internet_status, website_status
 from .plex import PlexClient, PlexPlaybackProxy, validate_server_url, validate_token
@@ -39,6 +40,7 @@ from .music import MusicRelay, validate_music
 from .raildata import REFRESH_INTERVAL, RailDataWorker, validate_api_key, validate_refresh_interval
 from .weather import WeatherWorker, validate_weather_config
 from .storage import atomic_write
+from .sleep import default_schedule, sleep_status, validate_schedule, validate_wake_until, WAKE_MINUTES
 from .updater import MAX_BUNDLE_BYTES, UpdateError, Updater, parse_version
 
 LOG = logging.getLogger("web-display")
@@ -91,10 +93,12 @@ class ConfigStore:
             if not self.path.exists():
                 return {"url": "", "password": None, "auto_ap": False,
                         "safe_area_percent": DEFAULT_SAFE_AREA_PERCENT,
+                        "audio_output": DEFAULT_AUDIO_OUTPUT,
                         "api_keys": [], "playlist": {"enabled": False, "scenes": []},
                         "plex_server_url": "", "plex_token": "", "plex_client_identifier": "",
                         "plex_default_bitrate_kbps": DEFAULT_PLEX_BITRATE_KBPS,
                         "music": validate_music({}),
+                        "sleep": default_schedule(), "sleep_wake_until": None,
                         "raildata_api_key": "", "service_details_api_key": "",
                         "raildata_refresh_seconds": REFRESH_INTERVAL,
                         "weather": validate_weather_config({})}
@@ -104,6 +108,7 @@ class ConfigStore:
                 "url": validate_url(data.get("url", "")),
                 "password": data.get("password"),
                 "auto_ap": data.get("auto_ap") is True,
+                "audio_output": validate_audio_output(data.get("audio_output", DEFAULT_AUDIO_OUTPUT)),
                 "safe_area_percent": validate_safe_area(
                     data.get("safe_area_percent", DEFAULT_SAFE_AREA_PERCENT)
                 ),
@@ -117,6 +122,8 @@ class ConfigStore:
                     data.get("plex_default_bitrate_kbps", DEFAULT_PLEX_BITRATE_KBPS)
                 ),
                 "music": validate_music(data.get("music", {})),
+                "sleep": validate_schedule(data.get("sleep", default_schedule())),
+                "sleep_wake_until": validate_wake_until(data.get("sleep_wake_until")),
                 "raildata_api_key": (
                     validate_api_key(data["raildata_api_key"])
                     if data.get("raildata_api_key") else ""
@@ -141,6 +148,7 @@ class ConfigStore:
             data.update(changes)
             data["url"] = validate_url(data.get("url", ""))
             data["auto_ap"] = validate_flag(data.get("auto_ap", False))
+            data["audio_output"] = validate_audio_output(data.get("audio_output", DEFAULT_AUDIO_OUTPUT))
             data["safe_area_percent"] = validate_safe_area(
                 data.get("safe_area_percent", DEFAULT_SAFE_AREA_PERCENT)
             )
@@ -151,6 +159,8 @@ class ConfigStore:
                 data.get("plex_default_bitrate_kbps", DEFAULT_PLEX_BITRATE_KBPS)
             )
             data["music"] = validate_music(data.get("music", {}))
+            data["sleep"] = validate_schedule(data.get("sleep", default_schedule()))
+            data["sleep_wake_until"] = validate_wake_until(data.get("sleep_wake_until"))
             data["raildata_api_key"] = (
                 validate_api_key(data["raildata_api_key"])
                 if data.get("raildata_api_key") else ""
@@ -328,12 +338,13 @@ class Application:
         self.keys_lock = threading.Lock()
         self.playlist_lock = threading.Lock()
         self.publish_lock = threading.Lock()
+        self.sleep_lock = threading.Lock()
         self.wifi_helper = wifi_helper
         self.hostname_helper = hostname_helper
         self.config = ConfigStore(state_path)
         self.plex_client_identifier = self.config.ensure_plex_client_identifier()
         self.plex_proxy = PlexPlaybackProxy(self.plex_client)
-        self.music = MusicRelay(self.plex_client)
+        self.music = MusicRelay(self.plex_client, target_path.with_name("sleep.json"))
         self.train_board_path = target_path.with_name("train-board.json")
         self.raildata_worker = RailDataWorker(self.config.load, self.train_board_path)
         self.weather_worker = WeatherWorker(self.config.load, target_path.with_name("weather.json"))
@@ -394,8 +405,11 @@ class Application:
 
     def publish_target(self) -> None:
         with self.publish_lock:
-            config = self.config.load()
+            with self.sleep_lock:
+                config = self.config.load()
+                self._publish_sleep(config)
             music = self.music.configure(config["music"], (config["plex_server_url"], config["plex_token"]))
+            music["audio_output"] = config["audio_output"]
             atomic_write(self.target_path.with_name("music.json"), json.dumps(music) + "\n", mode=0o640)
             playlist = validate_playlist(config["playlist"])
             self.plex_proxy.clear()
@@ -420,6 +434,7 @@ class Application:
                     **playlist, "scenes": runtime_scenes,
                     "revision": config.get("playlist_revision", ""),
                     "safe_area_percent": config["safe_area_percent"],
+                    "audio_output": config["audio_output"],
                 }) + "\n",
                 mode=0o640,
             )
@@ -433,6 +448,37 @@ class Application:
     def music_config(self) -> dict[str, object]:
         return {**self.config.load()["music"], "status": self.music.get_status()}
 
+    def _publish_sleep(self, config: dict[str, object]) -> None:
+        atomic_write(
+            self.target_path.with_name("sleep.json"),
+            json.dumps({**config["sleep"], "wake_until": config["sleep_wake_until"]}) + "\n",
+            mode=0o640,
+        )
+
+    def sleep_config(self) -> dict[str, object]:
+        config = self.config.load()
+        return {**config["sleep"], **sleep_status(config["sleep"], config["sleep_wake_until"])}
+
+    def save_sleep_config(self, value: object) -> dict[str, object]:
+        schedule = validate_schedule(value)
+        with self.sleep_lock:
+            config = self.config.update(sleep=schedule)
+            self._publish_sleep(config)
+            return {**schedule, **sleep_status(schedule, config["sleep_wake_until"])}
+
+    def wake(self, value: object) -> dict[str, object]:
+        if (not isinstance(value, dict) or set(value) != {"duration_minutes"}
+                or type(value["duration_minutes"]) is not int
+                or value["duration_minutes"] not in (0, *WAKE_MINUTES)):
+            raise ValueError("Wake duration must be 0, 15, 30, 60, 120 or 240 minutes")
+        duration = value["duration_minutes"]
+        with self.sleep_lock:
+            config = self.config.update(
+                sleep_wake_until=time.time() + duration * 60 if duration else None,
+            )
+            self._publish_sleep(config)
+            return {**config["sleep"], **sleep_status(config["sleep"], config["sleep_wake_until"])}
+
     def save_music_config(self, value: object) -> dict[str, object]:
         with self.publish_lock:
             settings = validate_music(value)
@@ -443,6 +489,7 @@ class Application:
             self.config.update(music=settings)
             config = self.config.load()
             runtime = self.music.configure(settings, (config["plex_server_url"], config["plex_token"]))
+            runtime["audio_output"] = config["audio_output"]
             atomic_write(self.target_path.with_name("music.json"), json.dumps(runtime) + "\n", mode=0o640)
         return self.music_config()
 
@@ -757,6 +804,7 @@ CONTENT_TYPES = {
     ".png": "image/png",
     ".ico": "image/x-icon",
     ".woff2": "font/woff2",
+    ".otf": "font/otf",
 }
 
 
@@ -925,8 +973,22 @@ def make_handler(app: Application) -> type[BaseHTTPRequestHandler]:
                 self._json(
                     HTTPStatus.OK,
                     {"url": config["url"], "auto_ap": config["auto_ap"],
-                     "safe_area_percent": config["safe_area_percent"]},
+                     "safe_area_percent": config["safe_area_percent"],
+                     "audio_output": config["audio_output"]},
                 )
+                return
+            if self.path == "/api/sleep":
+                if self._require_session():
+                    self._json(HTTPStatus.OK, app.sleep_config())
+                return
+            if self.path == "/api/audio/outputs":
+                if not self._require_session():
+                    return
+                try:
+                    self._json(HTTPStatus.OK, {"items": audio_outputs()})
+                except OSError:
+                    LOG.exception("Listing audio outputs failed")
+                    self._json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": "Could not list audio outputs"})
                 return
             request_path = urlsplit(self.path)
             if request_path.path == "/api/weather/config" and not request_path.query:
@@ -1095,6 +1157,9 @@ def make_handler(app: Application) -> type[BaseHTTPRequestHandler]:
                         return
                     app.run_action("reboot")
                     self._json(HTTPStatus.ACCEPTED, {"ok": True})
+                elif self.path == "/api/sleep/wake":
+                    if self._require_session(csrf=True):
+                        self._json(HTTPStatus.OK, app.wake(body))
                 elif self.path == "/api/update/check":
                     if not self._require_session(csrf=True):
                         return
@@ -1153,6 +1218,10 @@ def make_handler(app: Application) -> type[BaseHTTPRequestHandler]:
 
         def do_PUT(self) -> None:
             try:
+                if self.path == "/api/sleep":
+                    if self._require_session(csrf=True):
+                        self._json(HTTPStatus.OK, app.save_sleep_config(self._body()))
+                    return
                 if self.path == "/api/weather/config":
                     if self._require_session(csrf=True):
                         self._json(HTTPStatus.OK, app.save_weather_config(self._body()))
@@ -1186,6 +1255,13 @@ def make_handler(app: Application) -> type[BaseHTTPRequestHandler]:
                     changes["auto_ap"] = validate_flag(body["auto_ap"])
                 if "safe_area_percent" in body:
                     changes["safe_area_percent"] = validate_safe_area(body["safe_area_percent"])
+                if "audio_output" in body:
+                    output = validate_audio_output(body["audio_output"])
+                    if output != app.config.load()["audio_output"] and output not in {
+                        item["id"] for item in audio_outputs()
+                    }:
+                        raise ValueError("Selected audio output is unavailable")
+                    changes["audio_output"] = output
                 if not changes:
                     raise ValueError("No settings supplied")
                 config = app.config.update(**changes)
@@ -1193,7 +1269,8 @@ def make_handler(app: Application) -> type[BaseHTTPRequestHandler]:
                 self._json(
                     HTTPStatus.OK,
                     {"url": config["url"], "auto_ap": config["auto_ap"],
-                     "safe_area_percent": config["safe_area_percent"]},
+                     "safe_area_percent": config["safe_area_percent"],
+                     "audio_output": config["audio_output"]},
                 )
             except ValueError as error:
                 self._json(HTTPStatus.BAD_REQUEST, {"error": str(error)})

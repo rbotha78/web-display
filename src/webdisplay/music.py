@@ -4,13 +4,16 @@ import http.client
 import json
 import re
 import secrets
+import socket
 import threading
 import urllib.error
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from typing import Callable
 
 from .plex import PlexClient, RATING_KEY, STATION_KEY
+from .sleep import SleepRuntime
 
 PART_KEY = re.compile(r"/library/parts/[0-9]+/[0-9]+/file\.[A-Za-z0-9]+\Z")
 
@@ -33,7 +36,7 @@ def validate_music(value: object) -> dict[str, object]:
 class MusicRelay:
     """Private queue owner and range-capable audio relay; kiosk gets only a capability."""
 
-    def __init__(self, client_factory: Callable[[], PlexClient]):
+    def __init__(self, client_factory: Callable[[], PlexClient], sleep_path: Path | None = None):
         self.client_factory = client_factory
         self.lock = threading.RLock()
         self.capability = secrets.token_urlsafe(24)
@@ -44,6 +47,10 @@ class MusicRelay:
         self.track = None
         self.stream_key = ""
         self.status = {"state": "disabled", "title": "", "error": ""}
+        self.sleep_runtime = SleepRuntime(sleep_path) if sleep_path is not None else None
+        self.shutdown = threading.Event()
+        self.streams_lock = threading.Lock()
+        self.streams = set()
         owner = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -85,7 +92,7 @@ class MusicRelay:
                     return
                 with owner.lock:
                     client, track = owner.client, owner.track
-                    valid = (owner.settings["enabled"] and track is not None and
+                    valid = (not owner.sleeping() and owner.settings["enabled"] and track is not None and
                              self.path == f"/music/{owner.capability}/stream/{owner.stream_key}")
                     part = track.find("./Media/Part") if valid else None
                     key = part.get("key", "") if part is not None else ""
@@ -101,14 +108,24 @@ class MusicRelay:
                             return
                         headers["Range"] = byte_range
                     with client.open(key, headers=headers, timeout=20) as response:
-                        self.send_response(response.status)
-                        for name in ("Content-Type", "Content-Length", "Content-Range", "Accept-Ranges"):
-                            if response.headers.get(name):
-                                self.send_header(name, response.headers[name])
-                        self.send_header("Cache-Control", "no-store")
-                        self.end_headers()
-                        while chunk := response.read(64 * 1024):
-                            self.wfile.write(chunk)
+                        with owner.lock:
+                            if owner.sleeping() or owner.track is not track:
+                                self.reply(404, {})
+                                return
+                            with owner.streams_lock:
+                                owner.streams.add(response)
+                        try:
+                            self.send_response(response.status)
+                            for name in ("Content-Type", "Content-Length", "Content-Range", "Accept-Ranges"):
+                                if response.headers.get(name):
+                                    self.send_header(name, response.headers[name])
+                            self.send_header("Cache-Control", "no-store")
+                            self.end_headers()
+                            while not owner.sleeping() and (chunk := response.read(64 * 1024)):
+                                self.wfile.write(chunk)
+                        finally:
+                            with owner.streams_lock:
+                                owner.streams.discard(response)
                 except (OSError, urllib.error.URLError, http.client.HTTPException, ValueError):
                     self.close_connection = True
 
@@ -116,6 +133,37 @@ class MusicRelay:
         self.server.daemon_threads = True
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
+        self.sleep_thread = threading.Thread(target=self._enforce_sleep, daemon=True)
+        self.sleep_thread.start()
+
+    def sleeping(self):
+        return self.sleep_runtime is not None and self.sleep_runtime.sleeping()
+
+    def _enforce_sleep(self):
+        was_sleeping = False
+        while not self.shutdown.wait(0.5):
+            sleeping = self.sleeping()
+            if sleeping:
+                # Close relay sockets even if a Plex queue/timeline request holds the queue lock.
+                self._close_streams()
+                if not was_sleeping or self.queue is not None:
+                    self.control({"action": "stop"})
+            was_sleeping = sleeping
+
+    def _close_streams(self):
+        with self.streams_lock:
+            streams = list(self.streams)
+            self.streams.clear()
+        for response in streams:
+            # Interrupt a blocked upstream read before closing its buffered response.
+            try:
+                raw = getattr(getattr(response, "fp", None), "raw", None)
+                upstream = getattr(raw, "_sock", None)
+                if upstream is not None:
+                    upstream.shutdown(socket.SHUT_RDWR)
+                response.close()
+            except OSError:
+                pass
 
     @property
     def url(self):
@@ -144,10 +192,15 @@ class MusicRelay:
             })
 
     def _stop(self):
+        self._close_streams()
         try:
             self._timeline("stopped", 0)
-        except ValueError:
+        except (ValueError, OSError, http.client.HTTPException):
             pass
+        finally:
+            self.queue = self.track = self.client = None
+            self.stream_key = ""
+            self.status["title"] = ""
 
     def _select(self, track):
         part = track.find("./Media/Part")
@@ -184,6 +237,9 @@ class MusicRelay:
                 self._stop()
                 self.status["state"] = "disabled" if not self.settings["enabled"] else "waiting"
                 return {}
+            if self.sleeping():
+                self._stop()
+                raise ValueError("Music sleeping")
             if not self.settings["enabled"]:
                 raise ValueError("Music disabled")
             if value["action"] == "error":
@@ -192,6 +248,9 @@ class MusicRelay:
                 return {}
             if self.queue is None:
                 self._create_queue()
+                if self.sleeping():
+                    self._stop()
+                    raise ValueError("Music sleeping")
             track_id = self.track.get("playQueueItemID")
             if value["action"] == "next" and value.get("track_id") == track_id:
                 self._timeline("stopped", self.track.get("duration", "0"))
@@ -216,15 +275,22 @@ class MusicRelay:
                 self._timeline(state, position)
                 self.status["state"] = state
                 self.status["error"] = ""
+            if self.sleeping():
+                self._stop()
+                raise ValueError("Music sleeping")
             return {"track_id": self.track.get("playQueueItemID"),
                     "url": self.url + "/stream/" + self.stream_key,
                     "title": self.track.get("title", "Music")}
 
     def get_status(self):
         with self.lock:
+            if self.sleeping():
+                return {"state": "sleeping", "title": "", "error": ""}
             return dict(self.status)
 
     def close(self):
+        self.shutdown.set()
+        self.sleep_thread.join()
         with self.lock:
             self._stop()
         self.server.shutdown()

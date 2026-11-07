@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import socket
 import subprocess
@@ -10,7 +11,11 @@ import urllib.request
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from .scene_player import stop_process
+from .scene_player import RendererStopError, stop_process
+from .audio import DEFAULT_AUDIO_OUTPUT, audio_outputs, validate_audio_output
+from .sleep import SleepRuntime
+
+LOG = logging.getLogger(__name__)
 
 
 def control_url(value: object) -> str:
@@ -37,8 +42,25 @@ class MusicPlayer:
         self.request_id = 0
         self.ended = None
         self.paused = False
+        self.audio_output = DEFAULT_AUDIO_OUTPUT
+        self.sleep_runtime = SleepRuntime(config_path.with_name("sleep.json"))
         self.thread = threading.Thread(target=self._run, daemon=True)
+        self.sleep_thread = threading.Thread(target=self._watch_sleep, daemon=True)
         self.thread.start()
+        self.sleep_thread.start()
+
+    def _watch_sleep(self):
+        while not self.shutdown.wait(0.5):
+            process = self.process
+            if process is not None and self.sleep_runtime.sleeping():
+                # Interrupt mpv even while the worker is waiting on Plex or mpv IPC.
+                try:
+                    stop_process(process)
+                    with self.lock:
+                        if self.process is process:
+                            self._stop_player()
+                except (OSError, RendererStopError):
+                    LOG.error("Could not stop the sleeping music player")
 
     def pause_for_video(self, paused: bool):
         with self.lock:
@@ -79,16 +101,20 @@ class MusicPlayer:
         raise OSError("Audio player timed out")
 
     def _launch(self):
+        if self.audio_output not in {item["id"] for item in audio_outputs()}:
+            raise OSError("Selected audio output is unavailable")
         self.ipc_path.unlink(missing_ok=True)
         self.process = subprocess.Popen([
             self.mpv, "--no-config", "--no-terminal", "--no-video", "--idle=yes",
-            "--audio-device=alsa/hdmi:CARD=vc4hdmi,DEV=0",
+            "--ao=alsa", f"--audio-device={self.audio_output}",
             "--pause=yes", "--volume=0", f"--input-ipc-server={self.ipc_path}",
         ], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             start_new_session=True)
         for _ in range(50):
             if self.shutdown.wait(0.1):
                 raise OSError("Music stopped")
+            if self.sleep_runtime.sleeping():
+                raise OSError("Music sleeping")
             if self.process.poll() is not None:
                 raise OSError("Audio player exited")
             if self.ipc_path.exists():
@@ -123,10 +149,13 @@ class MusicPlayer:
                 or not url.path.startswith(base.path.removesuffix("control") + "stream/")):
             raise ValueError("Invalid audio stream")
         with self.lock:
-            if self.paused:
+            if self.paused or (hasattr(self, "sleep_runtime") and self.sleep_runtime.sleeping()):
                 return False
             if self.process is None:
                 self._launch()
+            if hasattr(self, "sleep_runtime") and self.sleep_runtime.sleeping():
+                self._stop_player()
+                return False
             self._command(["set_property", "pause", True])
             self._command(["set_property", "aid", "no" if self.paused else "auto"])
             self._command(["set_property", "volume", volume])
@@ -136,6 +165,8 @@ class MusicPlayer:
             return True
 
     def _run(self):
+        if not hasattr(self, "sleep_runtime"):
+            self.sleep_runtime = SleepRuntime(self.config_path.with_name("sleep.json"))
         endpoint = ""
         identity = None
         track = None
@@ -150,7 +181,10 @@ class MusicPlayer:
                         settings = json.loads(self.config_path.read_text())
                     except (FileNotFoundError, ValueError):
                         settings = {"enabled": False}
-                    new_identity = (settings.get("enabled"), settings.get("station_key"), settings.get("control_url"))
+                    audio_output = validate_audio_output(settings.get("audio_output", DEFAULT_AUDIO_OUTPUT))
+                    enabled = bool(settings.get("enabled") and not self.sleep_runtime.sleeping())
+                    new_identity = (enabled, settings.get("station_key"),
+                                    settings.get("control_url"), audio_output)
                     if new_identity != identity:
                         self._stop_player()
                         if endpoint:
@@ -159,9 +193,10 @@ class MusicPlayer:
                             except (OSError, ValueError):
                                 pass
                         identity, track = new_identity, None
+                        self.audio_output = audio_output
                         pending_next = False
                         failures, retry_at = 0, 0.0
-                        endpoint = control_url(settings["control_url"]) if settings.get("enabled") else ""
+                        endpoint = control_url(settings["control_url"]) if enabled else ""
                     if not endpoint or failures >= 3 or time.monotonic() < retry_at:
                         self.shutdown.wait(1)
                         continue
@@ -181,6 +216,8 @@ class MusicPlayer:
                         volume = settings["volume"]
                         timeline_at = 0
                     with self.lock:
+                        if self.process is None:
+                            continue
                         if self.process.poll() is not None:
                             raise OSError("Audio player exited")
                         position = self._command(["get_property", "time-pos"])
@@ -222,3 +259,4 @@ class MusicPlayer:
     def close(self):
         self.shutdown.set()
         self.thread.join()
+        self.sleep_thread.join()
