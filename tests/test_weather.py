@@ -12,6 +12,23 @@ from webdisplay.weather import (
 
 
 class WeatherTests(unittest.TestCase):
+    def test_failed_startup_retries_after_thirty_seconds_then_resumes_normal_interval(self):
+        with tempfile.TemporaryDirectory() as directory:
+            config = {"weather": {"api_key": "key"},
+                      "playlist": {"enabled": False, "scenes": []}}
+            fetch = Mock(side_effect=[
+                WeatherError("offline"), {"temperature": 12, "error": "", "stale": False},
+                {"temperature": 13, "error": "", "stale": False},
+            ])
+            worker = WeatherWorker(lambda: config, Path(directory) / "weather.json", fetch)
+            worker.close()
+            config["playlist"] = {"enabled": True, "scenes": [{"kind": "train", "enabled": True}]}
+            for stamp, expected in ((100, 1), (129, 1), (130, 2), (160, 2), (729, 2), (730, 3)):
+                with patch("webdisplay.weather.time.monotonic", return_value=stamp):
+                    worker.refresh_once()
+                self.assertEqual(fetch.call_count, expected)
+            self.assertEqual(json.loads(worker.path.read_text())["temperature"], 13)
+
     def test_location_and_key_validation(self):
         self.assertEqual(validate_weather_config({"city": " St Albans ", "country": "gb"}),
                          {"city": "St Albans", "country": "GB", "api_key": ""})
@@ -36,10 +53,10 @@ class WeatherTests(unittest.TestCase):
     def test_current_conditions_and_forecast_use_location_local_dates(self):
         current = {
             "main": {"temp": 10.5, "feels_like": 8, "humidity": 80},
-            "wind": {"speed": 2}, "weather": [{"description": "cloudy"}], "dt": 100,
+            "wind": {"speed": 2}, "weather": [{"description": "cloudy", "icon": "04d"}], "dt": 100,
         }
         entries = [
-            {"dt": stamp, "main": {"temp": temp}, "weather": [{"description": "rain"}]}
+            {"dt": stamp, "main": {"temp": temp}, "weather": [{"description": "rain", "icon": "10d"}]}
             for stamp, temp in ((82800, 9), (93600, 11))
         ]
         with patch("webdisplay.weather._request", side_effect=[
@@ -47,8 +64,9 @@ class WeatherTests(unittest.TestCase):
         ]):
             result = fetch_weather(validate_weather_config({"api_key": "private-key"}))
         self.assertEqual(result["wind_kmh"], 7.2)
+        self.assertEqual(result["icon"], "04d")
         self.assertEqual(result["forecast"], [{
-            "date": "1970-01-02", "low": 9, "high": 11, "description": "rain",
+            "date": "1970-01-02", "low": 9, "high": 11, "description": "rain", "icon": "10d",
         }])
         self.assertNotIn("private-key", json.dumps(result))
         with patch("webdisplay.weather._request", side_effect=[current, WeatherError("forecast unavailable")]):

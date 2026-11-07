@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import math
 import re
 from typing import Literal, Protocol, TypedDict
 from urllib.parse import urlparse
@@ -166,7 +165,7 @@ class Renderer(Protocol):
     def stop(self) -> None: ...
     def recovery(self) -> None: ...
     def failure(self, reason: str | None = None) -> None: ...
-    def countdown(self, remaining: int | None, *, starting: bool = False) -> None: ...
+    def countdown(self, progress: float | None) -> None: ...
 
 
 class Carousel:
@@ -199,9 +198,8 @@ class Carousel:
             )
             if not failed and state != "finished" and not expired:
                 self.renderer.countdown(
-                    math.ceil(duration - (now - self.started_at))
+                    min(1.0, (now - self.started_at) / duration)
                     if duration is not None and self.started_at is not None else None,
-                    starting=self.started_at is None,
                 )
                 return
             if failed:
@@ -219,6 +217,6 @@ class Carousel:
             self.attempted_at = now
             self.started_at = None
             self.renderer.start(scene)
-            self.renderer.countdown(None, starting=True)
+            self.renderer.countdown(None)
             return
         self.renderer.recovery()

@@ -17,6 +17,7 @@ from .storage import atomic_write
 
 LOG = logging.getLogger(__name__)
 REFRESH_SECONDS = 600
+RETRY_SECONDS = 30
 
 
 class WeatherError(ValueError):
@@ -85,6 +86,15 @@ def _description(value: dict[str, object]) -> str:
     return description
 
 
+def _icon(value: dict[str, object]) -> str:
+    conditions = value.get("weather")
+    if isinstance(conditions, list) and conditions and isinstance(conditions[0], dict):
+        icon = conditions[0].get("icon")
+        if isinstance(icon, str) and re.fullmatch(r"(01|02|03|04|09|10|11|13|50)[dn]", icon):
+            return icon
+    return ""
+
+
 def fetch_weather(settings: dict[str, str]) -> dict[str, object]:
     current = _request("weather", settings)
     main, wind = current.get("main"), current.get("wind")
@@ -97,6 +107,7 @@ def fetch_weather(settings: dict[str, str]) -> dict[str, object]:
         "humidity": _number(main.get("humidity")),
         "wind_kmh": round(_number(wind.get("speed")) * 3.6, 1),
         "description": _description(current),
+        "icon": _icon(current),
         "observed_at": _number(current.get("dt")),
         "updated_at": int(time.time()),
         "forecast": [],
@@ -123,6 +134,7 @@ def fetch_weather(settings: dict[str, str]) -> dict[str, object]:
                 days[date] = {
                     "date": date, "low": temperature, "high": temperature,
                     "description": description, "proximity": proximity,
+                    "icon": _icon(entry),
                 }
             else:
                 day = days[date]
@@ -130,6 +142,7 @@ def fetch_weather(settings: dict[str, str]) -> dict[str, object]:
                 day["high"] = max(day["high"], temperature)
                 if proximity < day["proximity"]:
                     day["description"], day["proximity"] = description, proximity
+                    day["icon"] = _icon(entry)
         result["forecast"] = [
             {key: value for key, value in day.items() if key != "proximity"}
             for _, day in sorted(days.items())[:5]
@@ -149,6 +162,7 @@ class WeatherWorker:
         self.config, self.path, self.fetch = config, path, fetch
         self._stop, self._wake = threading.Event(), threading.Event()
         self._last_refresh: float | None = None
+        self._refresh_failed = False
         self._settings: dict[str, str] | None = None
         self._cached: dict[str, object] = {}
         self._thread = threading.Thread(target=self._run, daemon=True)
@@ -168,7 +182,8 @@ class WeatherWorker:
         while not self._stop.is_set():
             self.refresh_once()
             elapsed = time.monotonic() - self._last_refresh if self._last_refresh is not None else 0
-            self._wake.wait(REFRESH_SECONDS - elapsed if elapsed < REFRESH_SECONDS else REFRESH_SECONDS)
+            interval = RETRY_SECONDS if self._refresh_failed else REFRESH_SECONDS
+            self._wake.wait(interval - elapsed if elapsed < interval else interval)
             self._wake.clear()
 
     def refresh_once(self) -> None:
@@ -188,16 +203,19 @@ class WeatherWorker:
         ):
             return
         now = time.monotonic()
-        if self._last_refresh is not None and now - self._last_refresh < REFRESH_SECONDS:
+        interval = RETRY_SECONDS if self._refresh_failed else REFRESH_SECONDS
+        if self._last_refresh is not None and now - self._last_refresh < interval:
             return
         self._last_refresh = now
         try:
             data = self.fetch(settings)
         except WeatherError as error:
+            self._refresh_failed = True
             LOG.warning("Weather refresh failed: %s", error)
             data = {**self._cached, "error": str(error), "stale": "temperature" in self._cached}
             self._publish(data)
         else:
+            self._refresh_failed = bool(data.get("forecast_error"))
             self._publish(data)
 
     def close(self) -> None:

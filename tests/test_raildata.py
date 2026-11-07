@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from urllib.error import HTTPError
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from webdisplay.raildata import (
     RailDataError,
@@ -19,6 +19,44 @@ from webdisplay.raildata import (
 
 
 class RailDataTests(unittest.TestCase):
+    def test_replacement_buses_merge_with_trains_in_departure_order_across_midnight(self):
+        board = {
+            "generatedAt": "2026-11-07T23:50:00+00:00",
+            "trainServices": [{"std": "00:10", "etd": "On time"}],
+            "busServices": [
+                {"std": "23:55", "etd": "On time", "serviceID": "bus-id"},
+                {"std": "00:20", "etd": "Cancelled"},
+            ],
+        }
+        with patch("webdisplay.raildata._request", side_effect=[board, {"std": "23:55", "etd": "On time"}]) as request:
+            result = RailDataClient("key", "details-key").fetch("HWW")
+        self.assertEqual([row["scheduled"] for row in result["rows"]], ["23:55", "00:10", "00:20"])
+        self.assertEqual([row["service_type"] for row in result["rows"]], ["bus", "train", "bus"])
+        self.assertIn("bus-id", request.call_args.args[0])
+        self.assertEqual(result["rows"][2]["state"], "cancelled")
+        board.pop("trainServices")
+        with patch("webdisplay.raildata._request", return_value=board):
+            result = RailDataClient("key", "").fetch("HWW")
+        self.assertEqual(len(result["rows"]), 2)
+
+    def test_failed_startup_retries_after_thirty_seconds_then_resumes_configured_interval(self):
+        with tempfile.TemporaryDirectory() as directory:
+            config = {"raildata_api_key": "key", "raildata_refresh_seconds": 120,
+                      "playlist": {"enabled": False, "scenes": []}}
+            fetch = Mock(side_effect=[
+                RailDataError("offline"), {"rows": [{"scheduled": "12:00"}]},
+                {"rows": [{"scheduled": "12:10"}]},
+            ])
+            worker = RailDataWorker(lambda: config, Path(directory) / "board.json", fetch=fetch)
+            worker.close()
+            config["playlist"] = {"enabled": True, "scenes": [
+                {"id": "hww", "kind": "train", "station_crs": "HWW", "enabled": True},
+            ]}
+            for stamp, expected in ((100, 1), (129, 1), (130, 2), (160, 2), (249, 2), (250, 3)):
+                with patch("webdisplay.raildata.time.monotonic", return_value=stamp):
+                    worker.refresh_once()
+                self.assertEqual(fetch.call_count, expected)
+
     def test_status_colours_and_station_message_shapes(self):
         board = {
             "trainServices": [

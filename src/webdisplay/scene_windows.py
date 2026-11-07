@@ -10,7 +10,8 @@ class SceneWindows:
         self.countdown_window = None
         self.countdown_pixmap = None
         self.countdown_gc = None
-        self.countdown_font = None
+        self.countdown_mask = None
+        self.countdown_mask_gc = None
 
     def _connect(self):
         if self.display is None:
@@ -67,42 +68,55 @@ class SceneWindows:
                 return
         raise OSError("Browser window is not available")
 
-    def show_countdown(self, text: str) -> None:
+    def show_countdown(self, progress: float) -> None:
         from Xlib import error
 
         try:
-            self._draw_countdown(text)
+            self._draw_countdown(progress)
         except (error.XError, error.ConnectionClosedError):
             raise OSError("Could not draw the countdown on the display server") from None
 
-    def _draw_countdown(self, text: str) -> None:
+    def _draw_countdown(self, progress: float) -> None:
         from Xlib import X
+        from Xlib.ext import shape
 
         display = self._connect()
+        if not display.has_extension("SHAPE"):
+            raise OSError("The display server does not support transparent countdown shapes")
         screen = display.screen()
+        size = 48
         if self.countdown_window is None:
-            fonts = display.list_fonts("-misc-fixed-medium-r-normal--20-*-*-*-*-*-*-*", 1)
-            self.countdown_font = display.open_font(fonts[0] if fonts else "fixed")
-            font = self.countdown_font.query()
-            width = font.max_bounds.character_width * 24 + 24
-            height = font.font_ascent + font.font_descent + 16
-            self.countdown_size = (width, height, font.font_ascent + 8)
-            self.countdown_pixmap = screen.root.create_pixmap(width, height, screen.root_depth)
+            self.countdown_pixmap = screen.root.create_pixmap(size, size, screen.root_depth)
             self.countdown_gc = self.countdown_pixmap.create_gc(
                 foreground=screen.white_pixel, background=screen.black_pixel,
-                font=self.countdown_font.id,
+                line_width=2, arc_mode=X.ArcPieSlice,
+            )
+            self.countdown_mask = screen.root.create_pixmap(size, size, 1)
+            self.countdown_mask_gc = self.countdown_mask.create_gc(
+                foreground=1, background=0, line_width=2, arc_mode=X.ArcPieSlice,
             )
             self.countdown_window = screen.root.create_window(
-                max(0, screen.width_in_pixels - width - 16), 16, width, height, 0,
+                max(0, screen.width_in_pixels - size - 16), 16, size, size, 0,
                 screen.root_depth, X.InputOutput, X.CopyFromParent,
                 background_pixmap=self.countdown_pixmap, override_redirect=True,
             )
             self.countdown_window.set_wm_name("Web Display countdown")
-        width, height, baseline = self.countdown_size
+            self.countdown_window.shape_rectangles(shape.SO.Set, shape.SK.Input, X.Unsorted, 0, 0, [])
+        sweep = -round(max(0.0, min(1.0, progress)) * 360 * 64)
         self.countdown_gc.change(foreground=screen.black_pixel)
-        self.countdown_pixmap.fill_rectangle(self.countdown_gc, 0, 0, width, height)
+        self.countdown_pixmap.fill_rectangle(self.countdown_gc, 0, 0, size, size)
         self.countdown_gc.change(foreground=screen.white_pixel)
-        self.countdown_pixmap.draw_text(self.countdown_gc, 12, baseline, text)
+        self.countdown_mask_gc.change(foreground=0)
+        self.countdown_mask.fill_rectangle(self.countdown_mask_gc, 0, 0, size, size)
+        self.countdown_mask_gc.change(foreground=1)
+        for pixmap, gc in (
+            (self.countdown_pixmap, self.countdown_gc),
+            (self.countdown_mask, self.countdown_mask_gc),
+        ):
+            pixmap.arc(gc, 2, 2, size - 5, size - 5, 0, 360 * 64)
+            if sweep:
+                pixmap.fill_arc(gc, 4, 4, size - 9, size - 9, 90 * 64, sweep)
+        self.countdown_window.shape_mask(shape.SO.Set, shape.SK.Bounding, 0, 0, self.countdown_mask)
         self.countdown_window.clear_area()
         self.countdown_window.map()
         self.countdown_window.configure(stack_mode=X.Above)
@@ -119,9 +133,11 @@ class SceneWindows:
                 self.countdown_window.destroy()
                 self.countdown_gc.free()
                 self.countdown_pixmap.free()
-                self.countdown_font.close()
+                self.countdown_mask_gc.free()
+                self.countdown_mask.free()
             if self.video is not None:
                 self.video.destroy()
             self.display.close()
         self.video = self.display = None
-        self.countdown_window = self.countdown_gc = self.countdown_pixmap = self.countdown_font = None
+        self.countdown_window = self.countdown_gc = self.countdown_pixmap = None
+        self.countdown_mask = self.countdown_mask_gc = None

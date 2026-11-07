@@ -241,15 +241,14 @@ class SceneRenderer:
         LOG.warning("Scene %s: %s", self.scene["id"], message)
         self._publish_status()
 
-    def countdown(self, remaining: int | None, *, starting: bool = False) -> None:
+    def countdown(self, progress: float | None) -> None:
         if self.countdown_failed:
             return
-        text = "Next scene: loading" if starting else (
-            "Next scene: no cutoff" if remaining is None
-            else f"Next scene: {remaining // 60:02d}:{remaining % 60:02d}"
-        )
         try:
-            self.windows.show_countdown(text)
+            if progress is None:
+                self.windows.hide_countdown()
+            else:
+                self.windows.show_countdown(progress)
         except OSError:
             LOG.exception("Could not display carousel countdown")
             self.countdown_failed = True

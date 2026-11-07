@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import type { Scene } from "./api";
 import { WeatherDisplay } from "./components/WeatherDisplay";
 
@@ -22,6 +22,7 @@ interface TrainRow {
   cancelled: boolean;
   status?: string;
   state?: "cancelled" | "delayed" | "on-time" | "";
+  service_type?: "train" | "bus";
 }
 
 interface CallingPoint {
@@ -171,14 +172,13 @@ export function SceneScreen() {
 
   const size = (scene?.text.length ?? 0) > 500 ? "small" : (scene?.text.length ?? 0) > 200 ? "medium" : "large";
   return (
-    <main className={`scene-screen ${scene?.layout ?? ""}${scene?.show_weather ? " weather-dashboard" : ""}`}>
+    <main className={`scene-screen ${scene?.layout ?? ""}${scene?.show_weather ? " weather-dashboard" : ""}${scene?.kind === "train" ? " train-screen" : ""}`}>
       {error ? <p role="alert">{error}</p> : !scene ? <p>Loading scene...</p> :
         scene.kind === "train" ? (
           <section className="train-board">
             <header>
               <p className="train-eyebrow">Live departures</p>
               <h1>{trainBoard?.station || scene.title || scene.station_crs}</h1>
-              {trainBoard?.generated_at && <p>Updated {trainBoard.generated_at}</p>}
             </header>
             {(trainBoard?.stale || trainError) && (
               <p className="train-warning" role="status">
@@ -210,19 +210,35 @@ export function SceneScreen() {
                 </thead>
                 <tbody>
                   {trainBoard.rows.map((row, index) => (
-                    <tr className={index === 0 ? "train-next" : ""} key={`${row.scheduled}-${index}`}>
-                      <td className={row.state === "on-time" ? "train-on-time" : ""}>{row.scheduled}</td>
+                    <Fragment key={`${row.scheduled}-${index}`}>
+                    <tr className={index === 0 ? "train-next" : ""}>
+                      <td>{row.scheduled}</td>
                       <td>
                         {row.destination || "Destination unavailable"}
-                        {index === 0 && trainBoard.next && (
+                        {row.service_type === "bus" && (
+                          <span className="train-bus-label">Rail replacement bus</span>
+                        )}
+                      </td>
+                      {trainBoard.platform_available && (
+                        <td>{row.service_type === "bus" ? "Bus stop" : row.platform || "TBC"}</td>
+                      )}
+                      <td className={row.state === "cancelled" || row.cancelled ? "train-cancelled" :
+                        row.state === "delayed" ? "train-delayed" :
+                        row.state === "on-time" ? "train-on-time" : ""}>
+                        {row.status || (row.cancelled ? "Cancelled" : row.estimated || "Status unavailable")}
+                      </td>
+                    </tr>
+                    {index === 0 && trainBoard.next && (
+                      <tr className="train-next train-detail-row">
+                        <td colSpan={trainBoard.platform_available ? 4 : 3}>
                           <div className="train-calling">
-                            {trainBoard.next.previous_stops?.map((group, groupIndex) => (
+                            {row.state !== "cancelled" && !row.cancelled && trainBoard.next.previous_stops?.map((group, groupIndex) => (
                               <p key={`previous-${groupIndex}`}>
                                 <strong>Previous stops: </strong>
                                 {group.map(callingPointText).join(", ")}
                               </p>
                             ))}
-                            {trainBoard.next.calling_at?.map((group, groupIndex) => (
+                            {row.state !== "cancelled" && !row.cancelled && trainBoard.next.calling_at?.map((group, groupIndex) => (
                               <p key={groupIndex}>
                                 <strong>Calling at: </strong>
                                 {group.map(callingPointText).join(", ")}
@@ -235,14 +251,10 @@ export function SceneScreen() {
                               </p>
                             )}
                           </div>
-                        )}
-                      </td>
-                      {trainBoard.platform_available && <td>{row.platform || "TBC"}</td>}
-                      <td className={row.state === "cancelled" || row.cancelled ? "train-cancelled" :
-                        row.state === "delayed" ? "train-delayed" : ""}>
-                        {row.status || (row.cancelled ? "Cancelled" : row.estimated || "Status unavailable")}
-                      </td>
-                    </tr>
+                        </td>
+                      </tr>
+                    )}
+                    </Fragment>
                   ))}
                 </tbody>
               </table>

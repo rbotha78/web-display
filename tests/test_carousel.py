@@ -95,19 +95,19 @@ class CarouselTests(unittest.TestCase):
     def test_countdown_uses_playback_start_and_resets_at_scene_change(self):
         carousel = Carousel(playlist(scene("a", duration=5), scene("b", duration=10)), self.renderer)
         carousel.tick(0)
-        self.renderer.countdown.assert_called_with(None, starting=True)
+        self.renderer.countdown.assert_called_with(None)
         self.renderer.state.return_value = "starting"
         carousel.tick(3)
-        self.renderer.countdown.assert_called_with(None, starting=True)
+        self.renderer.countdown.assert_called_with(None)
         self.renderer.state.return_value = "playing"
         carousel.tick(4)
-        self.renderer.countdown.assert_called_with(5, starting=False)
+        self.renderer.countdown.assert_called_with(0.0)
         carousel.tick(5.2)
-        self.renderer.countdown.assert_called_with(4, starting=False)
+        self.assertAlmostEqual(self.renderer.countdown.call_args.args[0], 0.24)
         carousel.tick(9)
-        self.renderer.countdown.assert_called_with(None, starting=True)
+        self.renderer.countdown.assert_called_with(None)
         carousel.tick(10)
-        self.renderer.countdown.assert_called_with(10, starting=False)
+        self.renderer.countdown.assert_called_with(0.0)
 
     def test_uncapped_video_countdown_has_no_deadline(self):
         carousel = Carousel(playlist(scene(
@@ -115,7 +115,7 @@ class CarouselTests(unittest.TestCase):
         )), self.renderer)
         carousel.tick(0)
         carousel.tick(1)
-        self.renderer.countdown.assert_called_with(None, starting=False)
+        self.renderer.countdown.assert_called_with(None)
 
     def test_loops_in_order_skips_disabled_and_starts_timer_after_startup(self):
         carousel = Carousel(playlist(

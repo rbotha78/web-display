@@ -17,6 +17,7 @@ from .storage import atomic_write
 
 LOG = logging.getLogger(__name__)
 REFRESH_INTERVAL = 60
+RETRY_INTERVAL = 30
 REQUEST_TIMEOUT = 10
 BOARD_URL = (
     "https://api1.raildata.org.uk/1010-live-departure-board-dep1_2/"
@@ -214,6 +215,25 @@ class RailDataClient:
                 service = departure.get("service")
                 if isinstance(service, dict):
                     services.append(service)
+        bus_services = board.get("busServices", [])
+        if not isinstance(bus_services, list):
+            raise RailDataError("National Rail returned an invalid bus departure list")
+        buses = [
+            {**service, "serviceType": "bus"}
+            for service in bus_services if isinstance(service, dict)
+        ]
+        if buses:
+            services.extend(buses)
+            generated = _string(board.get("generatedAt"))
+            try:
+                reference = datetime.fromisoformat(generated.replace("Z", "+00:00")).strftime("%H:%M")
+            except ValueError:
+                reference = _string(services[0].get("std"))
+            services.sort(key=lambda service: (
+                _delay_minutes(reference, service.get("std"))
+                if _clock_minutes(service.get("std")) is not None
+                and _clock_minutes(reference) is not None else 1440
+            ))
 
         rows = []
         for service in services:
@@ -229,6 +249,7 @@ class RailDataClient:
                 "operator": _string(service.get("operator")),
                 "cancelled": cancelled,
                 "state": _service_state(cancelled, scheduled, estimated),
+                "service_type": "bus" if service.get("serviceType") == "bus" else "train",
                 "alerts": [
                     item for item in service.get("adhocAlerts", [])
                     if isinstance(item, str)
@@ -345,6 +366,7 @@ class RailDataWorker:
         self._lock = threading.Lock()
         self._cursor = 0
         self._last_refresh_at: float | None = None
+        self._refresh_failed = False
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
 
@@ -355,6 +377,8 @@ class RailDataWorker:
         while not self._stop.is_set():
             self.refresh_once()
             interval = self.config().get("raildata_refresh_seconds", self.interval)
+            if self._refresh_failed:
+                interval = min(interval, RETRY_INTERVAL)
             elapsed = (
                 time.monotonic() - self._last_refresh_at
                 if self._last_refresh_at is not None else 0
@@ -402,6 +426,8 @@ class RailDataWorker:
             grouped = list(station_groups.items())
             now = time.monotonic()
             interval = config.get("raildata_refresh_seconds", self.interval)
+            if self._refresh_failed:
+                interval = min(interval, RETRY_INTERVAL)
             if self._last_refresh_at is not None and now - self._last_refresh_at < interval:
                 return
             cursor = self._cursor % len(grouped)
@@ -411,6 +437,7 @@ class RailDataWorker:
             try:
                 result = self.fetch(key, details_key, crs)
             except RailDataError as error:
+                self._refresh_failed = True
                 LOG.warning("National Rail refresh failed for %s: %s", crs, error)
                 for scene_id in scene_ids:
                     previous = boards.get(scene_id, {})
@@ -420,6 +447,7 @@ class RailDataWorker:
                         previous = {"stale": False, "error": str(error)}
                     boards[scene_id] = previous
             else:
+                self._refresh_failed = False
                 for scene_id in scene_ids:
                     boards[scene_id] = result
             self._publish(boards)

@@ -16,8 +16,8 @@ test.each(["weather", "dashboard"])("shows current weather and forecast in %s sc
       ? { kind, revision: "weather-one", layout: "clock", text: "", show_weather: kind === "dashboard" }
       : path === "/api/weather"
         ? { location: "St Albans, GB", temperature: 12, feels_like: 10, humidity: 80,
-            wind_kmh: 7.2, description: "light rain", observed_at: 100,
-            forecast: [{ date: "2026-11-08", low: 8, high: 14, description: "cloudy" }] }
+            wind_kmh: 7.2, description: "light rain", icon: "10d", observed_at: 100,
+            forecast: [{ date: "2026-11-08", low: 8, high: 14, description: "cloudy", icon: "04d" }] }
         : {},
   }));
   vi.stubGlobal("fetch", fetch);
@@ -26,18 +26,28 @@ test.each(["weather", "dashboard"])("shows current weather and forecast in %s sc
   expect(screen.getByText("12 °C")).toBeTruthy();
   expect(screen.getByText("light rain")).toBeTruthy();
   expect(screen.getByText("8–14 °C")).toBeTruthy();
+  expect(document.querySelector(".weather-current .weather-icon-rain")).toBeTruthy();
+  expect(document.querySelector(".weather-forecast .weather-icon-cloud")).toBeTruthy();
   expect(fetch).toHaveBeenCalledWith("/api/weather", expect.anything());
 });
 
-test("colours departure statuses and displays station messages as text", async () => {
+test.each(["state", "flag"])("hides cancelled-service stops using the %s and displays coloured statuses", async (cancellation) => {
   vi.stubGlobal("fetch", vi.fn(async (path: string) => ({
     ok: true,
     json: async () => path === "/api/scene"
       ? { kind: "train", revision: "colours", scene_id: "hww", title: "How Wood", text: "" }
       : path === "/api/weather" ? {}
       : {
+          platform_available: true,
+          next: {
+            previous_stops: [[{ station: "Previous stop", scheduled: "11:50" }]],
+            calling_at: [[{ station: "Upcoming stop", scheduled: "12:10" }]],
+            last_seen: { station: "Reported station", actual: "11:45" },
+          },
           rows: [
-            { scheduled: "12:00", destination: "A", status: "Cancelled", state: "cancelled" },
+            { scheduled: "12:00", destination: "A", status: "Cancelled",
+              state: cancellation === "state" ? "cancelled" : "",
+              cancelled: cancellation === "flag", service_type: "bus" },
             { scheduled: "12:10", destination: "B", estimated: "12:15", state: "delayed" },
             { scheduled: "12:20", destination: "C", estimated: "On time", state: "on-time" },
           ],
@@ -47,7 +57,15 @@ test("colours departure statuses and displays station messages as text", async (
   render(<SceneScreen />);
   expect((await screen.findByText("Cancelled")).className).toBe("train-cancelled");
   expect(screen.getByText("12:15").className).toBe("train-delayed");
-  expect(screen.getByText("12:20").className).toBe("train-on-time");
+  expect(screen.getByText("12:20").className).toBe("");
+  expect(screen.getByText("On time").className).toBe("train-on-time");
+  expect(screen.getByText("Rail replacement bus")).toBeTruthy();
+  expect(screen.getByText("Bus stop")).toBeTruthy();
+  expect(screen.queryByText("Previous stops:")).toBeNull();
+  expect(screen.queryByText("Calling at:")).toBeNull();
+  expect(screen.queryByText(/Previous stop \(/)).toBeNull();
+  expect(screen.queryByText(/Upcoming stop \(/)).toBeNull();
+  expect(screen.getByText(/Reported station at 11:45/)).toBeTruthy();
   expect(screen.getByText("Please use platform 1")).toBeTruthy();
   expect(screen.getByText("<b>Not markup</b>")).toBeTruthy();
   expect(document.querySelector(".train-alerts b")).toBeNull();

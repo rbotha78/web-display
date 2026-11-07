@@ -150,21 +150,19 @@ class RendererTests(unittest.TestCase):
         self.renderer.server.ready.set()
         self.assertEqual(self.renderer.state(), "playing")
 
-    def test_countdown_formats_time_and_hides_during_recovery(self):
-        self.renderer.countdown(125)
-        self.renderer.windows.show_countdown.assert_called_with("Next scene: 02:05")
+    def test_countdown_shows_progress_and_hides_without_a_deadline(self):
+        self.renderer.countdown(0.25)
+        self.renderer.windows.show_countdown.assert_called_with(0.25)
         self.renderer.countdown(None)
-        self.renderer.windows.show_countdown.assert_called_with("Next scene: no cutoff")
-        self.renderer.countdown(None, starting=True)
-        self.renderer.windows.show_countdown.assert_called_with("Next scene: loading")
+        self.renderer.windows.hide_countdown.assert_called()
         self.renderer.recovery()
         self.renderer.windows.hide_countdown.assert_called()
 
     def test_countdown_display_failure_is_logged_without_interrupting_playback(self):
         self.renderer.windows.show_countdown.side_effect = OSError("display unavailable")
         with self.assertLogs("webdisplay.scene_player", level="ERROR"):
-            self.renderer.countdown(5)
-        self.renderer.countdown(4)
+            self.renderer.countdown(0.5)
+        self.renderer.countdown(0.6)
         self.renderer.windows.show_countdown.assert_called_once()
 
     def test_dashboard_readiness_timeout_records_whether_document_or_render_ack_is_missing(self):

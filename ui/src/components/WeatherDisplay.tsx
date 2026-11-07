@@ -1,14 +1,16 @@
 import { useEffect, useState } from "react";
+import { WeatherIcon } from "./WeatherIcon";
 
 interface WeatherData {
   location?: string;
   temperature?: number;
   feels_like?: number;
   description?: string;
+  icon?: string;
   humidity?: number;
   wind_kmh?: number;
   observed_at?: number;
-  forecast?: { date: string; low: number; high: number; description: string }[];
+  forecast?: { date: string; low: number; high: number; description: string; icon?: string }[];
   forecast_error?: string;
   error?: string;
   stale?: boolean;
@@ -56,6 +58,7 @@ export function WeatherDisplay({ compact = false, currentOnly = false }: {
       {weather?.temperature !== undefined && (
         <>
           <div className="weather-current">
+            <WeatherIcon code={weather.icon} />
             <strong>{Math.round(weather.temperature)} °C</strong>
             <span>{weather.description}</span>
           </div>
@@ -70,6 +73,7 @@ export function WeatherDisplay({ compact = false, currentOnly = false }: {
                   <h3>{new Date(`${day.date}T12:00:00`).toLocaleDateString([], {
                     weekday: "short", day: "numeric", month: "short",
                   })}</h3>
+                  <WeatherIcon code={day.icon} />
                   <p>{Math.round(day.low)}–{Math.round(day.high)} °C</p>
                   <p>{day.description}</p>
                 </div>
