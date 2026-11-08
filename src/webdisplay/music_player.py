@@ -197,7 +197,7 @@ class MusicPlayer:
                         pending_next = False
                         failures, retry_at = 0, 0.0
                         endpoint = control_url(settings["control_url"]) if enabled else ""
-                    if not endpoint or failures >= 3 or time.monotonic() < retry_at:
+                    if not endpoint or time.monotonic() < retry_at:
                         self.shutdown.wait(1)
                         continue
                     with self.lock:
@@ -226,6 +226,8 @@ class MusicPlayer:
                             volume = settings["volume"]
                         ended, paused = self.ended, self.paused
                     if paused or (position is not None and position != last_position):
+                        if not paused and last_position is not None and position != last_position:
+                            failures = 0
                         last_position, last_progress = position, time.monotonic()
                     elif ended is None and time.monotonic() - last_progress > 30:
                         raise OSError("Audio playback stalled")
@@ -242,8 +244,11 @@ class MusicPlayer:
                 except (OSError, ValueError, KeyError, TypeError):
                     self._stop_player()
                     failures += 1
-                    retry_at = time.monotonic() + (5 if failures == 1 else 15)
+                    delay = 5 if failures == 1 else 15 if failures == 2 else 60
+                    retry_at = time.monotonic() + delay
+                    LOG.warning("Music playback interrupted; retrying in %s seconds", delay)
                     if failures >= 3 and endpoint:
+                        track, pending_next = None, False
                         try:
                             self._control(endpoint, "error")
                         except (OSError, ValueError):

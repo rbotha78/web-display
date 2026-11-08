@@ -156,10 +156,12 @@ class MusicPlayerTests(unittest.TestCase):
         player = self.player()
         player.shutdown = threading.Event()
         waits = []
+        clock = [0.0]
 
         def wait(seconds):
             waits.append(seconds)
-            if len(waits) >= 4:
+            clock[0] += seconds
+            if sum(call.args[1] == "current" for call in player._control.call_args_list) >= 4:
                 player.shutdown.set()
             return player.shutdown.is_set()
 
@@ -170,10 +172,10 @@ class MusicPlayerTests(unittest.TestCase):
             player.config_path = Path(directory) / "music.json"
             player.config_path.write_text(json.dumps({"enabled": True, "station_key": "station",
                                                      "control_url": self.endpoint, "volume": 30}))
-            with patch("webdisplay.music_player.time.monotonic", side_effect=range(0, 100000, 100)):
+            with patch("webdisplay.music_player.time.monotonic", side_effect=lambda: clock[0]):
                 player._run()
         actions = [call.args[1] for call in player._control.call_args_list]
-        self.assertEqual(actions.count("current"), 3)
+        self.assertEqual(actions.count("current"), 4)
         self.assertIn("error", actions)
         player._stop_player.assert_called()
 
@@ -190,6 +192,45 @@ class MusicPlayerTests(unittest.TestCase):
                                                      "control_url": self.endpoint, "volume": 30}))
             player._run()
         self.assertNotIn("current", [call.args[1] for call in player._control.call_args_list])
+
+    def test_server_recovers_after_three_failures_without_changing_settings(self):
+        player = self.player()
+        player.process.poll.return_value = None
+        player.shutdown = threading.Event()
+        player._stop_player = Mock()
+        player._load = Mock(return_value=True)
+        player._command = Mock(return_value=1.0)
+        clock = [0.0]
+        attempts = []
+        track = {"track_id": "fresh", "url": self.endpoint.removesuffix("control") + "stream/fresh"}
+
+        def control(endpoint, action, **kwargs):
+            if action == "current":
+                attempts.append(clock[0])
+                if len(attempts) <= 3:
+                    raise OSError("Plex is restarting")
+                return track
+            return {}
+
+        def wait(seconds):
+            clock[0] += seconds
+            if player._load.called:
+                player.shutdown.set()
+            self.assertLess(clock[0], 100)
+            return player.shutdown.is_set()
+
+        player.shutdown.wait = wait
+        player._control = Mock(side_effect=control)
+        with tempfile.TemporaryDirectory() as directory:
+            player.config_path = Path(directory) / "music.json"
+            player.config_path.write_text(json.dumps({
+                "enabled": True, "station_key": "station", "control_url": self.endpoint, "volume": 30,
+            }))
+            with patch("webdisplay.music_player.time.monotonic", side_effect=lambda: clock[0]):
+                player._run()
+        self.assertEqual(attempts, [0, 5, 20, 80])
+        player._load.assert_called_once_with(track, self.endpoint, 30)
+        self.assertIn("error", [call.args[1] for call in player._control.call_args_list])
 
     def test_control_endpoint_rejects_remote_hosts_credentials_and_queries(self):
         self.assertEqual(control_url(self.endpoint), self.endpoint)

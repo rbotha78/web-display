@@ -243,7 +243,7 @@ class MusicRelay:
             if not self.settings["enabled"]:
                 raise ValueError("Music disabled")
             if value["action"] == "error":
-                self.status.update(state="error", error="Audio playback failed; disable and re-enable music to retry.")
+                self.status.update(state="error", error="Audio playback interrupted; retrying automatically.")
                 self._stop()
                 return {}
             if self.queue is None:

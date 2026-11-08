@@ -247,9 +247,11 @@ next item. Station queues on the tested server are finite: reaching their actual
 end creates a **new queue for the same station**, rather than assuming Plex
 automatically refills them indefinitely. New queue creation may briefly interrupt
 audio, and stations may repeat tracks. Playback is not gapless or crossfaded.
-Up to three attempts handle connection,
-decoder and stalled-player failures; afterwards disable and re-enable music to
-retry. The card reports sanitized playback state/errors.
+Connection, decoder and stalled-player failures retry after 5 seconds, then
+15 seconds, then once per minute while music remains enabled and the display
+is awake. Repeated failures clear the stale Plex queue so stations recover
+after a server restart without manually toggling music. Successful playback
+resets the retry delay. The card reports sanitized playback state/errors.
 
 Authenticated endpoints: `GET /api/plex/stations`, `GET /api/plex/music` and
 `PUT /api/plex/music` (session mutations require CSRF). Music settings are
