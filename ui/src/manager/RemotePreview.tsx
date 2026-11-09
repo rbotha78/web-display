@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import type { RemoteView } from "../api";
 import { WeatherContent } from "../components/WeatherDisplay";
+import { RecentServiceContent } from "../components/RecentServiceContent";
+import { ServiceStationTimes, nextServiceStops } from "../components/ServiceStationTimes";
 import { api } from "./api";
 
 function deviceClock(value: RemoteView, elapsed: number) {
@@ -144,10 +146,19 @@ export function RemotePreview({ deviceId, deviceName, close }: {
                       <td>{row.status || (row.cancelled ? "Cancelled" : row.estimated)}</td></tr>
                   ))}</tbody>
                 </table>
-                {train?.next?.previous_stops?.map((group, i) => <p key={i}>Previous stops: {group.map((p) => `${p.station} (${p.cancelled ? "Cancelled" : p.actual || p.estimated || p.scheduled})`).join(", ")}</p>)}
-                {train?.next?.calling_at?.map((group, i) => <p key={i}>Calling at: {group.map((p) => `${p.station} (${p.cancelled ? "Cancelled" : p.actual || p.estimated || p.scheduled})`).join(", ")}</p>)}
-                {train?.next?.last_seen && <p>Last reported at {train.next.last_seen.station} at {train.next.last_seen.actual}</p>}
+                {train?.next && <div role="group" aria-label="Next service station times">
+                  <ServiceStationTimes stops={nextServiceStops(train, train.station || scene.station_crs || "")}
+                    station={train.station || scene.station_crs} lastSeen={train.next.last_seen} />
+                </div>}
                 {train?.alerts?.map((text, i) => <p key={i}>{text}</p>)}
+                <section aria-label={train?.recent && !train.recent.actual
+                  ? "Previous scheduled service" : "Most recent departure"}>
+                  <h4>{train?.recent && !train.recent.actual
+                    ? "Previous scheduled service" : "Most recent departure"}</h4>
+                  {train?.recent ? (
+                    <RecentServiceContent recent={train.recent} station={train.station} />
+                  ) : <p>{train?.recent_error || "Waiting for previous-service information."}</p>}
+                </section>
               </section>
             )}
             {scene && (scene.kind === "weather" || scene.kind === "train" || scene.show_weather) &&

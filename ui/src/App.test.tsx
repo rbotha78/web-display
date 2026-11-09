@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { App } from "./App";
 import { StrictMode } from "react";
@@ -53,6 +53,11 @@ function mockFetch(routes: Record<string, Handler>) {
 
 const unauthorised = { status: 401, body: { error: "login required" } };
 
+async function openGlobalSettings() {
+  const button = await screen.findByRole("button", { name: "Global settings" });
+  await act(async () => { fireEvent.click(button); });
+}
+
 beforeEach(() => {
   vi.spyOn(window, "confirm").mockReturnValue(true);
 });
@@ -71,6 +76,7 @@ test("exchanges a manager link once, clears the fragment and limits key manageme
     "PUT /api/config": () => ({ body: { url: "", auto_ap: false } }),
   }));
   render(<StrictMode><App /></StrictMode>);
+  await openGlobalSettings();
   await waitFor(() => expect((screen.getByLabelText("Web page URL") as HTMLInputElement).value).toBe("https://example.com"));
   fireEvent.click(await screen.findByText("Save settings"));
   await screen.findByText(/Settings saved/);
@@ -139,6 +145,7 @@ test("dashboard loads settings and saves them with the CSRF token", async () => 
       audio_output: "alsa/plughw:CARD=Headphones,DEV=0" } }),
   });
   render(<App />);
+  await openGlobalSettings();
   const url = (await screen.findByLabelText("Web page URL")) as HTMLInputElement;
   await waitFor(() => expect(url.value).toBe("https://example.com"));
   expect(await screen.findByText("Online (3/3)")).toBeTruthy();
@@ -185,6 +192,7 @@ test("renaming the device posts the validated hostname", async () => {
     "POST /api/hostname": () => ({ status: 202, body: { hostname: "lobby", changed: true } }),
   });
   render(<App />);
+  await openGlobalSettings();
   const input = (await screen.findByLabelText("Device hostname")) as HTMLInputElement;
   await waitFor(() => expect(input.value).toBe("web-display"));
   fireEvent.change(input, { target: { value: "Lobby" } });
@@ -222,6 +230,33 @@ function dashboardRoutes(extra: Record<string, Handler>): Record<string, Handler
   };
 }
 
+test("administration separates carousel and global settings without losing either draft", async () => {
+  const calls = mockFetch(dashboardRoutes({}));
+  render(<App />);
+  await screen.findByRole("region", { name: "Carousel configuration" });
+  await waitFor(() => expect((screen.getByLabelText("New scene type") as HTMLSelectElement).disabled).toBe(false));
+  expect(screen.queryByLabelText("Web page URL")).toBeNull();
+  expect(calls.some((call) => call.path === "/api/config")).toBe(false);
+  fireEvent.click(screen.getByText("Add scene"));
+  fireEvent.change(screen.getByLabelText("Scene web page URL"), {
+    target: { value: "https://carousel-draft.example" },
+  });
+
+  await openGlobalSettings();
+  const url = await screen.findByLabelText("Web page URL") as HTMLInputElement;
+  await waitFor(() => expect(url.value).toBe("https://example.com"));
+  expect(screen.queryByRole("region", { name: "Carousel configuration" })).toBeNull();
+  fireEvent.change(url, { target: { value: "https://global-draft.example" } });
+
+  fireEvent.click(screen.getByRole("button", { name: "Carousel" }));
+  expect(screen.queryByRole("region", { name: "Global settings" })).toBeNull();
+  expect((screen.getByLabelText("Scene web page URL") as HTMLInputElement).value).toBe("https://carousel-draft.example");
+  await openGlobalSettings();
+  expect(url.value).toBe("https://global-draft.example");
+  expect(calls.filter((call) => call.path === "/api/playlist")).toHaveLength(1);
+  expect(calls.some((call) => call.init.method === "PUT")).toBe(false);
+});
+
 test("checking for updates offers and installs a newer release", async () => {
   let installedVersion = "0.5.0";
   const calls = mockFetch(
@@ -239,6 +274,7 @@ test("checking for updates offers and installs a newer release", async () => {
     }),
   );
   render(<App />);
+  await openGlobalSettings();
   fireEvent.click(await screen.findByText("Check for updates"));
   expect(await screen.findByText(/Version 0\.5\.1 is available \(2\.0 MB\)/)).toBeTruthy();
   fireEvent.click(screen.getByText("Install update"));
@@ -255,6 +291,7 @@ test("shows when no newer update exists", async () => {
     }),
   );
   render(<App />);
+  await openGlobalSettings();
   fireEvent.click(await screen.findByText("Check for updates"));
   expect(await screen.findByText("No newer update is available.")).toBeTruthy();
   expect(screen.queryByText("Install update")).toBeNull();
@@ -269,6 +306,7 @@ test("uploading an update file sends the raw bytes with the CSRF token", async (
     }),
   );
   render(<App />);
+  await openGlobalSettings();
   const input = (await screen.findByLabelText("Signed update file")) as HTMLInputElement;
   const file = new File(["bundle"], "web-display-update-0.5.2.wdupdate");
   fireEvent.change(input, { target: { files: [file] } });
@@ -289,6 +327,7 @@ test("a rejected update shows the device's reason", async () => {
     }),
   );
   render(<App />);
+  await openGlobalSettings();
   const input = (await screen.findByLabelText("Signed update file")) as HTMLInputElement;
   fireEvent.change(input, { target: { files: [new File(["x"], "bad.wdupdate")] } });
   fireEvent.click(screen.getByText("Upload and install"));
@@ -308,6 +347,7 @@ test("an installed but not yet running update asks for a restart", async () => {
     }),
   );
   render(<App />);
+  await openGlobalSettings();
   expect(await screen.findByText(/Version 0\.5\.1 is installed and starts after a restart/)).toBeTruthy();
   expect(screen.getByText("Restart now")).toBeTruthy();
 });
@@ -327,6 +367,7 @@ test("lists and revokes manager keys", async () => {
     },
   });
   render(<App />);
+  await openGlobalSettings();
   const revokes = await screen.findAllByText("Revoke");
   expect(revokes).toHaveLength(2);
   fireEvent.click(revokes[0]);
@@ -357,6 +398,7 @@ test("development devices list, add and remove SSH keys", async () => {
     }),
   );
   render(<App />);
+  await openGlobalSettings();
   expect(await screen.findByText("laptop")).toBeTruthy();
 
   fireEvent.change(screen.getByLabelText("Public key"), {
@@ -379,6 +421,7 @@ test("hides the SSH key card on release firmware", async () => {
     }),
   );
   render(<App />);
+  await openGlobalSettings();
   await screen.findByText("Check for updates");
   expect(screen.queryByText("Development SSH keys")).toBeNull();
 });

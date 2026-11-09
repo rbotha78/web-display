@@ -102,14 +102,38 @@ test("renders train and weather from the same snapshot without extra requests", 
     scene: { id: "train", kind: "train", station_crs: "PAD" },
     train: { crs: "PAD", station: "Paddington", rows: [
       { scheduled: "15:30", destination: "Reading", status: "On time", platform: "4" },
-    ], alerts: ["<b>Station notice</b>"] },
+    ], alerts: ["<b>Station notice</b>"],
+    next: {
+      scheduled: "15:30", estimated: "15:33", actual: "",
+      last_seen: { station: "Earlier stop", actual: "15:21" },
+      previous_stops: [[{ station: "Earlier stop", actual: "15:21" }]],
+      calling_at: [[{ station: "Upcoming stop", scheduled: "15:40", estimated: "On time" }]],
+    },
+    recent: {
+      scheduled: "15:00", actual: "15:04", destination: "Oxford", status: "Departed at 15:04",
+      delay_minutes: 4, stale: false, details_error: "",
+      last_seen: { station: "Oxford", actual: "16:00" },
+      stops: [{ station: "Paddington", timing: "departure", scheduled: "15:00", actual: "15:04",
+        estimated: "", delay_minutes: 4, cancelled: false },
+        { station: "Oxford", timing: "arrival", scheduled: "15:55", actual: "16:00",
+        estimated: "", delay_minutes: 5, cancelled: false }],
+    } },
     weather: { location: "London", temperature: 12, description: "Clear sky", icon: "01d" },
   })));
   render(<RemotePreview deviceId="aabbccddeeff" deviceName="Lobby" close={vi.fn()} />);
   await settle();
-  expect(screen.getByText("Paddington")).toBeTruthy();
+  expect(screen.getByRole("heading", { name: "Paddington" })).toBeTruthy();
   expect(screen.getByText("Reading")).toBeTruthy();
   expect(screen.getByText("<b>Station notice</b>")).toBeTruthy();
+  const route = screen.getByRole("group", { name: "Next service station times" });
+  expect(route.querySelector(".train-recent-stops")?.textContent).toBe("Earlier stop15:21Paddington15:33 estUpcoming stop15:40");
+  expect(route.querySelector('[aria-current="location"]')?.textContent).toBe("Paddington15:33 est");
+  expect(route.querySelector(".train-stop-observed")?.textContent).toBe("Earlier stop15:21");
+  expect(route.querySelector(".train-last-seen")?.textContent).toBe("Last seen: Earlier stop at 15:21");
+  expect(screen.getByRole("region", { name: "Most recent departure" }).textContent).toContain("Paddington15:04");
+  expect(screen.getByRole("region", { name: "Most recent departure" })
+    .querySelector('[aria-current="location"]')?.textContent).toBe("Paddington15:04");
+  expect(screen.getByRole("region", { name: "Most recent departure" }).textContent).not.toMatch(/Oxford|arrival|late/);
   expect(screen.getByText("12 °C")).toBeTruthy();
   expect(fetch).toHaveBeenCalledTimes(1);
 });
@@ -123,4 +147,24 @@ test("expires a near-stale kiosk heartbeat even while the preview connection rem
   await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
   expect(screen.getByRole("alert").textContent).toContain("heartbeat is stale");
   expect(screen.queryByText("<script>Only text</script>")).toBeNull();
+});
+
+test("distinguishes previous scheduled service from a confirmed departure", async () => {
+  vi.stubGlobal("fetch", vi.fn(async () => reply({
+    ...initial,
+    scene: { id: "train", kind: "train", station_crs: "HWW" },
+    train: {
+      station: "How Wood", rows: [],
+      recent: {
+        scheduled: "08:57", actual: "", status: "Departure not confirmed",
+        destination: "St Albans Abbey", delay_minutes: null,
+        stops: [{ station: "Park Street", scheduled: "08:59", actual: "", estimated: "On time", timing: "reported" }],
+      },
+    },
+  })));
+  render(<RemotePreview deviceId="aabbccddeeff" deviceName="Lobby" close={vi.fn()} />);
+  const previous = await screen.findByRole("region", { name: "Previous scheduled service" });
+  expect(previous.textContent).toContain("Park Street08:59");
+  expect(previous.textContent).not.toMatch(/not confirmed|not reported|Lateness/);
+  expect(screen.queryByRole("heading", { name: "Most recent departure" })).toBeNull();
 });

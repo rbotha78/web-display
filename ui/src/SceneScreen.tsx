@@ -1,6 +1,9 @@
-import { Fragment, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import type { Scene } from "./api";
 import { WeatherDisplay } from "./components/WeatherDisplay";
+import { RecentServiceContent } from "./components/RecentServiceContent";
+import { ServiceStationTimes, nextServiceStops } from "./components/ServiceStationTimes";
 
 interface DisplayScene {
   kind: "dashboard" | "train" | "weather" | "recovery";
@@ -35,8 +38,31 @@ interface CallingPoint {
   cancelled: boolean;
 }
 
+interface RecentStop extends CallingPoint {
+  delay_minutes: number | null;
+  timing: "departure" | "arrival" | "reported";
+}
+
+interface RecentDeparture {
+  scheduled: string;
+  actual: string;
+  destination: string;
+  platform: string;
+  operator: string;
+  status: string;
+  delay_minutes: number | null;
+  last_seen: { station: string; actual: string } | null;
+  stops: RecentStop[];
+  display_stops?: RecentStop[];
+  updated_at: number;
+  stale: boolean;
+  details_error: string;
+}
+
 export interface TrainBoard {
   crs?: string;
+  destination_crs?: string;
+  filter_station_crs?: string;
   station?: string;
   generated_at?: string;
   services_available?: boolean;
@@ -46,6 +72,8 @@ export interface TrainBoard {
   alerts?: string[];
   details_available?: boolean;
   details_error?: string;
+  recent?: RecentDeparture | null;
+  recent_error?: string;
   next?: {
     scheduled?: string;
     estimated?: string;
@@ -60,40 +88,55 @@ export interface TrainBoard {
   error?: string;
 }
 
-function callingPointText(point: CallingPoint): string {
-  const time = point.cancelled ? "Cancelled" :
-    point.actual ? `actual ${point.actual}` : point.scheduled;
-  const expected = !point.cancelled && !point.actual && point.estimated &&
-    point.estimated !== "On time" ? `; expected ${point.estimated}` : "";
-  return `${point.station} (${time}${expected})`;
-}
-
-function StopLine({ label, groups }: { label: string; groups: CallingPoint[][] }) {
-  const ref = useRef<HTMLSpanElement>(null);
-  const text = groups.map((group) => group.map(callingPointText).join(", ")).join(" | ");
-  useEffect(() => {
-    let direction = 1;
-    let pause = 40;
-    if (ref.current) ref.current.scrollLeft = 0;
-    const timer = window.setInterval(() => {
-      const element = ref.current;
-      if (!element) return;
-      const maximum = element.scrollWidth - element.clientWidth;
-      if (maximum <= 1 || pause-- > 0) return;
-      element.scrollLeft += direction * 2;
-      if (element.scrollLeft >= maximum || element.scrollLeft <= 0) {
-        direction *= -1;
-        pause = 40;
-      }
-    }, 50);
-    return () => window.clearInterval(timer);
-  }, [text]);
-  if (!text) return null;
+function DepartureTable({ rows, platformAvailable = false, subsequent = false, children }: {
+  rows: TrainRow[];
+  platformAvailable?: boolean;
+  subsequent?: boolean;
+  children?: ReactNode;
+}) {
   return (
-    <p className="train-stop-line">
-      <strong>{label}: </strong>
-      <span ref={ref} className="train-stop-scroll">{text}</span>
-    </p>
+    <table className={subsequent ? "train-subsequent" : undefined}
+      aria-label={subsequent ? "Later departures" : "Next departure"}>
+      <colgroup>
+        <col /><col />{platformAvailable && <col />}<col />
+      </colgroup>
+      <thead className={subsequent ? "visually-hidden" : undefined}>
+        <tr>
+          <th scope="col">Time</th><th scope="col">Destination</th>
+          {platformAvailable && <th scope="col">Platform</th>}
+          <th scope="col">Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((row, index) => (
+          <tr key={`${row.scheduled}-${index}`} className={subsequent ? "" : "train-next"}>
+            <td>{row.scheduled}</td>
+            <td>
+              {row.destination || "Destination unavailable"}
+              {row.service_type === "bus" && (
+                <span className="train-bus-label">Rail replacement bus</span>
+              )}
+              {!!row.alerts?.length && (
+                <div className="train-service-notices" aria-label={`Service notices for ${row.scheduled}`}>
+                  {row.alerts.map((notice, noticeIndex) => (
+                    <p key={noticeIndex}><strong>Service notice: </strong>{notice}</p>
+                  ))}
+                </div>
+              )}
+            </td>
+            {platformAvailable && (
+              <td>{row.service_type === "bus" ? "Bus stop" : row.platform || "TBC"}</td>
+            )}
+            <td className={row.state === "cancelled" || row.cancelled ? "train-cancelled" :
+              row.state === "delayed" ? "train-delayed" :
+              row.state === "on-time" ? "train-on-time" : ""}>
+              {row.status || (row.cancelled ? "Cancelled" : row.estimated || "Status unavailable")}
+            </td>
+          </tr>
+        ))}
+        {children}
+      </tbody>
+    </table>
   );
 }
 
@@ -227,6 +270,7 @@ export function SceneScreen() {
   }, [scene]);
 
   const size = (scene?.text.length ?? 0) > 500 ? "small" : (scene?.text.length ?? 0) > 200 ? "medium" : "large";
+  const station = trainBoard?.station || scene?.title || scene?.station_crs || "";
   const publishedSafeArea = scene?.safe_area_percent ?? 5;
   const safeArea = Number.isInteger(publishedSafeArea) &&
     publishedSafeArea >= 0 && publishedSafeArea <= 10 ? publishedSafeArea : 5;
@@ -234,11 +278,27 @@ export function SceneScreen() {
     <main ref={screenRef} className={`scene-screen safe-area-${safeArea} ${scene?.layout ?? ""}${scene?.show_weather ? " weather-dashboard" : ""}${scene?.kind === "train" ? " train-screen" : ""}`}>
       {error ? <p role="alert">{error}</p> : !scene ? <p>Loading scene...</p> :
         scene.kind === "train" ? (
-          <section className="train-board">
+          <section className={`train-board${(trainBoard?.rows?.length ?? 0) > 5 ? " train-board-dense" : ""}`}>
             <header>
               <p className="train-eyebrow">Live departures</p>
-              <h1>{trainBoard?.station || scene.title || scene.station_crs}</h1>
+              <h1>{station}</h1>
             </header>
+            {!!trainBoard?.rows?.length && (
+              <section className="train-next-service" aria-label="Next service">
+                <DepartureTable rows={trainBoard.rows.slice(0, 1)} platformAvailable={trainBoard.platform_available}>
+                  {trainBoard.next && (
+                    <tr className="train-next train-detail-row">
+                      <td colSpan={trainBoard.platform_available ? 4 : 3}>
+                        <div className="train-calling" role="group" aria-label="Next service station times">
+                          <ServiceStationTimes stops={nextServiceStops(trainBoard, station)}
+                            station={station} lastSeen={trainBoard.next.last_seen} />
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </DepartureTable>
+              </section>
+            )}
             <div ref={contentRef} className="train-content" tabIndex={0} aria-label="Departures and notices">
             {(trainBoard?.stale || trainError) && (
               <p className="train-warning" role="status">
@@ -259,66 +319,9 @@ export function SceneScreen() {
               !trainBoard.rows?.length && !trainBoard.error && (
                 <p>No upcoming departures were returned.</p>
               )}
-            {!!trainBoard?.rows?.length && (
-              <table>
-                <thead>
-                  <tr>
-                    <th>Time</th><th>Destination</th>
-                    {trainBoard.platform_available && <th>Platform</th>}
-                    <th>Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {trainBoard.rows.map((row, index) => (
-                    <Fragment key={`${row.scheduled}-${index}`}>
-                    <tr className={index === 0 ? "train-next" : ""}>
-                      <td>{row.scheduled}</td>
-                      <td>
-                        {row.destination || "Destination unavailable"}
-                        {row.service_type === "bus" && (
-                          <span className="train-bus-label">Rail replacement bus</span>
-                        )}
-                        {!!row.alerts?.length && (
-                          <div className="train-service-notices" aria-label={`Service notices for ${row.scheduled}`}>
-                            {row.alerts.map((notice, noticeIndex) => (
-                              <p key={noticeIndex}><strong>Service notice: </strong>{notice}</p>
-                            ))}
-                          </div>
-                        )}
-                      </td>
-                      {trainBoard.platform_available && (
-                        <td>{row.service_type === "bus" ? "Bus stop" : row.platform || "TBC"}</td>
-                      )}
-                      <td className={row.state === "cancelled" || row.cancelled ? "train-cancelled" :
-                        row.state === "delayed" ? "train-delayed" :
-                        row.state === "on-time" ? "train-on-time" : ""}>
-                        {row.status || (row.cancelled ? "Cancelled" : row.estimated || "Status unavailable")}
-                      </td>
-                    </tr>
-                    {index === 0 && trainBoard.next && (
-                      <tr className="train-next train-detail-row">
-                        <td colSpan={trainBoard.platform_available ? 4 : 3}>
-                          <div className="train-calling">
-                            {row.state !== "cancelled" && !row.cancelled && (
-                              <>
-                                <StopLine label="Previous stops" groups={trainBoard.next.previous_stops ?? []} />
-                                <StopLine label="Calling at" groups={trainBoard.next.calling_at ?? []} />
-                              </>
-                            )}
-                            {trainBoard.next.last_seen && (
-                              <p>
-                                <strong>Last reported at: </strong>
-                                {trainBoard.next.last_seen.station} at {trainBoard.next.last_seen.actual}
-                              </p>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
-                    )}
-                    </Fragment>
-                  ))}
-                </tbody>
-              </table>
+            {trainBoard?.rows && trainBoard.rows.length > 1 && (
+              <DepartureTable rows={trainBoard.rows.slice(1)}
+                platformAvailable={trainBoard.platform_available} subsequent />
             )}
             {!!trainBoard?.alerts?.length && (
               <div className="train-alerts" aria-label="Station messages">
@@ -331,6 +334,17 @@ export function SceneScreen() {
             )}
             </div>
             {scrolling && <p className="train-scroll-hint">More departures and notices — scrolling automatically</p>}
+            <section className="train-recent" aria-label={trainBoard?.recent && !trainBoard.recent.actual
+              ? "Previous scheduled service" : "Most recent departure"}>
+              <h2>{trainBoard?.recent && !trainBoard.recent.actual
+                ? "Previous scheduled service" : "Most recent departure"}</h2>
+              {trainBoard?.recent ? (
+                <RecentServiceContent recent={trainBoard.recent} station={station} />
+              ) : (
+                <p role="status">{trainBoard?.recent_error ||
+                  "Waiting for previous-service information; scheduled times are not departures."}</p>
+              )}
+            </section>
             <WeatherDisplay key={scene.revision} compact currentOnly />
             <time className="train-current-time" dateTime={now.toISOString()}>
               {now.toLocaleTimeString([], {

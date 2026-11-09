@@ -69,7 +69,7 @@ test("adds and removes dashboard scenes without publishing partial changes", asy
   expect(save).not.toHaveBeenCalled();
 });
 
-test("adds a train board with an uppercase station CRS and saves it", async () => {
+test("adds a train board with uppercase station and optional destination codes", async () => {
   vi.spyOn(api, "playlist").mockResolvedValue({ enabled: false, scenes: [] });
   vi.spyOn(api, "plexConfig").mockResolvedValue({
     server_url: "", configured: false, default_bitrate_kbps: 4000,
@@ -81,12 +81,27 @@ test("adds a train board with an uppercase station CRS and saves it", async () =
   fireEvent.click(screen.getByText("Add scene"));
   fireEvent.change(screen.getByLabelText("Station CRS code"), { target: { value: "pad" } });
   expect(screen.getByLabelText("Station CRS code")).toHaveProperty("value", "PAD");
+  const destination = screen.getByLabelText("Destination CRS code (optional)");
+  expect(destination).toHaveProperty("required", false);
+  expect(destination).toHaveProperty("value", "");
+  fireEvent.change(destination, { target: { value: "rdg" } });
+  expect(destination).toHaveProperty("value", "RDG");
+  const callingStation = screen.getByLabelText("Calling station CRS filter (optional)");
+  expect(callingStation).toHaveProperty("required", false);
+  fireEvent.change(callingStation, { target: { value: "slg" } });
+  expect(callingStation).toHaveProperty("value", "SLG");
   expect(screen.getByLabelText("Scene duration (seconds)")).toHaveProperty("value", "300");
   fireEvent.click(screen.getByText("Save and apply"));
   await waitFor(() => expect(save).toHaveBeenCalled());
   expect(save.mock.calls[0][0].scenes[0]).toMatchObject({
-    kind: "train", station_crs: "PAD", duration: 300,
+    kind: "train", station_crs: "PAD", destination_crs: "RDG", filter_station_crs: "SLG", duration: 300,
   });
+  fireEvent.change(destination, { target: { value: "" } });
+  fireEvent.change(callingStation, { target: { value: "" } });
+  fireEvent.click(screen.getByText("Save and apply"));
+  await waitFor(() => expect(save).toHaveBeenCalledTimes(2));
+  expect(save.mock.calls[1][0].scenes[0].destination_crs).toBe("");
+  expect(save.mock.calls[1][0].scenes[0].filter_station_crs).toBe("");
 });
 
 test("adds standalone weather and enables weather on a dashboard", async () => {
@@ -145,6 +160,28 @@ test("playback status shows failures alongside the matching saved scene", async 
   fireEvent.click(screen.getByText("Check playback status"));
   expect(await screen.findByRole("status")).toHaveProperty("textContent",
     expect.stringContaining("Stream returned a web page"));
+});
+
+test("returning to the carousel refreshes Plex configuration without reloading its draft", async () => {
+  const playlist = vi.spyOn(api, "playlist").mockResolvedValue({
+    enabled: false,
+    scenes: [{ id: "movie", kind: "video", title: "Movie", enabled: true, duration: 300,
+      url: "", source: "plex", layout: "clock", text: "" }],
+  });
+  const config = vi.spyOn(api, "plexConfig")
+    .mockResolvedValueOnce({ server_url: "", configured: false, default_bitrate_kbps: 4000 })
+    .mockResolvedValue({ server_url: "http://plex.local:32400", configured: true, default_bitrate_kbps: 4000 });
+  const props = { notify: vi.fn(), fail: vi.fn() };
+  const { rerender } = render(<PlaylistCard {...props} active />);
+  await screen.findByText("Scene 1: Movie");
+  fireEvent.change(screen.getByLabelText("Scene title"), { target: { value: "Unsaved movie" } });
+  expect(screen.getByText("Choose Plex media")).toHaveProperty("disabled", true);
+  rerender(<PlaylistCard {...props} active={false} />);
+  expect(config).toHaveBeenCalledTimes(1);
+  rerender(<PlaylistCard {...props} active />);
+  await waitFor(() => expect(screen.getByText("Choose Plex media")).toHaveProperty("disabled", false));
+  expect(screen.getByLabelText("Scene title")).toHaveProperty("value", "Unsaved movie");
+  expect(playlist).toHaveBeenCalledTimes(1);
 });
 
 test("selects a Plex library item for a video scene and saves only its identifier", async () => {

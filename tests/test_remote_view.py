@@ -114,6 +114,36 @@ class RemoteViewTests(unittest.TestCase):
         self.assertNotIn("kiosk_start", value)
         self.assertLess(value["heartbeat_age_seconds"], 1)
 
+    def test_train_cache_must_match_destination_in_snapshot_and_manager_boundary(self):
+        train_path = self.root / "train.json"
+        board = {"crs": "HWW", "destination_crs": "WFJ", "filter_station_crs": "BWO", "rows": []}
+        train_path.write_text(json.dumps({"active": board}))
+        scene = {"id": "active", "kind": "train", "station_crs": "HWW",
+                 "destination_crs": "WFJ", "filter_station_crs": "BWO"}
+        value = snapshot("carousel", scene, SLEEP, train_path=train_path)
+        self.assertEqual(value["train"], board)
+        self.assertEqual(value["scene"]["destination_crs"], "WFJ")
+        for field, code in (("destination_crs", ""), ("destination_crs", "SAA"),
+                            ("filter_station_crs", ""), ("filter_station_crs", "PKS")):
+            changed = {**scene, field: code}
+            self.assertIsNone(snapshot("carousel", changed, SLEEP, train_path=train_path)["train"])
+            self.publish(changed, "carousel", train=board)
+            self.assertIsNone(load(self.path)["train"])
+        self.publish(scene, "carousel", train=board)
+        self.assertEqual(load(self.path)["train"]["destination_crs"], "WFJ")
+
+    def test_previous_display_stops_are_sanitized_without_dropping_terminal_arrival(self):
+        board = {"recent": {"stops": [], "display_stops": [
+            {"station": "Selected", "crs": "SEL", "scheduled": "12:00", "timing": "departure"},
+            {"station": "Filtered", "crs": "FLT", "scheduled": "12:10", "api_key": "private"},
+            {"station": "Terminal", "crs": "TRM", "scheduled": "12:20", "timing": "arrival"},
+        ]}}
+        recent = sanitize_train(board)["recent"]
+        self.assertEqual([stop["station"] for stop in recent["display_stops"]],
+                         ["Selected", "Filtered", "Terminal"])
+        self.assertEqual(recent["display_stops"][-1]["timing"], "arrival")
+        self.assertNotIn("private", json.dumps(recent))
+
     def test_existing_train_cache_shape_is_preserved_including_details_and_empty_next(self):
         board = {
             "crs": "PAD", "station": "Paddington", "generated_at": "2026-11-09T10:00:00Z",
@@ -134,6 +164,30 @@ class RemoteViewTests(unittest.TestCase):
         }
         self.assertEqual(sanitize_train(board), board)
         self.assertEqual(sanitize_train({**board, "next": None}), {**board, "next": None})
+
+    def test_recent_departure_is_sanitized_to_public_display_fields_only(self):
+        board = {
+            "crs": "PAD", "rows": [], "recent_error": "Waiting for a confirmed departure",
+            "recent": {
+                "scheduled": "10:00", "actual": "10:04", "destination": "Reading",
+                "platform": "4", "operator": "GWR", "status": "Departed at 10:04",
+                "delay_minutes": 4, "updated_at": 123, "stale": False, "details_error": "",
+                "last_seen": {"station": "Reading", "actual": "10:48", "service_id": "private-id"},
+                "stops": [{
+                    "station": "Reading", "scheduled": "10:45", "actual": "10:48",
+                    "estimated": "10:50", "delay_minutes": 3, "timing": "arrival",
+                    "cancelled": False, "service_id": "private-id",
+                }],
+                "service_id": "private-id", "service_url": "https://private.example/capability",
+                "raw_payload": {"api_key": "private-key"},
+            },
+        }
+        clean = sanitize_train(board)
+        encoded = json.dumps(clean)
+        self.assertEqual(clean["recent"]["stops"][0]["timing"], "arrival")
+        self.assertEqual(clean["recent"]["last_seen"], {"station": "Reading", "actual": "10:48"})
+        for secret in ("private-id", "service_url", "capability", "raw_payload", "private-key"):
+            self.assertNotIn(secret, encoded)
 
 
 if __name__ == "__main__":

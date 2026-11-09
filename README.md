@@ -5,21 +5,90 @@ with Chromium on HDMI, authenticated HTTPS administration, Wi-Fi provisioning,
 signed application updates and PC and Android display managers.
 Saving settings retains the saved values when confirmation notifications appear,
 without reloading stale configuration into the editor.
+Administration opens on **Carousel**, with an **Administration** menu for
+switching to **Global settings** (display defaults, sleep, provider credentials,
+networking, updates and access keys). Draft edits stay intact when switching
+screens; global settings load when first opened.
 
 ## Display features
 
 The carousel supports websites, streamed/Plex video, clock/date/notice dashboards,
 live National Rail departure boards and OpenWeather scenes. Plex radio stations
 can play in the background across scene changes, pausing for videos with audio.
+Display scenes and their outer safe-area border use a black background.
 
 Train boards use locally bundled D-DIN regular and bold fonts (SIL Open Font
 License, bundled as `fonts/OFL.txt` with update-compatible filenames).
 They show departures and clearly labelled rail replacement buses,
 platforms, station messages and per-service disruption notices. Status text is
 green for on-time services, amber for delays and flashing red for cancellations.
-Previous stops and calling-at lists each occupy one line, scrolling horizontally
-only when too long, with fixed labels and pauses at either end. Cancelled services
-hide these lists; actual last-reported observations remain visible when available.
+Departure-board scenes accept separate optional **Destination CRS code** and
+**Calling station CRS filter** settings (three letters, for example `WFJ` or
+`BWO`). Leave either blank to disable that constraint. The calling-station filter
+includes earlier and upcoming intermediate stops, not just the final destination;
+services without that station in their route are excluded. The display combines
+the rail API's `filterType=from` and `filterType=to` requests using `filterCrs`,
+deduplicates services and shows the next eight departures in time order. Both
+directions are also checked for previous-service look-backs. The provider may
+omit earlier station times from board responses; these remain unknown rather
+than being inferred or fetched through historical Service Details calls.
+With both filters set, results must also terminate at the destination
+code. With only a destination set, the existing API `to` filter is retained.
+Different station/filter combinations have separate caches and departure tracking.
+
+The next service uses compact station-and-time cells for previous stops, the
+selected station and upcoming stops.
+Each station strip stays one row high. On long routes, the selected station and
+the known last-seen station stay pinned on the next service while the other stations automatically
+scroll horizontally back and forth, pausing at each end. Short routes remain
+static. Station names use at most two lines (full names
+remain available on hover), so long routes cannot push departures off-screen.
+Boards with six or more services use tighter later-departure rows and slightly
+smaller text; the platform column leaves more room for destination names.
+Cancelled services hide the route; actual last-reported observations remain
+visible when available.
+The next service and its station times stay fixed above the later departures,
+which use slightly smaller text and scroll automatically without a visible
+scrollbar. The previous-service row stays fixed below the scrolling area. Weather
+uses a compact horizontal strip below it, wrapping only when needed to leave
+more vertical space for departures.
+
+A fixed row below the vertically scrolling upcoming-services area fetches the previous scheduled train
+immediately using a departure-board API look-back of up to two hours, without
+calling Service Details for previous services. It is labelled
+**Previous scheduled service** until an actual departure is reported; an
+"On time" estimate does not confirm departure, and missing actual times and
+lateness remain unreported. Once confirmed, **Most recent departure** retains
+the last train confirmed to have departed this station. The compact previous row
+shows only the selected station, configured calling-filter station and final
+destination, deduplicating stations that serve more than one role. Without a
+calling filter it shows the selected station and destination. Missing timing data
+is shown as `--`; terminal arrival times are included when reported. Times are
+actual where reported, otherwise an estimated clock marked `est`, or scheduled.
+Separate monitored-station arrival entries are omitted. Station strips fit within
+the available width with no visible scrollbar; only unpinned next-service calling
+stations scroll, without moving the fixed service rows.
+Full timing data remains available
+through the API; estimates are never presented as actual times.
+Both service rows keep the selected board station highlighted in gold and the
+last actually reported station in blue. For the next service, the last-seen
+station is also shown with its actual observation time when known; schedules and estimates do
+not produce a last-seen indicator. Both manager previews show this information.
+Confirmed observations captured while a train was the next live service remain
+visible until another train is confirmed to have departed. They are not polled
+afterwards, so later station observations and destination arrival may be missing.
+Rail replacement buses and cancelled station calls do not replace the row.
+
+Restarts clear in-memory tracking and reload the previous scheduled service from
+the API. This is a limited live-board look-back, not a historical departures feed;
+if no eligible service is available within two hours, the row explains this.
+Disappearing from the board alone is not proof of departure. The previous row
+uses only data returned by departure boards or already captured during normal
+next-service updates; it needs no Service Details API key. Missing station times
+and actual observations remain unknown. Failed board look-backs retain the last
+available data with a stale/error indication. Service Details requests are made
+only for the next live service, never to poll departed or retained services.
+Both manager remote views include the same recent-service information.
 
 Weather appears in standalone scenes, optional dashboard widgets and a compact
 train-board widget, with local condition icons, Celsius temperatures and forecast

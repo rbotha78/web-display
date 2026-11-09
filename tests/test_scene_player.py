@@ -121,6 +121,31 @@ class SceneServerTests(unittest.TestCase):
             response.read()
             self.assertEqual(response.status, 400)
 
+    def test_train_endpoint_rejects_cached_board_for_previous_destination_filter(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "train-board.json"
+            board = {"crs": "HWW", "destination_crs": "WFJ", "filter_station_crs": "BWO",
+                     "rows": [{"scheduled": "10:00"}]}
+            path.write_text(json.dumps({"scene": board}))
+            server = SceneServer(path)
+            self.addCleanup(server.close)
+            connection = http.client.HTTPConnection("127.0.0.1", server.server.server_port)
+            self.addCleanup(connection.close)
+            for destination, filter_crs in (("WFJ", "BWO"), ("SAA", "BWO"), ("", "BWO"),
+                                            ("WFJ", "PKS"), ("WFJ", "")):
+                server.show(make_scene(kind="train", station_crs="HWW", destination_crs=destination,
+                                       filter_station_crs=filter_crs))
+                connection.request("GET", "/api/scene")
+                scene = json.loads(connection.getresponse().read())
+                self.assertEqual(scene["destination_crs"], destination)
+                connection.request("GET", "/api/train?scene_id=scene")
+                payload = json.loads(connection.getresponse().read())
+                if (destination, filter_crs) == ("WFJ", "BWO"):
+                    self.assertEqual(payload, board)
+                else:
+                    self.assertNotIn("rows", payload)
+                    self.assertEqual(payload["error"], "Waiting for departure information")
+
 
 class RendererTests(unittest.TestCase):
     def setUp(self):

@@ -58,6 +58,8 @@ export interface Scene {
   layout: "clock" | "notice" | "clock-notice";
   text: string;
   station_crs?: string;
+  destination_crs?: string;
+  filter_station_crs?: string;
   show_weather?: boolean;
 }
 

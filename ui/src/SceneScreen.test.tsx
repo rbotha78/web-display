@@ -9,12 +9,8 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-test("scrolls overflowing stop lists on one line but leaves short lists stationary", async () => {
-  vi.useFakeTimers();
-  vi.spyOn(HTMLElement.prototype, "scrollWidth", "get").mockImplementation(function (this: HTMLElement) {
-    return this.className === "train-stop-scroll" && this.textContent?.includes("Long station") ? 200 : 100;
-  });
-  vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(100);
+test.each([null, { station: "Long station", actual: "On time" }])(
+  "keeps the board station highlighted without inventing a last-seen location (%j)", async (lastSeen) => {
   vi.stubGlobal("fetch", vi.fn(async (path: string) => ({
     ok: true,
     json: async () => path === "/api/scene"
@@ -22,6 +18,7 @@ test("scrolls overflowing stop lists on one line but leaves short lists stationa
       : path === "/api/weather" ? {}
       : { rows: [{ scheduled: "12:00", destination: "Watford" }],
           next: {
+            last_seen: lastSeen,
             previous_stops: [[{ station: "Short station", scheduled: "11:50" }]],
             calling_at: [
               [{ station: "Long station", scheduled: "12:10" }],
@@ -30,13 +27,13 @@ test("scrolls overflowing stop lists on one line but leaves short lists stationa
           } },
   })));
   render(<SceneScreen />);
-  await act(async () => { await vi.advanceTimersByTimeAsync(0); });
-  const lines = document.querySelectorAll(".train-stop-scroll");
-  expect(lines).toHaveLength(2);
-  expect(lines[1].textContent).toContain(" | Branch station");
-  await act(async () => { await vi.advanceTimersByTimeAsync(2500); });
-  expect(lines[0].scrollLeft).toBe(0);
-  expect(lines[1].scrollLeft).toBeGreaterThan(0);
+  const route = await screen.findByRole("group", { name: "Next service station times" });
+  expect([...route.querySelectorAll("strong")].map((element) => element.textContent))
+    .toEqual(["Short station", "How Wood", "Long station", "Branch station"]);
+  expect(route.querySelector('[aria-current="location"]')?.textContent).toBe("How Wood12:00");
+  expect(route.querySelector(".train-stop-observed")).toBeNull();
+  expect(route.querySelector(".train-last-seen")).toBeNull();
+  expect(document.querySelector(".train-stop-scroll")).toBeNull();
 });
 
 test.each([["train", 0], ["weather", 10], ["dashboard", 5], ["recovery", 8]])(
@@ -53,15 +50,18 @@ test.each([["train", 0], ["weather", 10], ["dashboard", 5], ["recovery", 8]])(
   },
 );
 
-test("automatically scrolls overflowing departures and notices rather than dropping content", async () => {
+test("scrolls only later departures and notices while next and previous services remain fixed", async () => {
   vi.useFakeTimers();
   vi.stubGlobal("fetch", vi.fn(async (path: string) => ({
     ok: true,
     json: async () => path === "/api/scene"
       ? { kind: "train", revision: "long", scene_id: "station", title: "Station", text: "" }
       : path === "/api/train?scene_id=station"
-        ? { rows: [{ scheduled: "12:00", destination: "Long destination", status: "On time" }],
-            alerts: ["Full station notice"], next: { calling_at: [[{ station: "Last calling point" }]] } }
+        ? { rows: [{ scheduled: "12:00", destination: "Long destination", status: "On time" },
+                   { scheduled: "12:30", destination: "Later destination", estimated: "On time" },
+                   { scheduled: "13:00", destination: "Final destination", estimated: "On time" }],
+            alerts: ["Full station notice"], next: { calling_at: [[{ station: "Last calling point" }]] },
+            recent: { actual: "", stops: [{ station: "Fixed station", scheduled: "11:00" }] } }
         : {},
   })));
   await act(async () => { render(<SceneScreen />); });
@@ -75,6 +75,106 @@ test("automatically scrolls overflowing departures and notices rather than dropp
   expect(screen.getByText(/scrolling automatically/)).toBeTruthy();
   expect(screen.getByText("Full station notice")).toBeTruthy();
   expect(screen.getByText(/Last calling point/)).toBeTruthy();
+  const next = screen.getByRole("region", { name: "Next service" });
+  expect(content.contains(next)).toBe(false);
+  expect(next.parentElement?.className).toBe("train-board");
+  expect(next.textContent).toContain("Long destination");
+  expect(next.textContent).toContain("Last calling point");
+  expect(next.textContent).not.toContain("Later destination");
+  const later = screen.getByRole("table", { name: "Later departures" });
+  expect(content.contains(later)).toBe(true);
+  expect(later.querySelectorAll("tbody > tr")).toHaveLength(2);
+  expect(later.textContent).not.toContain("Long destination");
+  expect(later.classList.contains("train-subsequent")).toBe(true);
+  const previous = screen.getByRole("region", { name: "Previous scheduled service" });
+  expect(content.contains(previous)).toBe(false);
+  expect(previous.parentElement?.className).toBe("train-board");
+  expect(previous.scrollTop).toBe(0);
+});
+
+test("shows only station times for the recent service, omitting separate arrivals and commentary", async () => {
+  vi.stubGlobal("fetch", vi.fn(async (path: string) => ({
+    ok: true,
+    json: async () => path === "/api/scene"
+      ? { kind: "train", revision: "recent", scene_id: "hww", title: "How Wood", text: "" }
+      : path === "/api/weather" ? {}
+      : {
+          station: "How Wood",
+          rows: [{ scheduled: "12:30", destination: "Next service", estimated: "On time" }],
+          alerts: ["Station notice"],
+          recent: {
+            scheduled: "11:55", actual: "12:02", destination: "Terminus",
+            status: "Arrived at Terminus at 12:36", delay_minutes: 7,
+            last_seen: { station: "Terminus", actual: "12:36" }, stale: false,
+            stops: [
+              { station: "How Wood", timing: "arrival", scheduled: "11:54", actual: "12:01",
+                estimated: "", delay_minutes: 7, cancelled: false },
+              { station: "How Wood", timing: "departure", scheduled: "11:55", actual: "12:02",
+                estimated: "", delay_minutes: 7, cancelled: false },
+              { station: "Next stop", timing: "reported", scheduled: "12:10", actual: "",
+                estimated: "12:15", delay_minutes: null, cancelled: false },
+              { station: "Cancelled stop", timing: "reported", scheduled: "12:20", actual: "",
+                estimated: "", delay_minutes: null, cancelled: true },
+              { station: "Terminus", timing: "arrival", scheduled: "12:30", actual: "",
+                estimated: "12:36", delay_minutes: null, cancelled: false },
+            ],
+          },
+        },
+  })));
+  render(<SceneScreen />);
+  const recent = await screen.findByRole("region", { name: "Most recent departure" });
+  await waitFor(() => expect(recent.textContent).toContain("How Wood12:02"));
+  expect(screen.getByLabelText("Actual 12:02").textContent).toBe("12:02");
+  expect(screen.getByLabelText("Estimated 12:15").textContent).toBe("12:15 est");
+  expect(recent.textContent).toContain("Cancelled stopCancelled");
+  expect(recent.textContent).not.toMatch(/late|Last actual|Arrival|No actual|Expected|Terminus|12:01/);
+  expect(recent.querySelectorAll(".train-recent-stop")).toHaveLength(3);
+  expect(recent.querySelectorAll('[aria-current="location"]')).toHaveLength(1);
+  expect(recent.querySelector(".train-recent-stop-current")?.textContent).toBe("How Wood12:02");
+  expect(document.querySelector(".train-content")?.contains(recent)).toBe(false);
+  expect(recent.parentElement?.className).toBe("train-board");
+  expect(screen.getByText("Station notice").compareDocumentPosition(recent) &
+    Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+});
+
+test("explains recent departure is unavailable without treating schedules as departures", async () => {
+  vi.stubGlobal("fetch", vi.fn(async (path: string) => ({
+    ok: true,
+    json: async () => path === "/api/scene"
+      ? { kind: "train", revision: "no-recent", scene_id: "hww", title: "How Wood", text: "" }
+      : path === "/api/weather" ? {}
+      : { rows: [{ scheduled: "12:30", estimated: "12:35" }],
+          recent_error: "Waiting for a confirmed departure observed since startup" },
+  })));
+  render(<SceneScreen />);
+  const recent = await screen.findByRole("region", { name: "Most recent departure" });
+  await waitFor(() => expect(recent.textContent).toContain("Waiting for a confirmed departure"));
+  expect(recent.textContent).not.toContain("Actual departure 12:30");
+});
+
+test("labels API look-back data as a previous scheduled service without claiming departure or lateness", async () => {
+  vi.stubGlobal("fetch", vi.fn(async (path: string) => ({
+    ok: true,
+    json: async () => path === "/api/scene"
+      ? { kind: "train", revision: "look-back", scene_id: "hww", title: "How Wood", text: "" }
+      : path === "/api/weather" ? {}
+      : {
+          station: "How Wood", rows: [],
+          recent: {
+            scheduled: "08:57", actual: "", destination: "St Albans Abbey",
+            status: "Departure not confirmed", delay_minutes: null, last_seen: null,
+            stops: [{ station: "Park Street", scheduled: "08:59", actual: "",
+              estimated: "On time", delay_minutes: null, timing: "reported", cancelled: false }],
+          },
+        },
+  })));
+  render(<SceneScreen />);
+  const previous = await screen.findByRole("region", { name: "Previous scheduled service" });
+  expect(previous.textContent).toContain("Park Street08:59");
+  expect(screen.getByLabelText("Scheduled 08:59").textContent).toBe("08:59");
+  expect(previous.textContent).not.toMatch(/not confirmed|not reported|Lateness|Expected|On time/);
+  expect(previous.querySelector("[aria-current]")).toBeNull();
+  expect(screen.queryByRole("heading", { name: "Most recent departure" })).toBeNull();
 });
 
 test.each(["weather", "dashboard"])("shows current weather and forecast in %s scenes", async (kind) => {
@@ -135,9 +235,11 @@ test.each(["state", "flag"])("hides cancelled-service stops using the %s and dis
   expect(document.querySelector(".train-service-notices b")).toBeNull();
   expect(screen.queryByText("Previous stops:")).toBeNull();
   expect(screen.queryByText("Calling at:")).toBeNull();
-  expect(screen.queryByText(/Previous stop \(/)).toBeNull();
-  expect(screen.queryByText(/Upcoming stop \(/)).toBeNull();
-  expect(screen.getByText(/Reported station at 11:45/)).toBeTruthy();
+  expect(screen.queryByText("Previous stop")).toBeNull();
+  expect(screen.queryByText("Upcoming stop")).toBeNull();
+  const route = screen.getByRole("group", { name: "Next service station times" });
+  expect(route.querySelector(".train-recent-stops")?.textContent).toBe("Reported station11:45");
+  expect(route.querySelector(".train-last-seen")?.textContent).toBe("Last seen: Reported station at 11:45");
   expect(screen.getByText("Please use platform 1")).toBeTruthy();
   expect(screen.getByText("<b>Not markup</b>")).toBeTruthy();
   expect(document.querySelector(".train-alerts b")).toBeNull();
@@ -267,7 +369,7 @@ test("renders cached train departures and next-service delay", async () => {
             station: "Reading", scheduled: "10:25", estimated: "10:32",
             actual: "", cancelled: false,
           }]],
-          last_seen: { station: "Ealing Broadway", actual: "10:08" },
+          last_seen: { station: "Previous station", actual: "09:52" },
           previous_stops: [[
             { station: "Previous station", scheduled: "09:50", estimated: "",
               actual: "09:52", cancelled: false },
@@ -282,14 +384,19 @@ test("renders cached train departures and next-service delay", async () => {
       },
   })));
   render(<SceneScreen />);
-  expect(await screen.findByText("London Paddington")).toBeTruthy();
+  expect(await screen.findByRole("heading", { name: "London Paddington" })).toBeTruthy();
   expect(screen.getByText("Delayed by 7 min")).toBeTruthy();
   expect(screen.getByText("Bristol")).toBeTruthy();
-  expect(screen.getByText(/Reading \(10:25; expected 10:32\)/)).toBeTruthy();
-  expect(screen.getByText(/Ealing Broadway at 10:08/)).toBeTruthy();
-  expect(screen.getByText("Previous stops:")).toBeTruthy();
-  expect(screen.getByText(/Previous station \(actual 09:52\)/)).toBeTruthy();
-  expect(screen.getByText(/Unobserved station \(09:55\)/)).toBeTruthy();
+  const route = screen.getByRole("group", { name: "Next service station times" });
+  expect(route.textContent).toContain("Reading10:32 est");
+  expect(route.textContent).toContain("Previous station09:52");
+  expect(route.textContent).toContain("Unobserved station09:55");
+  expect(route.querySelector('[aria-current="location"]')?.textContent).toBe("London Paddington10:00");
+  expect(route.querySelector(".train-stop-observed")?.textContent).toBe("Previous station09:52");
+  expect(route.querySelector(".train-last-seen")?.textContent).toBe("Last seen: Previous station at 09:52");
+  expect(route.querySelectorAll('[aria-current="location"]')).toHaveLength(1);
+  expect(screen.getByLabelText("Scheduled 10:00").parentElement?.hasAttribute("aria-current")).toBe(true);
+  expect(route.textContent).not.toMatch(/Previous stops:|Calling at:|Last reported/);
   const clock = document.querySelector(".train-current-time");
   expect(clock?.textContent).toMatch(/^\d{2}:\d{2}:\d{2}$/);
   expect(await screen.findByText("St Albans, GB")).toBeTruthy();

@@ -404,6 +404,8 @@ class ApiTests(unittest.TestCase):
         playlist = {"enabled": True, "scenes": [
             {"id": "clock", "kind": "dashboard", "layout": "clock"},
             {"id": "page", "kind": "web", "url": "https://example.com/"},
+            {"id": "train", "kind": "train", "station_crs": "hww", "destination_crs": "wfj",
+             "filter_station_crs": "bwo"},
         ]}
         response, _ = self.request("PUT", "/api/playlist", playlist)
         self.assertEqual(response.status, 401)
@@ -412,6 +414,8 @@ class ApiTests(unittest.TestCase):
         response, saved = self.request("PUT", "/api/playlist", playlist, headers)
         self.assertEqual(response.status, 200)
         self.assertEqual(saved["scenes"][0]["duration"], 60)
+        self.assertEqual(saved["scenes"][2]["destination_crs"], "WFJ")
+        self.assertEqual(saved["scenes"][2]["filter_station_crs"], "BWO")
         path = Path(self.directory.name) / "playlist.json"
         published = json.loads(path.read_text())
         self.assertEqual(published, {**saved, "revision": published["revision"], "safe_area_percent": 5,

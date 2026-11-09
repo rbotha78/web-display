@@ -21,8 +21,8 @@ interface Props {
 }
 
 export function Dashboard({ notify, onExpired, canManageKeys }: Props) {
-  const [status, setStatus] = useState<Status | null>(null);
-  const [network, setNetwork] = useState<NetworkStatus | null>(null);
+  const [page, setPage] = useState<"carousel" | "global">("carousel");
+  const [globalVisited, setGlobalVisited] = useState(false);
 
   const fail = useCallback(
     (error: unknown) => {
@@ -36,6 +36,35 @@ export function Dashboard({ notify, onExpired, canManageKeys }: Props) {
     [notify, onExpired],
   );
 
+  return (
+    <>
+      <nav className="admin-menu" aria-label="Administration">
+        <button type="button" className={page === "carousel" ? "" : "ghost"}
+          aria-current={page === "carousel" ? "page" : undefined} aria-controls="carousel-settings"
+          onClick={() => setPage("carousel")}>Carousel</button>
+        <button type="button" className={page === "global" ? "" : "ghost"}
+          aria-current={page === "global" ? "page" : undefined} aria-controls="global-settings"
+          onClick={() => { setGlobalVisited(true); setPage("global"); }}>Global settings</button>
+      </nav>
+      <section id="carousel-settings" aria-label="Carousel configuration" hidden={page !== "carousel"}>
+        <PlaylistCard notify={notify} fail={fail} active={page === "carousel"} />
+      </section>
+      <section id="global-settings" aria-label="Global settings" hidden={page !== "global"}>
+        {globalVisited && <GlobalSettings notify={notify} fail={fail}
+          canManageKeys={canManageKeys} active={page === "global"} />}
+      </section>
+    </>
+  );
+}
+
+function GlobalSettings({ notify, fail, canManageKeys, active }: {
+  notify: Props["notify"];
+  fail: (error: unknown) => void;
+  canManageKeys: boolean;
+  active: boolean;
+}) {
+  const [status, setStatus] = useState<Status | null>(null);
+  const [network, setNetwork] = useState<NetworkStatus | null>(null);
   const refreshNetwork = useCallback(async () => {
     try {
       setNetwork(await api.network());
@@ -45,11 +74,12 @@ export function Dashboard({ notify, onExpired, canManageKeys }: Props) {
   }, [fail]);
 
   useEffect(() => {
+    if (!active) return;
     api.status().then(setStatus).catch(fail);
     void refreshNetwork();
     const timer = window.setInterval(() => void refreshNetwork(), 15000);
     return () => window.clearInterval(timer);
-  }, [fail, refreshNetwork]);
+  }, [active, fail, refreshNetwork]);
 
   return (
     <div className="grid">
@@ -59,7 +89,6 @@ export function Dashboard({ notify, onExpired, canManageKeys }: Props) {
       <PlexCard notify={notify} fail={fail} />
       <RailDataCard notify={notify} fail={fail} />
       <WeatherCard notify={notify} fail={fail} />
-      <PlaylistCard notify={notify} fail={fail} />
       <HostnameCard current={status?.hostname ?? null} notify={notify} fail={fail} />
       <WifiCard network={network} notify={notify} fail={fail} refresh={refreshNetwork} />
       <UpdatesCard notify={notify} fail={fail} />

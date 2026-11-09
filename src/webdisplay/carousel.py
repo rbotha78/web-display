@@ -5,7 +5,7 @@ import re
 from typing import Literal, Protocol, TypedDict
 from urllib.parse import urlparse
 
-from .raildata import validate_crs
+from .raildata import validate_crs, validate_optional_crs
 
 LOG = logging.getLogger(__name__)
 MAX_SCENES = 30
@@ -32,6 +32,8 @@ class Scene(TypedDict):
     layout: str
     text: str
     station_crs: str
+    destination_crs: str
+    filter_station_crs: str
     show_weather: bool
 
 
@@ -123,6 +125,8 @@ def validate_playlist(value: object, *, allow_runtime: bool = False) -> Playlist
         if not isinstance(text, str) or len(text) > 2000:
             raise ValueError("Notice text must be at most 2000 characters")
         station_crs = validate_crs(item.get("station_crs", "")) if kind == "train" else ""
+        destination_crs = validate_optional_crs(item.get("destination_crs", "")) if kind == "train" else ""
+        filter_station_crs = validate_optional_crs(item.get("filter_station_crs", "")) if kind == "train" else ""
         show_weather = item.get("show_weather", False) if kind == "dashboard" else False
         if not isinstance(show_weather, bool):
             raise ValueError("Weather widget must be true or false")
@@ -130,7 +134,9 @@ def validate_playlist(value: object, *, allow_runtime: bool = False) -> Playlist
             id=scene_id, kind=kind, title=title.strip(), enabled=enabled,
             duration=duration, audio_enabled=audio_enabled, url=url, source=source,
             plex_rating_key=plex_rating_key, plex_bitrate_kbps=plex_bitrate,
-            layout=layout, text=text, station_crs=station_crs, show_weather=show_weather,
+            layout=layout, text=text, station_crs=station_crs, destination_crs=destination_crs,
+            filter_station_crs=filter_station_crs,
+            show_weather=show_weather,
         )
         if allow_runtime and source == "plex":
             playback_url = validate_url(item.get("plex_playback_url", ""))

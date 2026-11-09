@@ -6,6 +6,7 @@ import java.time.Instant
 import java.time.OffsetDateTime
 import java.time.ZoneId
 import java.time.ZonedDateTime
+import java.util.Locale
 
 sealed interface RemoteScene {
     val title: String
@@ -58,7 +59,77 @@ data class RemoteTrain(
     val callingAt: List<List<RemoteStop>>,
     val lastSeen: String,
     val updatedAt: Double?,
+    val recent: RemoteRecentDeparture? = null,
+    val recentError: String = "",
+    val nextStation: RemoteStop? = null,
+    val lastSeenStop: RemoteStop? = null,
 )
+
+data class RemoteRecentDeparture(
+    val scheduled: String, val actual: String, val destination: String, val platform: String,
+    val operator: String, val status: String, val delayMinutes: Double?,
+    val lastSeen: RemoteReportedLocation?, val stops: List<RemoteRecentStop>,
+    val updatedAt: Double?, val stale: Boolean, val detailsError: String,
+    val displayStops: List<RemoteRecentStop>? = null,
+) {
+    val heading: String
+        get() = if (RAIL_CLOCK.matches(actual)) "Most recent departure" else "Previous scheduled service"
+
+    fun departureDescription(): String = railTimingDescription(scheduled, actual, "", delayMinutes)
+}
+
+data class RemoteReportedLocation(val station: String, val actual: String)
+
+enum class RemoteRailTiming(val label: String) {
+    DEPARTURE("Departure"), ARRIVAL("Arrival"), REPORTED("Reported"),
+}
+
+data class RemoteRecentStop(
+    val station: String, val scheduled: String, val actual: String, val estimated: String,
+    val delayMinutes: Double?, val timing: RemoteRailTiming, val cancelled: Boolean,
+) {
+    fun compactDescription(): String {
+        return "$station · ${compactRailTime(scheduled, actual, estimated, cancelled)}"
+    }
+
+    fun description(): String =
+        "$station · ${timing.label}\n" +
+            railTimingDescription(
+                scheduled, actual, if (cancelled) "" else estimated, if (cancelled) null else delayMinutes,
+            ) +
+            if (cancelled) " · Cancelled" else ""
+}
+
+private val RAIL_CLOCK = Regex("(?:[01][0-9]|2[0-3]):[0-5][0-9]")
+
+private fun compactRailTime(scheduled: String, actual: String, estimated: String, cancelled: Boolean): String =
+    when {
+        cancelled -> "Cancelled"
+        RAIL_CLOCK.matches(actual) -> actual
+        RAIL_CLOCK.matches(estimated) -> "$estimated est"
+        RAIL_CLOCK.matches(scheduled) -> scheduled
+        else -> "--"
+    }
+
+private fun railTimingDescription(
+    scheduled: String, actual: String, estimated: String, delayMinutes: Double?,
+): String = buildList {
+    add("Scheduled ${scheduled.ifBlank { "not reported" }}")
+    if (RAIL_CLOCK.matches(actual)) {
+        add("Actual $actual")
+        if (delayMinutes != null) {
+            val minutes = String.format(Locale.ROOT, "%.1f", kotlin.math.abs(delayMinutes)).removeSuffix(".0")
+            add(when {
+                delayMinutes > 0 -> "$minutes min late"
+                delayMinutes < 0 -> "$minutes min early"
+                else -> "On time"
+            })
+        }
+    } else {
+        add("No actual report")
+        if (estimated.isNotBlank()) add("Expected $estimated")
+    }
+}.joinToString(" · ")
 
 data class RemoteDeparture(
     val scheduled: String, val estimated: String, val destination: String, val platform: String,
@@ -70,6 +141,8 @@ data class RemoteStop(
     val station: String, val scheduled: String, val estimated: String, val actual: String,
     val cancelled: Boolean,
 ) {
+    fun compactDescription(): String = "$station · ${compactRailTime(scheduled, actual, estimated, cancelled)}"
+
     fun description(): String {
         val time = when {
             cancelled -> "Cancelled"
@@ -171,8 +244,41 @@ object RemoteViewParser {
             next?.optJSONArray("previous_stops").stops(), next?.optJSONArray("calling_at").stops(),
             lastSeen?.let { "${it.text("station")} at ${it.text("actual")}" }.orEmpty(),
             value.number("updated_at"),
+            value.optJSONObject("recent")?.let(::recentDeparture), value.text("recent_error"),
+            next?.let {
+                RemoteStop(value.text("station"), it.text("scheduled"), it.text("estimated"), it.text("actual"), false)
+            },
+            lastSeen?.takeIf { it.text("station").isNotBlank() && RAIL_CLOCK.matches(it.text("actual")) }?.let {
+                RemoteStop(it.text("station"), "", "", it.text("actual"), false)
+            },
         )
     }
+
+    private fun recentDeparture(value: JSONObject) = RemoteRecentDeparture(
+        value.text("scheduled"), value.text("actual"), value.text("destination"), value.text("platform"),
+        value.text("operator"), value.text("status"), value.number("delay_minutes"),
+        value.optJSONObject("last_seen")?.let {
+            val station = it.text("station")
+            val actual = it.text("actual")
+            if (station.isNotBlank() && RAIL_CLOCK.matches(actual)) RemoteReportedLocation(station, actual) else null
+        },
+        recentStops(value.optJSONArray("stops")),
+        value.number("updated_at"), value.optBoolean("stale"), value.text("details_error"),
+        value.optJSONArray("display_stops")?.let(::recentStops),
+    )
+
+    private fun recentStops(value: JSONArray?) = value.objects().map {
+            RemoteRecentStop(
+                it.text("station"), it.text("scheduled"), it.text("actual"), it.text("estimated"),
+                it.number("delay_minutes"),
+                when (it.text("timing")) {
+                    "departure" -> RemoteRailTiming.DEPARTURE
+                    "arrival" -> RemoteRailTiming.ARRIVAL
+                    else -> RemoteRailTiming.REPORTED
+                },
+                it.optBoolean("cancelled"),
+            )
+        }
 
     private fun weather(value: JSONObject) = RemoteWeather(
         value.text("location"), value.number("temperature"), value.number("feels_like"),

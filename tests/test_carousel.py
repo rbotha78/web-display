@@ -31,8 +31,20 @@ class PlaylistTests(unittest.TestCase):
         )
         self.assertEqual([item["duration"] for item in saved["scenes"]], [60, 60, 300, 300, None])
         self.assertEqual(saved["scenes"][3]["station_crs"], "PAD")
+        self.assertEqual(saved["scenes"][3]["destination_crs"], "")
         self.assertFalse(saved["scenes"][2]["audio_enabled"])
         self.assertFalse(validate_playlist({"enabled": False, "scenes": []})["enabled"])
+
+    def test_train_destination_filter_is_optional_uppercase_and_validated(self):
+        filtered = playlist(scene(
+            "filtered", kind="train", station_crs="hww", destination_crs="wfj", filter_station_crs="bwo",
+        ))["scenes"][0]
+        self.assertEqual(filtered["destination_crs"], "WFJ")
+        self.assertEqual(filtered["filter_station_crs"], "BWO")
+        for invalid in ("WF", "WFJJ", "123", None, True, 123):
+            for field in ("destination_crs", "filter_station_crs"):
+                with self.subTest(field=field, value=invalid), self.assertRaises(ValueError):
+                    playlist(scene("bad", kind="train", station_crs="HWW", **{field: invalid}))
 
     def test_video_audio_setting_is_validated_and_normalized(self):
         disabled = playlist(scene("silent", kind="video", url="https://example.com/stream"))

@@ -5,9 +5,10 @@ import type { Notice } from "./Toast";
 interface Props {
   notify: (text: string, kind?: Notice["kind"]) => void;
   fail: (error: unknown) => void;
+  active?: boolean;
 }
 
-export function PlaylistCard({ notify, fail }: Props) {
+export function PlaylistCard({ notify, fail, active = true }: Props) {
   const [playlist, setPlaylist] = useState<Playlist | null>(null);
   const [busy, setBusy] = useState(false);
   const [kind, setKind] = useState<Scene["kind"]>("web");
@@ -33,11 +34,18 @@ export function PlaylistCard({ notify, fail }: Props) {
 
   useEffect(() => {
     api.playlist().then(setPlaylist).catch(fail);
+  }, [fail]);
+
+  useEffect(() => {
+    if (!active) return;
+    let current = true;
     api.plexConfig().then((config) => {
+      if (!current) return;
       setPlexConfigured(config.configured);
       setPlexDefaultBitrate(config.default_bitrate_kbps);
     }).catch(fail);
-  }, [fail]);
+    return () => { current = false; };
+  }, [active, fail]);
 
   async function openPlexPicker(sceneId: string) {
     setPickerScene(sceneId);
@@ -101,7 +109,7 @@ export function PlaylistCard({ notify, fail }: Props) {
     const scene: Scene = {
       id: crypto.randomUUID(), kind, title: "", enabled: true,
       duration: kind === "video" || kind === "train" ? 300 : 60,
-      url: "", layout: "clock-notice", text: "", station_crs: "",
+      url: "", layout: "clock-notice", text: "", station_crs: "", destination_crs: "", filter_station_crs: "",
     };
     setPlaylist((current) => current && ({ ...current, scenes: [...current.scenes, scene] }));
   }
@@ -146,7 +154,7 @@ export function PlaylistCard({ notify, fail }: Props) {
       <p className="warn">
         Experimental: scene changes relaunch the browser. Streaming video is muted by
         default and requires mpv on the base image. Image uploads are not included yet.
-        Plex playback uses the private server configuration above.
+        Plex playback uses the private server configuration in Global settings.
       </p>
       <fieldset className="playlist-fields" disabled={!playlist || busy}>
         <label className="check">
@@ -204,18 +212,40 @@ export function PlaylistCard({ notify, fail }: Props) {
                   Choose Plex media
                 </button>
                 {scene.plex_rating_key && <span className="muted">Selected from Plex: {scene.title}</span>}
-                {!plexConfigured && <span className="muted">Configure Plex above to browse media.</span>}
+                {!plexConfigured && <span className="muted">Configure Plex in Global settings to browse media.</span>}
               </div>
             ) : scene.kind === "train" ? (
-              <label>
-                Station CRS code
-                <input required maxLength={3} minLength={3} pattern="[A-Za-z]{3}"
-                  value={scene.station_crs ?? ""}
-                  placeholder="e.g. PAD"
-                  onChange={(event) => update(scene.id, {
-                    station_crs: event.target.value.toUpperCase(),
-                  })} />
-              </label>
+              <>
+                <label>
+                  Station CRS code
+                  <input required maxLength={3} minLength={3} pattern="[A-Za-z]{3}"
+                    value={scene.station_crs ?? ""}
+                    placeholder="e.g. PAD"
+                    onChange={(event) => update(scene.id, {
+                      station_crs: event.target.value.toUpperCase(),
+                    })} />
+                </label>
+                <label>
+                  Destination CRS code (optional)
+                  <input maxLength={3} minLength={3} pattern="[A-Za-z]{3}"
+                    value={scene.destination_crs ?? ""}
+                    placeholder="All destinations"
+                    onChange={(event) => update(scene.id, {
+                      destination_crs: event.target.value.toUpperCase(),
+                    })} />
+                </label>
+                <p className="muted">Leave blank for all destinations. Otherwise, the API filters services to this station.</p>
+                <label>
+                  Calling station CRS filter (optional)
+                  <input maxLength={3} minLength={3} pattern="[A-Za-z]{3}"
+                    value={scene.filter_station_crs ?? ""}
+                    placeholder="Any route"
+                    onChange={(event) => update(scene.id, {
+                      filter_station_crs: event.target.value.toUpperCase(),
+                    })} />
+                </label>
+                <p className="muted">Match this station anywhere in the route, including earlier stops. With both filters set, the destination must also match the final destination.</p>
+              </>
             ) : scene.kind === "weather" ? (
               <p className="muted">Uses the city, country and API key in OpenWeather settings.</p>
             ) : (

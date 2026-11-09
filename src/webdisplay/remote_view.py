@@ -11,6 +11,7 @@ from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
+from .raildata import board_matches
 from .storage import atomic_write
 
 RUNTIME_PATH = Path("/run/web-display-kiosk/remote-view.json")
@@ -74,7 +75,7 @@ def _texts(value: object) -> list[str]:
 def sanitize_scene(value: object) -> dict | None:
     if value is None:
         return None
-    result = _fields(value, ("id", "kind", "title", "layout", "text", "station_crs",
+    result = _fields(value, ("id", "kind", "title", "layout", "text", "station_crs", "destination_crs", "filter_station_crs",
                              "source", "plex_rating_key"), ("duration",), ("show_weather", "audio_enabled"))
     if result.get("kind") not in KINDS or not result.get("id"):
         raise ValueError("Invalid active scene")
@@ -96,7 +97,7 @@ def sanitize_weather(value: object) -> dict:
 
 
 def sanitize_train(value: object) -> dict:
-    result = _fields(value, ("crs", "station", "generated_at", "error", "details_error"),
+    result = _fields(value, ("crs", "destination_crs", "filter_station_crs", "station", "generated_at", "error", "details_error", "recent_error"),
                      ("updated_at",), ("services_available", "platform_available", "details_available", "stale"))
     for key in ("alerts",):
         if key in value:
@@ -128,6 +129,34 @@ def sanitize_train(value: object) -> dict:
             )
     elif "next" in value and value["next"] is None:
         result["next"] = None
+    if isinstance(value.get("recent"), dict):
+        recent = value["recent"]
+        clean = _fields(
+            recent, ("scheduled", "actual", "destination", "destination_crs", "platform", "operator", "status", "details_error"),
+            ("delay_minutes", "updated_at"), ("stale",),
+        )
+        if recent.get("delay_minutes") is None:
+            clean["delay_minutes"] = None
+        clean["last_seen"] = (
+            _fields(recent["last_seen"], ("station", "actual"))
+            if isinstance(recent.get("last_seen"), dict) else None
+        )
+        for key in ("stops", "display_stops"):
+            if not isinstance(recent.get(key), list):
+                continue
+            clean[key] = [
+                _fields(
+                    point, ("station", "crs", "scheduled", "actual", "estimated", "timing"),
+                    ("delay_minutes",), ("cancelled",),
+                )
+                for point in recent[key][:100]
+            ]
+            for point, original in zip(clean[key], recent[key][:100]):
+                if original.get("delay_minutes") is None:
+                    point["delay_minutes"] = None
+        result["recent"] = clean
+    elif "recent" in value and value["recent"] is None:
+        result["recent"] = None
     return result
 
 
@@ -156,11 +185,8 @@ def snapshot(mode: str, scene: object, sleep: dict, message: str = "", *,
         try:
             boards = read_json(train_path)
             board = boards.get(active["id"]) if isinstance(boards, dict) else None
-            # Never join a cache left over from a different station with the same scene ID.
-            if isinstance(board, dict) and (
-                board.get("crs") == active.get("station_crs") or
-                (not board.get("crs") and not board.get("rows") and isinstance(board.get("error"), str))
-            ):
+            if board_matches(board, active.get("station_crs"), active.get("destination_crs", ""),
+                             active.get("filter_station_crs", "")):
                 result["train"] = sanitize_train(board)
         except (OSError, ValueError):
             pass
@@ -216,9 +242,8 @@ def load(path: Path | None = None) -> dict:
     result.update(available=True, mode=mode, updated=updated, scene=active, sleep=sleep, train=None, weather=None)
     if active and active["kind"] == "train" and value.get("train") is not None:
         board = sanitize_train(value["train"])
-        if board.get("crs") == active.get("station_crs") or (
-            not board.get("crs") and not board.get("rows") and isinstance(board.get("error"), str)
-        ):
+        if board_matches(board, active.get("station_crs"), active.get("destination_crs", ""),
+                         active.get("filter_station_crs", "")):
             result["train"] = board
     if active and (active["kind"] in ("weather", "train") or active.get("show_weather")) and value.get("weather") is not None:
         result["weather"] = sanitize_weather(value["weather"])

@@ -178,10 +178,17 @@ private fun TrainContent(board: RemoteTrain?, clock: DeviceClock) {
             row.alerts.forEach { Text("Service notice: $it") }
             if (index == 0) {
                 if (!row.cancelled && row.state != "cancelled") {
-                    StopGroups("Previous stops", board.previousStops)
-                    StopGroups("Calling at", board.callingAt)
+                    val current = board.nextStation?.let {
+                        it.copy(scheduled = it.scheduled.ifBlank { row.scheduled }, estimated = it.estimated.ifBlank { row.estimated })
+                    }
+                    val stops = board.previousStops.flatten() + listOfNotNull(current) + board.callingAt.flatten()
+                    stops.forEach {
+                        StationTime(it.station, board.station, it.compactDescription(), board.lastSeenStop?.station.orEmpty())
+                    }
+                } else {
+                    board.lastSeenStop?.let { StationTime(it.station, board.station, it.compactDescription(), it.station) }
                 }
-                if (board.lastSeen.isNotBlank()) Text("Last reported at: ${board.lastSeen}")
+                board.lastSeenStop?.let { Text("Last seen: ${it.station} at ${it.actual}", color = MaterialTheme.colorScheme.primary) }
             }
         }
     }
@@ -190,12 +197,34 @@ private fun TrainContent(board: RemoteTrain?, clock: DeviceClock) {
         board.alerts.forEach { Text(it) }
     }
     board.updatedAt?.let { Text("Live data checked: ${epochTime(it, clock)}") }
+    if (board.recent != null || board.recentError.isNotBlank()) {
+        RemoteSection(board.recent?.heading ?: "Most recent departure") {
+            if (board.recentError.isNotBlank()) Warning(board.recentError)
+            board.recent?.let { recent ->
+                if (recent.stale) Warning("Stale data")
+                if (recent.detailsError.isNotBlank()) Warning(recent.detailsError)
+                (recent.displayStops ?: recent.stops.filter { it.timing != RemoteRailTiming.ARRIVAL })
+                    .forEach { StationTime(it.station, board.station, it.compactDescription()) }
+            }
+        }
+    }
 }
 
 @Composable
-private fun StopGroups(label: String, groups: List<List<RemoteStop>>) {
-    if (groups.any { it.isNotEmpty() }) {
-        Text("$label: ${groups.joinToString(" | ") { group -> group.joinToString(", ") { it.description() } }}")
+private fun StationTime(station: String, currentStation: String, text: String, lastSeenStation: String = "") {
+    val current = currentStation.isNotBlank() && station.trim().equals(currentStation.trim(), ignoreCase = true)
+    val observed = lastSeenStation.isNotBlank() && station.trim().equals(lastSeenStation.trim(), ignoreCase = true)
+    if (current || observed) {
+        Surface(
+            color = if (current) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.secondaryContainer,
+            contentColor = if (current) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSecondaryContainer,
+            shape = MaterialTheme.shapes.small,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text(text, fontWeight = FontWeight.Bold, modifier = Modifier.padding(6.dp))
+        }
+    } else {
+        Text(text)
     }
 }
 

@@ -31,6 +31,7 @@ from .browser import BrowserError, PersistentBrowser, Tab
 from .scene_windows import SceneWindows
 from .display import DEFAULT_SAFE_AREA_PERCENT
 from .audio import DEFAULT_AUDIO_OUTPUT, audio_outputs
+from .raildata import board_matches
 
 LOG = logging.getLogger(__name__)
 STALL_TIMEOUT = 30
@@ -138,6 +139,13 @@ class SceneServer:
                     board = boards.get(scene_ids[0], {
                         "stale": False, "error": "Waiting for departure information",
                     })
+                    with owner._lock:
+                        active = dict(owner._payload)
+                    if active.get("scene_id") == scene_ids[0] and not board_matches(
+                        board, active.get("station_crs", ""), active.get("destination_crs", ""),
+                        active.get("filter_station_crs", ""),
+                    ):
+                        board = {"stale": False, "error": "Waiting for departure information"}
                     body = json.dumps(board).encode()
                     content_type = "application/json"
                 elif path.path == "/api/scene/ready":
@@ -185,6 +193,8 @@ class SceneServer:
                 "scene_id": scene["id"] if scene and scene["kind"] == "train" else "",
                 "title": scene["title"] if scene else "",
                 "station_crs": scene["station_crs"] if scene and scene["kind"] == "train" else "",
+                "destination_crs": scene.get("destination_crs", "") if scene and scene["kind"] == "train" else "",
+                "filter_station_crs": scene.get("filter_station_crs", "") if scene and scene["kind"] == "train" else "",
                 "show_weather": scene.get("show_weather", False) if scene else False,
                 "safe_area_percent": self.safe_area_percent,
             }
