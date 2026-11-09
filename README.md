@@ -3,6 +3,8 @@
 A 32-bit Raspberry Pi OS appliance for Raspberry Pi 2 and Raspberry Pi 3,
 with Chromium on HDMI, authenticated HTTPS administration, Wi-Fi provisioning,
 signed application updates and PC and Android display managers.
+Release **[v0.5.17](https://github.com/rbotha78/web-display/releases/tag/v0.5.17)**
+adds enhanced train boards, manager remote views and floating now-playing information.
 Saving settings retains the saved values when confirmation notifications appear,
 without reloading stale configuration into the editor.
 Administration opens on **Carousel**, with an **Administration** menu for
