@@ -484,8 +484,7 @@ class Application:
             settings = validate_music(value)
             if settings["station_key"] and (settings["enabled"] or
                     settings["station_key"] != self.config.load()["music"]["station_key"]):
-                if settings["station_key"] not in {s["key"] for s in self.plex_client().stations()}:
-                    raise ValueError("Select a station advertised by this Plex server")
+                self.plex_client().validate_music_source(settings["station_key"])
             self.config.update(music=settings)
             config = self.config.load()
             runtime = self.music.configure(settings, (config["plex_server_url"], config["plex_token"]))
@@ -1008,7 +1007,34 @@ def make_handler(app: Application) -> type[BaseHTTPRequestHandler]:
                     return
                 try:
                     self._json(HTTPStatus.OK, app.music_config() if request_path.path.endswith("/music")
-                               else {"items": app.plex_client().stations()})
+                               else {"items": app.plex_client().music_sources()})
+                except ValueError as error:
+                    self._json(HTTPStatus.BAD_GATEWAY, {"error": str(error)})
+                return
+            if request_path.path == "/api/plex/music/browse":
+                if not self._require_session():
+                    return
+                try:
+                    query = parse_qs(request_path.query, keep_blank_values=True)
+                    if set(query) - {"library", "kind", "search", "offset", "key"} or any(
+                        len(values) != 1 for values in query.values()
+                    ):
+                        raise ValueError("Invalid music browse request")
+                    client = app.plex_client()
+                    if "key" in query:
+                        if set(query) != {"key"}:
+                            raise ValueError("Invalid mix lookup")
+                        items = client.music_mix_items(query["key"][0])
+                        result = {"items": items, "total": len(items), "offset": 0}
+                    else:
+                        offset = query.get("offset", ["0"])[0]
+                        if not offset.isascii() or not offset.isdigit():
+                            raise ValueError("Invalid music browse offset")
+                        result = client.music_browse(
+                            query.get("library", [""])[0], query.get("kind", ["artist"])[0],
+                            query.get("search", [""])[0], int(offset),
+                        )
+                    self._json(HTTPStatus.OK, result)
                 except ValueError as error:
                     self._json(HTTPStatus.BAD_GATEWAY, {"error": str(error)})
                 return

@@ -1,34 +1,104 @@
 # Copilot Session Handoff
 
-Last updated: 2026-10-30.
+Last updated: 2026-11-09.
 
 ## Start Here
 
-Read `.github/copilot-instructions.md` for repository commands and conventions,
-then `PLAN.md` for approved scope. This handoff records the latest implementation
-and hardware status; distinguish user-reported hardware checks from local tests.
+Read `AGENTS.md` and `.github/copilot-instructions.md` for workflow, commands and
+invariants, then this current-status section and `PLAN.md` for approved scope.
+`README.md` documents user-facing operation. Do not depend on session-local todos
+or artifacts to resume work. Distinguish tests, live API checks, physical-display
+observations and endurance acceptance; historical findings below are not current
+vitals or deployment instructions.
 
 ## Current Repository And Release
 
-- Branch `main`, latest implementation commit `10b6de8` (`Bound carousel resource
-  use and harden renderer recovery`), committed and pushed. Persistent-renderer
-  work was introduced in `9df7105`.
-- The latest published release and version metadata are **0.5.11**, tagged
-  `v0.5.11`, with a signed application bundle, full release image and checksums.
-  The persistent-renderer changes are newer than that release; do not describe
-  them as released or release them before hardware acceptance.
-- Both Pis run the installed application under
-  `/var/lib/web-display-app/current`, pointing to the `versions/0.5.11` package.
-  Development patches were applied directly to that active package, not the
-  factory Python package. They are not signed update installations.
-- Pi 2 has the final renderer stabilization patch from `10b6de8`; Pi 3 has the
-  earlier persistent-renderer/cold-start recovery code, not that stabilization
-  patch. Do not compare the two as identical software or workloads.
-- Release 0.5.11 includes Plex bitrate fixes, expiring/dismissible notifications
-  and manager "Open admin page" login through short-lived single-use links.
-  Manager enrollment still stores an API key, not an administrator password.
-  HDMI audio permissions require the updated service unit/base image; a signed
-  application bundle does not update systemd units, root helpers or the OS.
+- Branch `main`; use `git status` and `git log` for the actual checkout/commit.
+  Train layout refinements were committed in `f5a18e4`; this handoff accompanies
+  the subsequent Plex playlist/custom-mix implementation.
+- Latest published release and version metadata: **v0.5.17**. The release includes
+  enhanced train boards, manager remote views and the floating now-playing card.
+  The optional previous-departure section, reclaimed row space, larger footer
+  clock and Plex playlist/custom-mix extension are newer main-branch work, not
+  features of the published v0.5.17 artifacts. No newer release was requested.
+- Confirmed on Nov 9: v0.5.17 has the signed `.wdupdate`, update checksum, Android
+  APK, full `.img.xz` and image checksum. The image workflow completed successfully
+  (run `42657619061`); it is no longer waiting to build. This is not a claim that
+  this newly built image has been flashed/boot-accepted on both Pis.
+- The local Android APK at
+  `android/app/build/outputs/apk/debug/web-display-manager.apk` was built Nov 9
+  at 14:58 UTC and matches the release APK (25,197,967 bytes). No Android source
+  changed for the subsequent music controls; no replacement APK was needed.
+
+## Current Development Deployment (2026-11-09)
+
+- Both targets listed in `AGENTS.md` received the final train and Plex changes
+  using `tools/push-to-device.sh --restart-kiosk`, with pinned SSH host checking.
+  They remain development targets; confirm this again before future pushes.
+- Both now run the factory package at
+  `/usr/lib/python3/dist-packages/webdisplay`, not patched `versions/0.5.11`.
+  Development pushes removed installed update versions/state but preserved
+  private configuration, API keys and carousel playlists. They are not signed
+  update installations, even though version metadata still says 0.5.17.
+- Final deployed device UI: `static/assets/index-BtGYKjMG.js`.
+  Both services (`web-display` and `web-display-kiosk`) were active; HTTPS
+  `/health`, Python module hashes, static index/JS hashes and served JS bytes
+  matched the final local build on both devices.
+- Remote-view snapshot: `/run/web-display-kiosk/remote-view.json`, not
+  `/run/web-display/remote-view.json`. Private configuration remains
+  `/var/lib/web-display/config.json`; never print credentials or relay capability
+  URLs during checks.
+- Do not redeploy or alter playback merely to resume a session. Inspect current
+  live state first. Never silently replace a changed SSH host key or disable
+  host verification. Do not enable music or change sources during probes.
+
+## Latest Implemented Features
+
+- Administration opens on **Carousel**; the menu switches to **Global settings**
+  without discarding drafts. Display backgrounds are black.
+- Train boards support destination and calling-station filters (including earlier
+  stops), actual-only last-seen/departure observations, compact previous-service
+  routes and horizontally scrolling long routes with key stations pinned.
+  **Show previous departure** defaults on; disabling it lets upcoming rows fill
+  the space. The bold gold seconds clock stays below weather. Both reconstructed
+  manager views follow the scene settings.
+- Weather scenes, dashboard/train weather, overscan-safe countdown, weekly sleep
+  and temporary wake are implemented. Sleep stops music/skips videos, not the
+  screen or non-video scenes.
+- **Global settings -> Background music** lists Plex library stations,
+  regular/smart audio playlists and supported server-advertised mixes. Artist
+  and album mix builders search/page through libraries and save up to 20
+  selections on this display, not as a new Plex playlist.
+- Custom mixes shuffle selected tracks, not sonic recommendations or Guest DJ.
+  Plexamp-local mixes are not directly importable: save them as an audio playlist
+  first unless the server already exposes them as a supported station/playlist.
+  Smart playlists re-evaluate and mixes reshuffle when a queue is renewed.
+  Empty sources fail explicitly. Music remains opt-in, pauses for video audio,
+  respects sleep/output selection, and has bounded automatic retries.
+- The native top-left now-playing card floats without resizing the scene; it
+  can overlap content and is not included in reconstructed manager previews.
+  PC/Android managers open device administration for music configuration; they
+  have no dedicated native music editor or carousel playlist editor.
+
+## Latest Validation
+
+- Playlist/mix extension: 61 Python tests passed with
+  `PYTHONPATH=src:tests python3 -m unittest test_plex test_music_player test_app -q`.
+  Compilation and whitespace checks passed.
+- 23 UI tests passed with
+  `cd ui && npm test -- src/components/MusicCard.test.tsx src/components/PlexCard.test.tsx src/App.test.tsx`.
+  `npm run build` typechecked and rebuilt both apps. The final regression prevents
+  saved-mix metadata lookup after Plex credentials are removed.
+- Live Pi 2 checks discovered stations/playlists, searched/paged artist/album
+  metadata, built artist-mix, album-mix and nonempty smart-playlist queues, and
+  streamed audio bytes through a separate private relay. Temporary queue items
+  were cleaned up; neither display's saved music settings was changed.
+  These checks did not include listening to physical speaker output.
+- Train space-reclamation checks used real Chromium at 1920x1080, 1280x720 and
+  800x600, with 3, 8 and 40 services and previous departure shown/hidden.
+  They establish geometry, not sustained physical-display acceptance.
+- Full-suite counts recorded farther below are historical, not a claim that a
+  full Python/UI suite was rerun for the latest extension.
 
 ## Milestone Status
 
@@ -53,22 +123,25 @@ and hardware status; distinguish user-reported hardware checks from local tests.
   updates all devices and restarts devices. The device-side **Manager access**
   card lists and revokes keys; the user confirmed it works on Pi 3.
 
-## Active Work
+## Outstanding Work And Acceptance
 
-Two tracked todos remain `in_progress`; carousel reliability is the immediate
-priority:
+The latest requested playlist/mix implementation is complete and deployed; no
+further implementation is implied. Resume only the work the user requests.
 
-- `verify-persistent-scenes`: Pi 2 no longer shows the earlier kiosk crashes or
-  browser-control timeout storm in the latest long observation, but repeatedly
-  skips the dashboard after a 30-second startup timeout. Hardware acceptance
-  remains incomplete; see the current carousel findings below.
-- `m2-pi2-wifi-dropout`: Pi 2 previously stopped finding networks (`ssid-not-found`
-  and empty scans); a user-approved reboot restored scanning and connection to
-  the configured network. A later short observation showed a connected interface and clean
-  gateway pings, but does not establish long-term reliability.
-
-Pending work:
-
+- `verify-persistent-scenes`: still open. Dashboard acknowledgment retries and
+  stage-specific diagnostics are implemented, but Pi 2 again reported
+  `Dashboard did not acknowledge its rendered revision` on Nov 7 after about
+  54.7 hours uptime. Zero service restarts did not mean correct carousel playback.
+  The latest deployment restarted the kiosk; short healthy checks do not prove
+  this recurrence fixed. Investigate revision acknowledgment/freeze-thaw and
+  perform comparable multi-cycle/endurance checks without masking timeouts.
+- `train-departure-scene`, `weather-scenes`, `plex-background-music`: implemented,
+  committed in earlier iterations and deployed, not missing feature work.
+  Sustained visual/provider/forecast/audio/queue-recovery acceptance remains
+  incomplete. The playlist/mix extension is also deployed and live API/relay
+  checked, but has no new physical-audio/endurance sign-off.
+- `m2-pi2-wifi-dropout`: historical scan/dropout issue remains under observation.
+  A reboot restored scanning; short clean samples do not establish reliability.
 - `admin-ui-resume-session-resource-spike`: leaving the admin UI open and then
   suspending/resuming the computer can produce repeated fetch-error notifications
   instead of returning to login after session expiry, driving CPU/memory growth
@@ -79,6 +152,11 @@ Pending work:
   with phones; use the tested compatible USB adapter, never an open AP.
 - `verify-manager-address-fallback`: exercise an actual interface outage.
 - `phase-b-ab-images`: blocked/deferred, not implemented.
+
+Image uploads, native manager playlist editing, general-purpose overlays and
+animated transitions remain deferred. Weekly sleep and the specific now-playing
+notification are implemented exceptions to the original scheduling/overlay
+deferral. Do not enlarge scope without a request.
 
 ### Historical Wi-Fi Observations
 
@@ -108,7 +186,11 @@ one interface is actually down; the old-firmware warning on a real device; and
 the device-side key-revocation card on Pi 2. These are not blockers for the
 completed manager milestone.
 
-## Current Carousel Findings (2026-10-30)
+## Historical Carousel Findings (2026-10-30)
+
+The following measurements and deployment differences describe that checkpoint,
+not the current matched development deployment. The later Nov 7 recurrence above
+is the latest recorded long-run dashboard evidence.
 
 ### Implementation And Deployment
 
@@ -124,16 +206,16 @@ completed manager milestone.
   five seconds and contains the second process-wait timeout after SIGKILL.
   A process that has not exited remains tracked; recovery backs off for
   60 seconds rather than launching overlapping replacements.
-- Preserve configuration and update state when applying a targeted development
-  patch. Back up the active installed modules first. The broad device-push script
-  replaces the factory package and clears installed versions/state, so it is
-  not interchangeable with these targeted patches.
+- At that checkpoint, configuration and update state were preserved by a targeted
+  patch with backed-up installed modules. That was different from today's
+  development pushes, which replace the factory package and clear installed
+  versions/state.
 - Initial two-cycle Pi 2 observation followed configured scene order without
   failures or restarts, retained one Chromium process, and had no idle mpv in
   browser scenes. Minimum available RAM was 433 MiB and peak mpv PSS 86.5 MiB.
   That short run did not establish endurance.
 
-### Endurance And Latest Vitals
+### Historical Endurance And Vitals
 
 The original overnight run after `9df7105` failed on Pi 2: 965 scene failures,
 947 browser-control timeouts and two automatic kiosk restarts were recorded.
@@ -147,7 +229,7 @@ Power was restored on 2026-10-29 morning. A fresh baseline at 07:40 UTC had abou
 four minutes of uptime. Pre-NTP timestamps in the current boot must not be
 mistaken for overnight runtime; previous-boot logs were unavailable.
 
-| Latest snapshot (UTC) | Pi 2, Oct 29 21:55 | Pi 3, Oct 30 09:31 |
+| Snapshot (UTC) | Pi 2, Oct 29 21:55 | Pi 3, Oct 30 09:31 |
 | --- | --- | --- |
 | Uptime | 14.3 hours | About 9.1 days |
 | Sampled system CPU | 3.2% | 12.7% |
@@ -162,13 +244,14 @@ performance comparisons. Pi 2 swap grew from zero at boot, but that alone does
 not prove a leak. Its post-restoration logs had no browser-control timeouts,
 tracebacks, OOM kills or undervoltage events at the evening check.
 
-**Remaining blocker:** Pi 2 logged 128 dashboard startup failures by Oct 29
+**Historical blocker:** Pi 2 logged 128 dashboard startup failures by Oct 29
 21:55, plus one Plex retry. Another 182 dashboard retries occurred between that
 snapshot and Oct 30 09:31. The recorded error is "Scene did not start within
 30 seconds." Other scene kinds continue playing, but the dashboard is skipped;
 zero service restarts must not be mistaken for correct carousel operation.
-The cause has not yet been established. Trace the local dashboard revision/ready
-acknowledgment and freeze/thaw lifecycle in `browser.py`, `scene_player.py` and
+The cause had not been established. Subsequent rendered-revision acknowledgment
+retries and stage-specific diagnostics did not eliminate the later recurrence.
+Relevant code remains `browser.py`, `scene_player.py` and
 `ui/src/SceneScreen.tsx`; do not merely increase timeouts or disable tab retention.
 
 Pi 2's fresh-boot 720p playback also showed rapidly increasing output-frame
@@ -177,11 +260,11 @@ Its evening mpv snapshot raced with transitions and could not assess playback.
 Pi 3's latest 640x352 hardware-decoded sample had zero output/decoder drops and
 no current scene failures. Do not infer visual acceptance from decoder counters.
 
-Next: fix dashboard startup/retry behavior, then run a comparable endurance
-observation with scene failure counts, order, memory/swap and playback metrics.
-The admin UI suspend/resume issue follows. No future sampling job is scheduled.
-Keep raw vitals/logs in session artifacts rather than committing LAN details,
-private configuration, Plex tokens or runtime capability URLs.
+These results motivated the dashboard diagnostics/retries and remain reasons
+to measure scene failures/order as well as memory/swap and playback metrics.
+No future sampling job is scheduled. Keep raw vitals/logs in session artifacts
+rather than committing private configuration, Plex tokens or runtime capability
+URLs.
 
 ## Device And Network Notes
 
@@ -238,7 +321,7 @@ PYTHONPATH=src python3 -m unittest discover -s tests
 python3 -m compileall -q src tests
 ```
 
-The final renderer-stabilization regression passed **257 Python tests**, including
+The historical renderer-stabilization regression passed **257 Python tests**, including
 real desktop Chromium retention and local-tab freeze/thaw coverage. The most
 recent recorded UI suite passed **33 tests**, before the Python-only stabilization
 changes. Desktop/file-fixture browser checks do not replace network/hardware
@@ -270,6 +353,23 @@ transfer it. See `README.md` and CI workflow for release details.
 ## Architecture Pointers
 
 - Device service/API and address reporting: `src/webdisplay/app.py`.
+- Playlist schema/scheduler: `src/webdisplay/carousel.py`; retained renderers:
+  `src/webdisplay/browser.py`, `src/webdisplay/scene_player.py`.
+- Rail/weather providers: `src/webdisplay/raildata.py`, `src/webdisplay/weather.py`;
+  local rendering: `ui/src/SceneScreen.tsx`,
+  `ui/src/components/ServiceStationTimes.tsx`.
+- Music catalog/selection: `src/webdisplay/plex.py`; private queue/relay:
+  `src/webdisplay/music.py`; kiosk player: `src/webdisplay/music_player.py`;
+  administration: `ui/src/components/MusicCard.tsx`.
+- Music settings retain `{enabled, station_key, volume}`. Source keys accept
+  station paths, `/playlists/<id>/items` and `mix:artist:<IDs>` /
+  `mix:album:<IDs>`. `GET /api/plex/music/browse` accepts bounded library/kind/
+  search/offset queries, or a mix `key` alone for editing. Plex pagination must
+  send container start and size together. Reuse the validated source/metadata
+  helpers rather than inventing Plexamp `/mix` APIs.
+- Remote view: `src/webdisplay/remote_view.py`; sleep:
+  `src/webdisplay/sleep.py`; API types/clients: `ui/src/api.ts`,
+  `ui/src/manager/api.ts`.
 - Network supervisor and Wi-Fi recovery: `src/webdisplay/netmonitor.py`,
   `src/webdisplay/network.py`, and `src/webdisplay/wifi_helper.py`.
 - Signed updates: `src/webdisplay/updater.py`, `src/webdisplay/releases.py`,

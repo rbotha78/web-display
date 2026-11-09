@@ -139,9 +139,11 @@ Start with a simple carousel of scenes, not persistent overlays. This is a
 record of the agreed direction. Slice 1 covers the device editor,
 web/dashboard scenes and direct mpv streams. It was accepted on 2026-10-19
 after overnight endurance checks and physical screen power-cycle recovery
-confirmation. The current implementation slice is private Plex configuration,
-media browsing and native playback; image uploads and manager editing remain
-deferred. See README.md for current behaviour and hardware results.
+confirmation. Subsequent implemented scope includes private Plex playback,
+retained renderers, train/weather scenes, background music, sleep and manager
+remote views. Persistent-renderer endurance acceptance remains open. Image
+uploads and manager playlist editing remain deferred. The dated status below and
+`HANDOFF.md` supersede historical implementation-stage wording in this design.
 
 ### Initial Scope
 
@@ -179,7 +181,9 @@ deferred. See README.md for current behaviour and hardware results.
   publishing partially edited playlists.
 - After a restart, start at the first enabled scene. Retain the saved playlist
   and credentials.
-- Persistent overlays, animated transitions and scheduling are deferred.
+- General-purpose overlays and animated transitions remain deferred. Later
+  approved scope adds a native floating now-playing card and weekly sleep;
+  neither is a general overlay editor or per-scene scheduling system.
 
 ### Uploaded Images
 
@@ -241,6 +245,36 @@ deferred. See README.md for current behaviour and hardware results.
 - Run extended loops and measure memory, temperature and dropped frames before
   treating the carousel as suitable for unattended use.
 
+## Subsequent Approved Scope (Implemented, 2026-11-09)
+
+- Live National Rail scenes with station/destination/calling-station CRS
+  settings, earlier and upcoming calling-point filtering, configurable refresh,
+  station/service notices and honest stale/error/unknown-time presentation.
+  Service Details are limited to the next live service. The previous departure
+  uses a bounded board look-back and captured actual observations, not historical
+  polling. Its section is optional (default on); hiding it gives its space to
+  upcoming services. Long routes scroll while selected/last-seen stations remain
+  visible; the footer clock is prominent and separate from weather.
+- OpenWeather scenes, dashboard widgets and compact train-board weather.
+  Provider keys remain private; automated checks and live current-weather checks
+  do not replace forecast/visual/endurance acceptance.
+- Carousel/global administration screens with retained drafts, black display
+  backgrounds, an overscan-safe countdown and retained Chromium/video renderers.
+- Weekly local-time sleep stops music and skips videos without turning off the
+  display; bounded temporary wake overrides are supported.
+- Background Plex library radio, regular/smart audio playlists and custom
+  artist/album shuffle mixes (up to 20 selections), with output selection,
+  video-audio pause/resume, queue renewal, automatic recovery and a floating
+  now-playing notification. Mixes do not implement Plexamp sonic recommendations
+  or import app-local mixes; saved mixes must be exposed by Plex.
+- PC and Android managers with sanitized reconstructed remote views. The
+  managers can open device administration; dedicated music configuration and
+  playlist editing are not native manager features.
+
+These features are implemented, not an instruction to reimplement them. The
+latest train-layout refinements and playlist/custom-mix support are newer than
+v0.5.17. See `HANDOFF.md` for exact release/deployment and acceptance boundaries.
+
 ## Architecture Direction
 
 - NetworkManager owns both client and access-point networking.
@@ -268,7 +302,7 @@ deferred. See README.md for current behaviour and hardware results.
   promising power-loss-safe A/B updates.
 - Choose update signing-key custody and physical recovery behaviour before release (custody decided in milestone 3).
 
-## Current Status
+## Current Status (2026-11-09)
 
 Milestone 1 is implemented and validated on Raspberry Pi 2. Milestone 2's network
 features are implemented; Pi 2 WPA2 client/AP operation, Ethernet preference and
@@ -287,9 +321,14 @@ recorded on Pi 2 and Pi 3. Manager-driven release updates to 0.5.7 and 0.5.8 wer
 also tested on both devices. Phase B (A/B root images) remains deferred.
 Milestone 4 (central device management) is implemented and hardware-tested,
 including discovery/enrolment, multi-address reporting, management actions and
-device-side API-key revocation. The latest application/manager release is 0.5.8;
-see `HANDOFF.md` for current device, test and remaining-work details.
+device-side API-key revocation. The latest published application/manager release
+is **v0.5.17**, with signed update, Android APK and full release-image assets.
+Both development Pis also have newer train-layout and Plex playlist/mix changes.
+Version metadata remains 0.5.17 until a separately requested release.
 
 Production hardening, full release acceptance and the two Wi-Fi reliability
-investigations remain outstanding. App bundles do not update base-image files or
+investigations remain outstanding. Persistent-renderer/dashboard acknowledgment,
+provider-scene endurance, physical audio and admin suspend/resume acceptance also
+remain open; see `HANDOFF.md` for evidence rather than treating the implemented
+feature list as hardware sign-off. App bundles do not update base-image files or
 the operating system; changes to those require a development push or new image.

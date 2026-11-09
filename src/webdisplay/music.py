@@ -12,10 +12,14 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Callable
 
-from .plex import PlexClient, RATING_KEY, STATION_KEY
+from .plex import MIX_KEY, PLAYLIST_KEY, PlexClient, RATING_KEY, valid_music_source
 from .sleep import SleepRuntime
 
 PART_KEY = re.compile(r"/library/parts/[0-9]+/[0-9]+/file\.[A-Za-z0-9]+\Z")
+
+
+class EmptyMusicSourceError(ValueError):
+    pass
 
 
 def validate_music(value: object) -> dict[str, object]:
@@ -24,10 +28,10 @@ def validate_music(value: object) -> dict[str, object]:
     enabled, station, volume = value.get("enabled", False), value.get("station_key", ""), value.get("volume", 30)
     if not isinstance(enabled, bool):
         raise ValueError("Music enabled must be true or false")
-    if not isinstance(station, str) or (station and not STATION_KEY.fullmatch(station)):
-        raise ValueError("Select an advertised library radio station")
+    if not isinstance(station, str) or (station and not valid_music_source(station)):
+        raise ValueError("Select a Plex station, audio playlist, or artist/album mix")
     if enabled and not station:
-        raise ValueError("Select a music station before enabling playback")
+        raise ValueError("Select a music source before enabling playback")
     if isinstance(volume, bool) or not isinstance(volume, int) or not 0 <= volume <= 100:
         raise ValueError("Music volume must be an integer from 0 to 100")
     return {"enabled": enabled, "station_key": station, "volume": volume}
@@ -80,11 +84,14 @@ class MusicRelay:
                         raise ValueError("Invalid control request")
                     value = json.loads(self.rfile.read(length))
                     self.reply(200, owner.control(value))
-                except (ValueError, OSError, http.client.HTTPException):
+                except (ValueError, OSError, http.client.HTTPException) as error:
+                    message = str(error) if isinstance(error, EmptyMusicSourceError) else (
+                        "Music playback unavailable; check Plex connection."
+                    )
                     with owner.lock:
-                        owner.status["error"] = "Music playback unavailable; check Plex connection."
+                        owner.status["error"] = message
                         owner.status["state"] = "error"
-                    self.reply(502, {"error": "Music playback unavailable; check Plex connection."})
+                    self.reply(502, {"error": message})
 
             def do_GET(self):
                 if not self.authorized():
@@ -215,13 +222,25 @@ class MusicRelay:
     def _create_queue(self):
         self.client = self.client_factory()
         machine = self.client.identity()["machine_identifier"]
-        queue = self.client.xml("/playQueues", {
+        key = self.settings["station_key"]
+        query: dict[str, object] = {
             "type": "audio",
-            "uri": f"server://{machine}/com.plexapp.plugins.library{self.settings['station_key']}",
-        }, method="POST")
+            "uri": f"server://{machine}/com.plexapp.plugins.library{key}",
+        }
+        mix = MIX_KEY.fullmatch(key)
+        playlist = PLAYLIST_KEY.fullmatch(key)
+        if mix:
+            self.client.music_mix_items(key)
+            path = urllib.parse.quote_plus("/library/metadata/" + mix.group(2))
+            query.update(uri="library:///directory/" + path, shuffle=1, includeRelated=1)
+        elif playlist:
+            query["playlistID"] = playlist.group(1)
+        queue = self.client.xml("/playQueues", query, method="POST")
+        tracks = list(queue.iter("Track"))
+        if not tracks:
+            raise EmptyMusicSourceError("The selected music source contains no playable tracks.")
         if not queue.get("playQueueID", "").isdigit():
             raise ValueError("Invalid music queue")
-        tracks = list(queue.iter("Track"))
         selected = queue.get("playQueueSelectedItemID")
         track = next((t for t in tracks if t.get("playQueueItemID") == selected), None)
         if track is None:
@@ -261,8 +280,7 @@ class MusicRelay:
                 if index < 0:
                     raise ValueError("Music queue lost the current track")
                 if index + 1 >= len(tracks):
-                    # Plex's advertised stations are finite on some servers.
-                    # Start another server-generated station queue at its actual end.
+                    # Re-evaluate smart playlists and reshuffle mixes at the actual queue end.
                     self._create_queue()
                 else:
                     self._select(tracks[index + 1])

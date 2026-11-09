@@ -94,6 +94,21 @@ export interface MusicStation {
   key: string;
   title: string;
   library: string;
+  kind?: "station" | "playlist" | "mix";
+  smart?: boolean;
+}
+
+export interface MusicBrowseItem {
+  id: string;
+  title: string;
+  type: "library" | "artist" | "album";
+  artist?: string;
+}
+
+export interface MusicBrowseResult {
+  items: MusicBrowseItem[];
+  total: number;
+  offset: number;
 }
 
 export interface PlexBrowseItem {
@@ -256,6 +271,11 @@ export const api = {
   plexConfig: () => request<PlexConfig>("/api/plex/config"),
   musicConfig: () => request<MusicConfig>("/api/plex/music"),
   musicStations: () => request<{ items: MusicStation[] }>("/api/plex/stations"),
+  musicBrowse: (query: { library?: string; kind?: "artist" | "album"; search?: string; offset?: number; key?: string } = {}) => {
+    const params = new URLSearchParams();
+    for (const [key, value] of Object.entries(query)) params.set(key, String(value));
+    return request<MusicBrowseResult>("/api/plex/music/browse" + (params.size ? `?${params}` : ""));
+  },
   saveMusicConfig: (config: { enabled: boolean; station_key: string; volume: number }) =>
     request<MusicConfig>("/api/plex/music", "PUT", config),
   railDataConfig: () => request<RailDataConfig>("/api/raildata/config"),

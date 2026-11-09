@@ -25,6 +25,8 @@ class FakePlexHandler(http.server.BaseHTTPRequestHandler):
     timelines = []
     queues_created = 0
     queue_queries = []
+    created_queue_queries = []
+    music_browse_queries = []
     slow_music = None
     token = "private-test-token"
 
@@ -47,6 +49,34 @@ class FakePlexHandler(http.server.BaseHTTPRequestHandler):
                     b'<Playlist key="/library/sections/3/stations/8" title="Deep Cuts Radio" />'
                     b'<Playlist key="/library/metadata/42/station/x" title="Not a library station" />'
                     b'</Hub></MediaContainer>')
+            content_type = "application/xml"
+        elif parsed.path == "/playlists":
+            self.assertEqual_query(urllib.parse.parse_qs(parsed.query), "playlistType", "audio")
+            body = (b'<MediaContainer>'
+                    b'<Playlist key="/playlists/10/items" ratingKey="10" title="Saved mix" playlistType="audio" smart="0" />'
+                    b'<Playlist key="/playlists/11/items" ratingKey="11" title="Favourites" playlistType="audio" smart="1" />'
+                    b'<Playlist key="/playlists/12/items" ratingKey="12" title="Empty" playlistType="audio" smart="1" />'
+                    b'<Playlist key="/playlists/13/items" title="Video" playlistType="video" />'
+                    b'<Playlist key="https://other.invalid/private" title="Unsafe" playlistType="audio" />'
+                    b'</MediaContainer>')
+            content_type = "application/xml"
+        elif parsed.path == "/library/sections/3/all":
+            query = urllib.parse.parse_qs(parsed.query)
+            self.music_browse_queries.append(query)
+            self.assertEqual_query(query, "X-Plex-Container-Size", "100")
+            kind = "artist" if query["type"] == ["8"] else "album"
+            base = 501 if kind == "artist" else 601
+            body = (f'<MediaContainer size="2" totalSize="202">'
+                    f'<Directory ratingKey="{base}" title="First {kind}" type="{kind}" parentTitle="Artist" />'
+                    f'<Directory ratingKey="{base + 1}" title="Second {kind}" type="{kind}" parentTitle="Artist" />'
+                    '</MediaContainer>').encode()
+            content_type = "application/xml"
+        elif parsed.path.startswith("/library/metadata/"):
+            keys = parsed.path.rsplit("/", 1)[1].split(",")
+            body = ('<MediaContainer>' + ''.join(
+                f'<Directory ratingKey="{key}" title="Music {key}" type="{"artist" if int(key) < 600 else "album"}" />'
+                for key in keys if key in {"501", "502", "601", "602"}
+            ) + '</MediaContainer>').encode()
             content_type = "application/xml"
         elif parsed.path == "/:/timeline":
             self.timelines.append(urllib.parse.parse_qs(parsed.query))
@@ -131,10 +161,23 @@ class FakePlexHandler(http.server.BaseHTTPRequestHandler):
             return
         query = urllib.parse.parse_qs(parsed.query)
         self.assertEqual_query(query, "type", "audio")
-        self.assertEqual_query(query, "uri",
-                               "server://machine-1/com.plexapp.plugins.library/library/sections/3/stations/1")
+        self.created_queue_queries.append(query)
+        uri = query["uri"][0]
+        if uri.startswith("library:///directory/"):
+            self.assertEqual_query(query, "shuffle", "1")
+            self.assertEqual_query(query, "includeRelated", "1")
+            if urllib.parse.unquote_plus(uri.removeprefix("library:///directory/")) not in (
+                "/library/metadata/501,502", "/library/metadata/601,602",
+            ):
+                raise AssertionError("Invalid mix seed URI")
+        elif "/playlists/" in uri:
+            key = uri.rsplit("/playlists/", 1)[1].split("/")[0]
+            self.assertEqual_query(query, "playlistID", key)
+        else:
+            self.assertEqual_query(query, "uri",
+                                  "server://machine-1/com.plexapp.plugins.library/library/sections/3/stations/1")
         self.__class__.queues_created += 1
-        body = self.queue_xml(self.queues_created)
+        body = b"<MediaContainer />" if uri.endswith("/playlists/12/items") else self.queue_xml(self.queues_created)
         self.send_response(200)
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
@@ -221,6 +264,97 @@ class PlexTests(unittest.TestCase):
                       {"station_key": "/library/metadata/42"}, {"enabled": "true"}):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 validate_music(value)
+
+    def test_music_sources_include_audio_playlists_and_advertised_mixes_only(self):
+        sources = {item["key"]: item for item in self.client().music_sources()}
+        self.assertEqual(sources["/library/sections/3/stations/1"]["kind"], "station")
+        self.assertEqual(sources["/library/metadata/42/station/x"]["kind"], "mix")
+        self.assertFalse(sources["/playlists/10/items"]["smart"])
+        self.assertTrue(sources["/playlists/11/items"]["smart"])
+        self.assertNotIn("/playlists/13/items", sources)
+        self.assertNotIn("https://other.invalid/private", sources)
+        for invalid in ("mix:track:1", "mix:artist:", "mix:artist:" + ",".join(["1"] * 21),
+                        "/playlists/10/items?X-Plex-Token=secret", "/library/metadata/1/station/x?evil=1",
+                        "https://other.invalid/playlists/10/items"):
+            with self.subTest(key=invalid), self.assertRaises(ValueError):
+                validate_music({"station_key": invalid})
+
+    def test_music_browse_pages_searches_and_checks_mix_members(self):
+        client = self.client()
+        self.assertEqual(client.music_browse()["items"], [{"id": "3", "title": "Music", "type": "library"}])
+        result = client.music_browse("3", "album", "First", 100)
+        self.assertEqual(result["total"], 202)
+        self.assertEqual(result["items"][0]["id"], "601")
+        query = FakePlexHandler.music_browse_queries[-1]
+        self.assertEqual(query["title"], ["First"])
+        self.assertEqual(query["X-Plex-Container-Start"], ["100"])
+        self.assertEqual(query["type"], ["9"])
+        self.assertEqual([item["id"] for item in client.music_mix_items("mix:artist:502,501")], ["502", "501"])
+        for key in ("mix:artist:501,999", "mix:artist:601", "mix:album:501", "mix:artist:501,501"):
+            with self.subTest(key=key), self.assertRaises(ValueError):
+                client.validate_music_source(key)
+        for key in ("/playlists/999/items", "/library/metadata/999/station/not-advertised"):
+            with self.subTest(key=key), self.assertRaises(ValueError):
+                client.validate_music_source(key)
+        with self.assertRaises(ValueError):
+            client.music_browse("1")
+
+    def test_playlist_and_custom_mix_queues_renew_with_the_same_source(self):
+        for key in ("/playlists/10/items", "/playlists/11/items", "mix:artist:501,502", "mix:album:601,602"):
+            with self.subTest(key=key):
+                relay = MusicRelay(self.client)
+                try:
+                    relay.configure({"enabled": True, "station_key": key, "volume": 30}, "identity")
+                    current = relay.control({"action": "current"})
+                    first_query = FakePlexHandler.created_queue_queries[-1]
+                    self.assertEqual(current["artist"], "Artist 1")
+                    for _ in range(32):
+                        current = relay.control({"action": "next", "track_id": current["track_id"]})
+                    self.assertEqual(current["track_id"], "1")
+                    self.assertEqual(FakePlexHandler.created_queue_queries[-1], first_query)
+                    if key.startswith("mix:"):
+                        self.assertEqual(first_query["shuffle"], ["1"])
+                        self.assertEqual(first_query["includeRelated"], ["1"])
+                    else:
+                        self.assertEqual(first_query["playlistID"], [key.split("/")[2]])
+                finally:
+                    relay.close()
+
+    def test_empty_playlist_reports_an_actionable_error(self):
+        relay = MusicRelay(self.client)
+        try:
+            relay.configure({"enabled": True, "station_key": "/playlists/12/items", "volume": 30}, "identity")
+            request = urllib.request.Request(
+                relay.url + "/control", json.dumps({"action": "current"}).encode(),
+                {"Content-Type": "application/json"}, method="POST",
+            )
+            with self.assertRaises(urllib.error.HTTPError) as error:
+                urllib.request.urlopen(request)
+            with error.exception as response:
+                self.assertIn("no playable tracks", json.load(response)["error"])
+            self.assertEqual(relay.get_status()["state"], "error")
+            self.assertIn("no playable tracks", relay.get_status()["error"])
+        finally:
+            relay.close()
+
+    def test_new_music_sources_persist_and_invalid_selections_leave_settings_unchanged(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            app = Application(root / "config.json", root / "pairing", root / "target", Path("/bin/true"))
+            try:
+                app.save_plex_config({"server_url": self.url, "token": FakePlexHandler.token})
+                for key in ("/playlists/11/items", "mix:artist:501,502", "mix:album:601,602"):
+                    settings = {"enabled": True, "station_key": key, "volume": 20}
+                    app.save_music_config(settings)
+                    self.assertEqual(app.config.load()["music"], settings)
+                    self.assertEqual(json.loads((root / "music.json").read_text())["station_key"], key)
+                with self.assertRaises(ValueError):
+                    app.save_music_config({"enabled": True, "station_key": "mix:artist:999", "volume": 20})
+                self.assertEqual(app.config.load()["music"]["station_key"], "mix:album:601,602")
+                app.save_music_config({"enabled": False, "station_key": "mix:album:601,602", "volume": 20})
+                self.assertFalse(app.music_config()["enabled"])
+            finally:
+                app.close()
 
     def test_music_relay_ranges_queue_window_renewal_and_idempotent_next(self):
         FakePlexHandler.queues_created = 0

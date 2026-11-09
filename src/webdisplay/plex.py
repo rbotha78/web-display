@@ -30,7 +30,19 @@ RATING_KEY = re.compile(r"[0-9]{1,20}\Z")
 LIBRARY_KEY = re.compile(r"[0-9]{1,10}\Z")
 METADATA_KEY = re.compile(r"/library/metadata/[0-9]{1,20}/children\Z")
 STATION_KEY = re.compile(r"/library/sections/[0-9]{1,10}/stations/(?:1|2|3|8)\Z")
+PLAYLIST_KEY = re.compile(r"/playlists/([0-9]{1,20})/items\Z")
+MIX_KEY = re.compile(r"mix:(artist|album):([0-9]{1,20}(?:,[0-9]{1,20}){0,19})\Z")
+ADVERTISED_MIX_KEY = re.compile(
+    r"/library/(?:metadata/[0-9]{1,20}/station|sections/[0-9]{1,10}/stations)/"
+    r"[A-Za-z0-9_-]{1,128}(?:\?type=(?:8|9|10))?\Z"
+)
 LOG = logging.getLogger(__name__)
+
+
+def valid_music_source(key: str) -> bool:
+    return any(pattern.fullmatch(key) for pattern in (
+        STATION_KEY, PLAYLIST_KEY, MIX_KEY, ADVERTISED_MIX_KEY,
+    ))
 
 
 def validate_server_url(value: object) -> str:
@@ -153,18 +165,100 @@ class PlexClient:
         ]
 
     def stations(self) -> list[dict[str, str]]:
-        result = []
+        return [
+            {key: item[key] for key in ("key", "title", "library")}
+            for item in self._station_sources() if item["kind"] == "station"
+        ]
+
+    def _station_sources(self) -> list[dict[str, str]]:
+        result: list[dict[str, str]] = []
+        seen: set[str] = set()
         for section in self.xml("/library/sections").findall("Directory"):
             key = section.get("key", "")
             if section.get("type") != "artist" or not LIBRARY_KEY.fullmatch(key):
                 continue
             hubs = self.xml(f"/hubs/sections/{key}", {"includeStations": 1})
             for item in hubs.iter("Playlist"):
-                station_key = item.get("key", "")
-                if STATION_KEY.fullmatch(station_key):
-                    result.append({"key": station_key, "title": item.get("title", "Radio"),
-                                   "library": section.get("title", "Music")})
+                source_key = item.get("key", "")
+                supported = STATION_KEY.fullmatch(source_key) or ADVERTISED_MIX_KEY.fullmatch(source_key)
+                if supported and source_key not in seen:
+                    result.append({
+                        "key": source_key, "title": item.get("title", "Radio"),
+                        "library": section.get("title", "Music"),
+                        "kind": "station" if STATION_KEY.fullmatch(source_key) else "mix",
+                    })
+                    seen.add(source_key)
         return result
+
+    def music_sources(self) -> list[dict[str, object]]:
+        result: list[dict[str, object]] = [dict(item) for item in self._station_sources()]
+        seen = {item["key"] for item in result}
+        for item in self.xml("/playlists", {"playlistType": "audio"}).findall("Playlist"):
+            key = item.get("key", "")
+            if item.get("playlistType") == "audio" and PLAYLIST_KEY.fullmatch(key) and key not in seen:
+                result.append({
+                    "key": key, "title": item.get("title", "Playlist"), "library": "Playlists",
+                    "kind": "playlist", "smart": item.get("smart") == "1",
+                })
+                seen.add(key)
+        return result
+
+    def music_mix_items(self, key: str) -> list[dict[str, str]]:
+        match = MIX_KEY.fullmatch(key)
+        if match is None:
+            raise ValueError("Invalid artist or album mix")
+        kind, identifiers = match.groups()
+        keys = identifiers.split(",")
+        if len(set(keys)) != len(keys):
+            raise ValueError("Mix selections must be unique")
+        root = self.xml("/library/metadata/" + identifiers)
+        items = {
+            item.get("ratingKey"): {
+                "id": item.get("ratingKey", ""), "title": item.get("title", "Untitled"),
+                "type": kind, "artist": item.get("parentTitle", ""),
+            }
+            for item in root.findall("Directory") if item.get("type") == kind
+        }
+        if any(identifier not in items for identifier in keys):
+            raise ValueError("Some selected artists or albums are no longer available")
+        return [items[identifier] for identifier in keys]
+
+    def validate_music_source(self, key: str) -> None:
+        if MIX_KEY.fullmatch(key):
+            self.music_mix_items(key)
+        elif key not in {item["key"] for item in self.music_sources()}:
+            raise ValueError("Select a music source available from this Plex server")
+
+    def music_browse(self, library: str = "", kind: str = "artist", search: str = "",
+                     offset: int = 0) -> dict[str, object]:
+        if kind not in {"artist", "album"} or len(search) > 100 or not 0 <= offset <= 1000000:
+            raise ValueError("Invalid music browse request")
+        libraries = [
+            {"id": item.get("key"), "title": item.get("title", "Music"), "type": "library"}
+            for item in self.xml("/library/sections").findall("Directory")
+            if item.get("type") == "artist" and LIBRARY_KEY.fullmatch(item.get("key", ""))
+        ]
+        if not library:
+            return {"items": libraries, "total": len(libraries), "offset": 0}
+        if library not in {item["id"] for item in libraries}:
+            raise ValueError("Select a music library from this Plex server")
+        query: dict[str, object] = {
+            "type": 8 if kind == "artist" else 9, "sort": "titleSort",
+            "X-Plex-Container-Start": offset, "X-Plex-Container-Size": 100,
+        }
+        if search:
+            query["title"] = search
+        root = self.xml(f"/library/sections/{library}/all", query)
+        items = [
+            {"id": item.get("ratingKey", ""), "title": item.get("title", "Untitled"),
+             "type": kind, "artist": item.get("parentTitle", "")}
+            for item in root.findall("Directory")
+            if item.get("type") == kind and RATING_KEY.fullmatch(item.get("ratingKey", ""))
+        ]
+        total = root.get("totalSize", root.get("size", str(len(items))))
+        if not total.isdigit():
+            raise ValueError("Plex returned an invalid music result count")
+        return {"items": items, "total": int(total), "offset": offset}
 
     def browse(self, key: str | None = None) -> list[dict[str, object]]:
         if key is None:

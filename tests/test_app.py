@@ -4,7 +4,7 @@ import tempfile
 import threading
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from webdisplay import app as webdisplay_app
 from webdisplay.app import (
@@ -470,7 +470,7 @@ class ApiTests(unittest.TestCase):
         self.assertNotIn("token", result)
 
     def test_music_settings_and_stations_require_authentication_and_csrf(self):
-        for path in ("/api/plex/music", "/api/plex/stations"):
+        for path in ("/api/plex/music", "/api/plex/stations", "/api/plex/music/browse"):
             response, _ = self.request("GET", path)
             self.assertEqual(response.status, 401)
         token, session = self.app.sessions.create()
@@ -487,6 +487,27 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(result["volume"], 40)
         self.assertNotIn("control_url", result)
         self.assertNotIn("token", result)
+
+    def test_music_browse_accepts_only_bounded_known_queries(self):
+        token, _ = self.app.sessions.create()
+        cookie = {"Cookie": f"session={token}"}
+        client = Mock()
+        client.music_browse.return_value = {"items": [], "total": 0, "offset": 100}
+        client.music_mix_items.return_value = [{"id": "501", "title": "Artist", "type": "artist"}]
+        with patch.object(self.app, "plex_client", return_value=client):
+            response, result = self.request(
+                "GET", "/api/plex/music/browse?library=3&kind=artist&search=Test&offset=100", headers=cookie,
+            )
+            self.assertEqual(response.status, 200)
+            client.music_browse.assert_called_once_with("3", "artist", "Test", 100)
+            response, result = self.request("GET", "/api/plex/music/browse?key=mix%3Aartist%3A501", headers=cookie)
+            self.assertEqual(response.status, 200)
+            self.assertEqual(result["items"][0]["id"], "501")
+            for query in ("offset=-1", "offset=x", "offset=1&offset=2", "url=http://other.invalid",
+                          "key=mix:artist:501&library=3"):
+                with self.subTest(query=query):
+                    response, _ = self.request("GET", "/api/plex/music/browse?" + query, headers=cookie)
+                    self.assertEqual(response.status, 502)
 
     def test_raildata_key_configuration_is_private_and_csrf_protected(self):
         response, _ = self.request("GET", "/api/raildata/config")

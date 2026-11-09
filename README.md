@@ -5,6 +5,9 @@ with Chromium on HDMI, authenticated HTTPS administration, Wi-Fi provisioning,
 signed application updates and PC and Android display managers.
 Release **[v0.5.17](https://github.com/rbotha78/web-display/releases/tag/v0.5.17)**
 adds enhanced train boards, manager remote views and floating now-playing information.
+The current `main` branch additionally includes optional previous departures,
+train-layout refinements and Plex playlists/custom mixes; those additions are
+not part of the v0.5.17 release artifacts.
 Saving settings retains the saved values when confirmation notifications appear,
 without reloading stale configuration into the editor.
 Administration opens on **Carousel**, with an **Administration** menu for
@@ -15,8 +18,9 @@ screens; global settings load when first opened.
 ## Display features
 
 The carousel supports websites, streamed/Plex video, clock/date/notice dashboards,
-live National Rail departure boards and OpenWeather scenes. Plex radio stations
-can play in the background across scene changes, pausing for videos with audio.
+live National Rail departure boards and OpenWeather scenes. Plex radio stations,
+audio playlists and artist/album shuffle mixes can play in the background across
+scene changes, pausing for videos with audio.
 Display scenes and their outer safe-area border use a black background.
 Background music has a permanent, compact now-playing card floating in the
 top-left corner, showing the song and artist when available, including on websites
@@ -220,7 +224,7 @@ scene). No reboot is required; normal connected playback is left untouched.
 ### Experimental carousel
 
 The device administration page has a **Carousel** editor for up to 30 ordered
-web-page, widget-dashboard and streamed-video scenes. Add scenes, move them up
+web-page, widget-dashboard, streamed-video, train and weather scenes. Add scenes, move them up
 or down, choose which to include, enable the carousel, then select **Save and
 apply**. Draft edits are not published. Each apply or kiosk restart starts at
 the first enabled scene. Disabling the carousel restores the existing single
@@ -233,24 +237,26 @@ again, and reset when the carousel renderer restarts. The authenticated
 Dashboard scenes have clock/date, plain-text notice, or combined fixed layouts.
 They are rendered by the bundled React UI on a read-only loopback server, with
 no administrator credentials exposed. Web pages use direct navigation, not
-iframes. This initial implementation stops the previous renderer before
-starting the next: Chromium relaunches between browser scenes, so changes are
-hard cuts with a loading gap, not seamless transitions.
+iframes. The current renderer retains Chromium and prepares the next scene
+before handover; see **Carousel transitions and retained websites** below.
+Transitions are hard cuts, not animated or guaranteed gapless.
 
-Page/dashboard scenes default to 60 seconds. Video scenes finish at end of
+Page/dashboard/weather scenes default to 60 seconds; train scenes default to
+300 seconds. Video scenes finish at end of
 stream or their cutoff (default 300 seconds), whichever comes first; disabling
 the cutoff allows full-length playback, including endless live streams.
 Configurable durations are whole seconds from 5 to 86400. Web timers begin
-when Chromium launches after a reachability check (page-loading time counts);
-dashboard timers begin after React renders, and video timers after mpv reports
-playback. Startup has a separate 30-second timeout. Failed/unreachable scenes,
+after handover to the prepared page; local-scene timers require React's rendered
+revision acknowledgment, and video timers require mpv playback readiness.
+Startup has a separate 30-second timeout. Failed/unreachable scenes,
 renderer exits and video stalls are skipped with a 60-second retry cooldown.
 If all scenes fail, a local recovery screen remains visible between retries.
 Starting the setup access point interrupts the carousel for the existing setup
 screen; after it stops, the playlist starts again from its first enabled scene.
 
 Direct-video scenes use HTTP(S) streams/files supported by mpv, not web-player
-pages. Audio output is disabled, with the tested X11/EGL and V4L2 decoding options.
+pages. Video audio is muted by default and can be enabled per scene, with the
+tested X11/EGL and V4L2 decoding options.
 For `.m3u8` master playlists the kiosk selects a rendition before starting mpv:
 at most 1280x720 and 4 Mbps where advertised, excluding explicitly advertised
 HEVC/AV1/VP9 codecs. This avoids opening every rendition (including 4K) during
@@ -283,7 +289,7 @@ checks showed hardware decoding with no dropped frames. Validate audio separatel
 The authenticated API is `GET /api/playlist` and `PUT /api/playlist`, using the
 same session/CSRF or bearer-key rules as other device settings. PUT replaces the
 whole playlist with `{"enabled": boolean, "scenes": [...]}`. Each scene has a
-unique `id`, `kind` (`web`, `dashboard`, `video`), optional `title` and `enabled`,
+unique `id`, `kind` (`web`, `dashboard`, `video`, `train`, `weather`), optional `title` and `enabled`,
 and `duration` in seconds (`null` disables a video cutoff). Web and direct-video
 scenes require `url`; Plex video scenes use `source: "plex"` and a
 `plex_rating_key`; video scenes accept optional `audio_enabled` (default false).
@@ -293,7 +299,10 @@ The effective Plex bitrate is used for both the server request and local HLS
 selection/playback; the 720p resolution limit remains in place. Direct streams
 retain their separate 4 Mbps limit.
 Dashboards accept `layout` (`clock`, `notice`, `clock-notice`) and `text` (at
-most 2000 characters). Omitting timing uses the defaults above.
+most 2000 characters), plus optional `show_weather`. Train scenes require
+`station_crs`, accept optional `destination_crs` and `filter_station_crs`, and
+default `show_previous_departure` to true. Weather scenes use the device's
+configured weather location. Omitting timing uses the defaults above.
 Private configuration is atomically saved; the administrator playlist API
 contains no Plex token or playback capability URLs.
 The authenticated Plex endpoints are `GET /api/plex/config`,
@@ -306,10 +315,27 @@ current token; **Remove Plex settings** clears both server address and token.
 
 The device administration page also offers **Background music**. Connect Plex,
 select an advertised music-library station (Library Radio, Deep Cuts Radio,
-Time Travel Radio, or Random Album Radio), choose volume, and explicitly enable
+Time Travel Radio, or Random Album Radio), an audio playlist, or a custom
+artist/album mix, choose volume, and explicitly enable
 playback. Music defaults **off**, including on existing installations; selecting
-a station alone does not enable it. Settings are private and independent of the
+a source alone does not enable it. Settings are private and independent of the
 carousel playlist. Removing Plex credentials disables music.
+
+Regular and **smart playlists** are listed for the configured Plex token's user.
+Playlist rules and order remain managed in Plex; each new playback queue evaluates
+the current playlist, so smart-playlist changes take effect at the next queue
+renewal or playback restart. Empty playlists report an explicit playback error
+rather than falling back to another source.
+
+Use **Build artist mix** or **Build album mix** to search and page through music
+libraries, then select up to 20 artists or albums. The device saves that selection
+and asks Plex to shuffle their tracks into a new mix on each queue renewal.
+These are selection-based shuffle mixes, not Plexamp sonic recommendations or
+Guest DJ sessions, and they are saved on this display rather than creating a
+playlist on Plex. Saved Plexamp mixes appear in the source picker when the server
+exposes them as audio playlists or supported station entries. Plexamp-only
+client-local mixes cannot be imported directly; save them as an audio playlist
+in Plex first. Playback still uses only music available to the configured token.
 
 A separate audio-only persistent mpv plays through the selected audio output
 across web, dashboard, weather, train and muted-video scenes, including single-page mode. Videos with
@@ -328,21 +354,27 @@ not card numbers; changing output restarts playback. A disconnected selected
 device is shown as unavailable and playback fails visibly rather than silently
 switching outputs. This setting does not enable audio on muted video scenes.
 
-The service owns a server-generated station queue, reports playing/paused/stopped
+The service owns a server-generated music queue, reports playing/paused/stopped
 timelines and retrieves a window centered on the completed track to find the
 next item. Station queues on the tested server are finite: reaching their actual
-end creates a **new queue for the same station**, rather than assuming Plex
+end creates a **new queue for the same source**, rather than assuming Plex
 automatically refills them indefinitely. New queue creation may briefly interrupt
-audio, and stations may repeat tracks. Playback is not gapless or crossfaded.
+audio, and sources may repeat tracks. Playback is not gapless or crossfaded.
 Connection, decoder and stalled-player failures retry after 5 seconds, then
 15 seconds, then once per minute while music remains enabled and the display
 is awake. Repeated failures clear the stale Plex queue so stations recover
 after a server restart without manually toggling music. Successful playback
 resets the retry delay. The card reports sanitized playback state/errors.
 
-Authenticated endpoints: `GET /api/plex/stations`, `GET /api/plex/music` and
+Authenticated endpoints: `GET /api/plex/stations`, `GET /api/plex/music/browse`, `GET /api/plex/music` and
 `PUT /api/plex/music` (session mutations require CSRF). Music settings are
 `enabled`, `station_key`, and integer `volume` (0–100, default 30).
+The stations endpoint now includes audio playlists and advertised mixes.
+Music browsing accepts `library`, `kind` (`artist`/`album`), `search`, and
+`offset` (100 results per page), or `key` to resolve an existing custom mix.
+The backwards-compatible `station_key` also accepts `/playlists/<id>/items`
+and `mix:artist:<comma-separated IDs>` / `mix:album:<comma-separated IDs>`;
+arbitrary URLs and non-music selections are rejected.
 
 Slice 1 was accepted on 2026-10-19 after physical video playback confirmation on
 Pi 2 and Pi 3, unavailable-content and browser/player-crash recovery checks,
@@ -524,10 +556,11 @@ is committed in `src/webdisplay/static/` and served by the Python service, so
 neither the Pi nor the image build needs Node. After changing anything in `ui/`:
 
 ```sh
-cd ui && npm install && npm run typecheck && npm test && npm run build
+cd ui && npm ci && npm run typecheck && npm test && npm run build
 ```
 
-and commit the regenerated `src/webdisplay/static/`. `npm run dev` runs a hot-reload
+and include the regenerated `src/webdisplay/static/` and
+`src/webdisplay_manager/static/` in UI commits. `npm run dev` runs a hot-reload
 server that proxies `/api` to a service on `https://localhost:8443`. The page is
 served with a strict Content-Security-Policy (no inline scripts or styles).
 

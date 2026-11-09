@@ -1,5 +1,14 @@
 # Repository instructions
 
+## Session continuity
+
+Read `AGENTS.md` for the iteration/deployment workflow and `HANDOFF.md` for the
+latest dated implementation and hardware status before starting work. `PLAN.md`
+records approved designs; `README.md` describes user-facing operation. Keep these
+documents consistent when completing an iteration. Check source, Git history and
+release assets rather than treating historical notes or session todos as current.
+Do not mark unresolved hardware/endurance checks complete because tests pass.
+
 ## Build, test, and development commands
 
 Run commands from the repository root unless shown otherwise. Python requires
@@ -40,6 +49,14 @@ PYTHONPATH=src python3 -m webdisplay_manager --no-browser
 
 UI tests use Vitest, jsdom, and React Testing Library. Manager UI tests are in
 `ui/src/manager/ManagerApp.test.tsx`; the same test selectors apply.
+Use installed dependencies for subsequent iterations; reinstall from the
+lockfile when dependencies change or required dependencies are missing.
+
+Android manager builds require JDK 17, Android platform 36 and build tools
+35.0.0. With `ANDROID_HOME` configured, run from `android/`:
+`./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug`.
+The APK is `android/app/build/outputs/apk/debug/web-display-manager.apk`.
+Device-only music controls do not require a new native manager/Android build.
 
 Image builds require Docker with privileged-container support, about 30 GB free,
 and a native Linux filesystem:
@@ -98,6 +115,19 @@ identity is certificate-based, not tied to one DHCP address; successful fallback
 addresses are promoted. Both React apps share `ui/` dependencies and styles but
 have separate entry points and API clients.
 
+Carousel scene kinds are `web`, `dashboard`, `video`, `train` and `weather`.
+`scene_player.py` coordinates Chromium/mpv and the read-only local scene server;
+`ui/src/SceneScreen.tsx` renders local scenes and acknowledges their revision.
+`raildata.py` and `weather.py` own provider access/caching. `remote_view.py`
+publishes sanitized reconstruction data at
+`/run/web-display-kiosk/remote-view.json`; this is not a screenshot or the native
+now-playing notification. Both managers reconstruct the view without credentials.
+
+Background music is separate from the carousel playlist. `plex.py` discovers and
+validates sources; `music.py` owns private queues/audio relay; `music_player.py`
+supervises a separate persistent audio-only mpv. Provider tokens stay in the
+HTTPS service and upstream headers, never in scene data or player URLs.
+
 ## Cross-cutting conventions
 
 - After UI changes, run `cd ui && npm run build` and include the regenerated
@@ -132,6 +162,29 @@ have separate entry points and API clients.
   offline overlay after two failed checks. Full-screen setup replaces it when
   no URL is configured or the setup AP is active; before first successful load,
   show the waiting page. Do not conflate site failure with internet failure.
+- Preserve the two-website-tab bound and hidden-tab freezing. Consecutive videos
+  reuse mpv; browser handover must become visible before stopping mpv to reclaim
+  decoder/allocator memory. Scene readiness requires the rendered-revision
+  acknowledgment, not merely a ready browser document. Do not mask failures by
+  extending startup timeouts or equating zero service restarts with correct
+  scene order.
+- Train calling-station filters include earlier and upcoming stops. Keep cache
+  and tracking identities separate for each station/filter combination. Fetch
+  Service Details only for the next live service; use board look-backs or
+  previously captured observations for departed services. Never infer actual
+  departures/last-seen stations from estimates or a service disappearing.
+  `show_previous_departure` defaults true; hiding it must reclaim the space.
+- Keep background-music settings backwards compatible as
+  `{enabled, station_key, volume}`. `station_key` identifies stations, audio
+  playlists or `mix:artist:<IDs>` / `mix:album:<IDs>` selections. Validate against
+  Plex, limit custom mixes to 20 unique correctly typed selections, and reject
+  arbitrary URLs. Browse with both Plex container start and size (100/page) to
+  stay within XML response limits. Renew the same source at queue end; empty
+  sources fail explicitly, never fall back to another source.
+- Custom music mixes shuffle selected music; they are not Plexamp sonic/Guest DJ
+  sessions. Import only server-exposed playlists/stations, not app-local mixes.
+  Do not enable music or change a display's source for a deployment/probe.
+  Preserve video-audio pause/resume, sleep and private relay capability rotation.
 - For releases, bump `WEB_DISPLAY_VERSION` in
   `image/stage-web-display/01-install/files/web-display-release` and `version`
   in `pyproject.toml` together; `tests/test_manager.py` enforces this. Release
