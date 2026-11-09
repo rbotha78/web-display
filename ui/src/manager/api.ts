@@ -1,3 +1,5 @@
+import type { RemoteView } from "../api";
+
 export interface Device {
   id: string;
   name: string;
@@ -55,13 +57,14 @@ export function setToken(value: string) {
   token = value;
 }
 
-async function request<T>(path: string, method = "GET", body?: unknown): Promise<T> {
+async function request<T>(path: string, method = "GET", body?: unknown, signal?: AbortSignal): Promise<T> {
   const headers: Record<string, string> = { "X-Manager-Token": token };
   if (body !== undefined) headers["Content-Type"] = "application/json";
   const response = await fetch(path, {
     method,
     headers,
     body: body === undefined ? undefined : JSON.stringify(body),
+    signal,
   });
   let payload: { error?: string } = {};
   try {
@@ -75,6 +78,8 @@ async function request<T>(path: string, method = "GET", body?: unknown): Promise
 
 export const api = {
   devices: () => request<{ devices: Device[]; manager_version?: string }>("/api/devices"),
+  remoteView: (id: string, signal?: AbortSignal) =>
+    request<RemoteView>("/api/devices/" + id + "/remote-view", "GET", undefined, signal),
   discover: () => request<{ found: Found[] }>("/api/discover"),
   fingerprint: (host: string, port: number) =>
     request<{ host: string; port: number; fingerprint: string }>("/api/fingerprint", "POST", {

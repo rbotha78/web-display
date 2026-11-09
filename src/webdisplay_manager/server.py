@@ -123,7 +123,14 @@ def make_handler(manager: Manager, token: str, port_getter) -> type[BaseHTTPRequ
             if not self._authorised():
                 return
             keys = re.fullmatch(r"/api/devices/([0-9a-f]{12})/debug-keys", self.path)
-            if keys:
+            remote = re.fullmatch(r"/api/devices/([0-9a-f]{12})/remote-view", self.path)
+            if remote:
+                try:
+                    self._json(HTTPStatus.OK, manager.remote_view(remote.group(1)))
+                except DeviceError as error:
+                    status = error.status if error.status in (401, 403, 404, 503) else 502
+                    self._json(HTTPStatus(status), {"error": str(error), "status": error.status})
+            elif keys:
                 self._json(HTTPStatus.OK, manager.debug_keys(keys.group(1), "list", {}))
             elif self.path == "/api/devices":
                 self._json(HTTPStatus.OK, {"devices": manager.devices(), "manager_version": manager_version()})

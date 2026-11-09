@@ -1,3 +1,20 @@
+import type { TrainBoard } from "./SceneScreen";
+import type { WeatherData } from "./components/WeatherDisplay";
+
+export interface RemoteView {
+  available: true;
+  mode: "carousel" | "single" | "recovery";
+  updated: number;
+  heartbeat_age_seconds?: number;
+  device_time: string;
+  timezone: string;
+  scene: (Pick<Scene, "id" | "kind"> & Partial<Scene>) | null;
+  train: TrainBoard | null;
+  weather: WeatherData | null;
+  sleep: { sleeping: boolean; scheduled_sleep: boolean; wake_until: number | null };
+  message: string;
+}
+
 export interface Session {
   csrf: string;
   can_manage_keys?: boolean;
@@ -231,6 +248,7 @@ export const api = {
   wake: (duration_minutes: number) => request<SleepConfig>("/api/sleep/wake", "POST", { duration_minutes }),
   playlist: () => request<Playlist>("/api/playlist"),
   playlistStatus: () => request<PlaybackStatus>("/api/playlist/status"),
+  remoteView: () => request<RemoteView>("/api/remote-view"),
   savePlaylist: (playlist: Playlist) => request<Playlist>("/api/playlist", "PUT", playlist),
   plexConfig: () => request<PlexConfig>("/api/plex/config"),
   musicConfig: () => request<MusicConfig>("/api/plex/music"),

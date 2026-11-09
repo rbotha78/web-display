@@ -397,6 +397,20 @@ def main() -> None:
     from .music_player import MusicPlayer
     music = MusicPlayer(target_path.with_name("music.json"), fallback_path.parent, args.mpv)
     sleep_runtime = SleepRuntime(target_path.with_name("sleep.json"))
+    from .remote_view import publish, snapshot
+    remote_path = fallback_path.with_name("remote-view.json")
+    remote_path.unlink(missing_ok=True)
+
+    def publish_remote(mode: str, scene: object, message: str = "") -> None:
+        try:
+            publish(remote_path, snapshot(
+                mode, scene, sleep_runtime.status, message,
+                train_path=target_path.with_name("train-board.json"),
+                weather_path=target_path.with_name("weather.json"),
+            ))
+        except (OSError, ValueError):
+            LOG.exception("Could not publish remote view")
+            remote_path.unlink(missing_ok=True)
 
     def stop(*_: object) -> None:
         raise SystemExit
@@ -455,6 +469,15 @@ def main() -> None:
                     previous_revision = revision
                 icon.set_visible(False)
                 carousel.tick(time.monotonic())
+                active = renderer.active_scene
+                active_process = renderer.process if active and active["kind"] == "video" else renderer.browser.process
+                if active_process is None or active_process.poll() is not None:
+                    active = None
+                publish_remote(
+                    "carousel" if active else "recovery", active,
+                    "" if active else ("No carousel scenes are currently available" if renderer.recovering
+                                       else "Loading carousel scene"),
+                )
                 time.sleep(1)
                 continue
             if renderer is not None:
@@ -487,8 +510,15 @@ def main() -> None:
                 process = launch(args.browser, desired)
                 destination = desired
             icon.set_visible(show_icon)
+            if destination == target and target:
+                publish_remote("single", {"id": "single", "kind": "web", "url": target,
+                                          "title": "Website"}, "Website offline; retaining the loaded page" if show_icon else "")
+            else:
+                publish_remote("recovery", None, "Setup access point active" if ap_active else
+                               "No display URL configured" if not target else "Waiting for website connection")
             time.sleep(1)
     finally:
+        remote_path.unlink(missing_ok=True)
         music.close()
         stop_process(process)
         if renderer is not None:

@@ -211,6 +211,18 @@ class DeviceManager(private val store: SecureDeviceStore) {
             "POST", "/api/reboot", JSONObject(), bearer(device.key)))
     }
 
+    suspend fun remoteView(id: String, requests: PinnedHttp.RequestScope): RemoteSnapshot =
+        deviceAction(id, requests) { device ->
+            val reply = PinnedHttp.request(
+                device.host, device.port, device.fingerprint, "GET", "/api/remote-view",
+                headers = bearer(device.key), requestScope = requests,
+            )
+            if (reply.status == 404) throw DeviceRequestException(
+                "Remote view needs newer device software. Update the device to use this feature.", 404,
+            )
+            RemoteViewParser.parse(PinnedHttp.requireSuccess(reply), android.os.SystemClock.elapsedRealtime())
+        }
+
     suspend fun adminUrl(id: String): String = deviceAction(id) { device ->
         val reply = PinnedHttp.request(device.host, device.port, device.fingerprint, "POST",
             "/api/admin-login-token", JSONObject(), bearer(device.key))
@@ -287,25 +299,27 @@ class DeviceManager(private val store: SecureDeviceStore) {
         }
     }
 
-    private suspend fun <T> deviceAction(id: String, action: (Device) -> T): T {
+    private suspend fun <T> deviceAction(
+        id: String, requests: PinnedHttp.RequestScope? = null, action: (Device) -> T,
+    ): T {
         val requestJob = currentCoroutineContext()[Job]
         return withContext(Dispatchers.IO) {
         requestJob?.ensureActive()
         val saved = store.load().firstOrNull { it.id == id } ?: throw DeviceRequestException("Unknown device")
-        val device = connect(saved, requestJob)
+        val device = connect(saved, requestJob, requests)
         requestJob?.ensureActive()
         action(device)
         }
     }
 
-    private fun connect(device: Device, requestJob: Job?): Device {
+    private fun connect(device: Device, requestJob: Job?, requests: PinnedHttp.RequestScope? = null): Device {
         var failure: DeviceRequestException? = null
         for (address in ManagerRules.candidateAddresses(device, discovered)) {
             try {
                 requestJob?.ensureActive()
                 PinnedHttp.requireSuccess(
                     PinnedHttp.request(address.host, address.port, device.fingerprint, "GET", "/health",
-                        headers = bearer(device.key), timeoutMs = 5_000),
+                        headers = bearer(device.key), timeoutMs = 5_000, requestScope = requests),
                 )
                 val promoted = device.copy(
                     host = address.host,

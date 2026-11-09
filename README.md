@@ -541,6 +541,15 @@ fingerprint (compare it with the device screen), then uses the administrator pas
 create an API key for this PC. Only the key and pinned fingerprint are stored, in
 `~/.config/web-display-manager/devices.json` (mode 0600); passwords are never stored.
 Functions: status, change display address, check/install updates (one or all), restart.
+**Remote view** opens a reconstructed preview of the current display scene,
+refreshing every five seconds only while the view is open. Dashboard clocks
+and notices, train boards and weather use the display's current scene data.
+Web pages show an address/details card; videos show a metadata card and are
+never streamed to the manager. This is not a screenshot or remote-control
+session: browser page contents, playback pixels and exact TV layout are not
+reproduced. The view identifies recovery/sleep states and reports unavailable
+or stale data rather than presenting it as live. Device firmware must support
+the authenticated `/api/remote-view` endpoint.
 **Open admin page** signs the browser in using the manager's existing key, without
 storing or asking for the password. The device issues a single-use login token that
 expires after one minute; it travels in the URL fragment (not access logs) and is
@@ -570,7 +579,8 @@ when multicast is blocked.
 The app supports the same operations as the PC manager: device enrollment,
 online/offline and network status, URL changes, restart, individual and fleet
 update checks/installations, SSH public-key management on development images,
-and automatic or manual browser administration links. Installation does not
+automatic or manual browser administration links, and the same reconstructed
+**Remote view** available in the PC manager. Installation does not
 automatically reboot a display. Detailed device settings and carousel editing
 remain in the device's administration page, as with the PC manager.
 
@@ -595,10 +605,11 @@ Build with JDK 17 and an Android SDK containing platform 36 and build tools
 ```sh
 cd android
 ./gradlew testDebugUnitTest lintDebug assembleDebug
-adb install -r app/build/outputs/apk/debug/app-debug.apk
+adb install -r app/build/outputs/apk/debug/web-display-manager.apk
 ```
 
-The **Android manager** GitHub Actions workflow builds an installable debug APK
+The APK is named **web-display-manager.apk**. The **Android manager** GitHub
+Actions workflow builds an installable debug APK
 artifact. Debug APKs are for development/sideloading, not Play Store release
 distribution; production signing is not configured. Phone-side discovery,
 enrollment and visual acceptance need testing on an Android device.

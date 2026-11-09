@@ -234,6 +234,31 @@ class ApiTests(unittest.TestCase):
         payload = json.loads(response.read()) if response.length != 0 else {}
         return response, payload
 
+    def test_remote_view_requires_session_or_bearer_and_reports_unavailable_runtime(self):
+        from webdisplay import remote_view
+        path = Path(self.directory.name) / "remote-view.json"
+        response, _ = self.request("GET", "/api/remote-view")
+        self.assertEqual(response.status, 401)
+        token, _ = self.app.sessions.create()
+        key = self.app.create_key("Preview manager")["key"]
+        with patch.object(remote_view, "RUNTIME_PATH", path):
+            for headers in ({"Cookie": f"session={token}"}, {"Authorization": f"Bearer {key}"}):
+                response, body = self.request("GET", "/api/remote-view", headers=headers)
+                self.assertEqual(response.status, 503)
+                self.assertIn("unavailable", body["error"])
+            remote_view.publish(path, remote_view.snapshot(
+                "single", {"id": "single", "kind": "web", "url": "https://user:secret@site.example/page?key=x"},
+                {"sleeping": False, "scheduled_sleep": False, "wake_until": None},
+            ))
+            for headers in ({"Cookie": f"session={token}"}, {"Authorization": f"Bearer {key}"}):
+                response, body = self.request("GET", "/api/remote-view", headers=headers)
+                self.assertEqual(response.status, 200)
+                self.assertEqual(body["scene"]["url"], "https://site.example/page")
+            value = json.loads(path.read_text())
+            path.write_text(json.dumps({**value, "updated": 0}))
+            response, _ = self.request("GET", "/api/remote-view", headers={"Cookie": f"session={token}"})
+            self.assertEqual(response.status, 503)
+
     def test_wifi_requires_login_and_csrf(self):
         response, _ = self.request("POST", "/api/wifi/scan", {})
         self.assertEqual(response.status, 401)

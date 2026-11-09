@@ -29,6 +29,12 @@ class ManagerViewModel(application: Application) : AndroidViewModel(application)
     val storeError: StateFlow<String?> = _storeError
     private val _managerVersion = MutableStateFlow("1.0.0")
     val managerVersion: StateFlow<String> = _managerVersion
+    private val remoteSession = RemoteViewSession(viewModelScope, manager::remoteView)
+    val remoteView: StateFlow<RemoteViewState?> = remoteSession.state
+
+    fun openRemoteView(id: String, name: String) = remoteSession.open(id, name)
+    fun closeRemoteView() = remoteSession.close()
+    fun resumeRemoteView() = remoteSession.resume()
 
     fun refresh() {
         perform("refresh", coalesce = true, work = {
@@ -154,6 +160,7 @@ class ManagerViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun cancelNetwork() {
+        remoteSession.pause()
         jobs.toList().forEach { it.cancel() }
         PinnedHttp.pauseNetwork()
     }

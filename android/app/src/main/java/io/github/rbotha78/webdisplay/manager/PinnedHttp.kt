@@ -20,6 +20,30 @@ class CertificateChangedException : DeviceRequestException("The device certifica
 data class HttpReply(val status: Int, val json: JSONObject, val headers: Map<String, List<String>>)
 
 object PinnedHttp {
+    class RequestScope {
+        private val connections = mutableSetOf<HttpsURLConnection>()
+        private var cancelled = false
+
+        @Synchronized
+        internal fun track(connection: HttpsURLConnection) {
+            if (cancelled) throw DeviceRequestException("Remote view closed")
+            connections += connection
+        }
+
+        @Synchronized
+        internal fun untrack(connection: HttpsURLConnection) {
+            connections -= connection
+        }
+
+        fun cancel() {
+            val active = synchronized(this) {
+                cancelled = true
+                connections.toList()
+            }
+            active.forEach { runCatching { it.disconnect() } }
+        }
+    }
+
     private const val MAX_RESPONSE = 1_048_576
     private val activeConnections = ConcurrentHashMap.newKeySet<HttpsURLConnection>()
     private val connectionLock = Any()
@@ -54,10 +78,12 @@ object PinnedHttp {
         body: JSONObject? = null,
         headers: Map<String, String> = emptyMap(),
         timeoutMs: Int = 10_000,
+        requestScope: RequestScope? = null,
     ): HttpReply {
         val connection = connection(host, port, pin, path, timeoutMs)
         track(connection)
         try {
+            requestScope?.track(connection)
             connection.requestMethod = method
             connection.setRequestProperty("Accept", "application/json")
             headers.forEach { (key, value) -> connection.setRequestProperty(key, value) }
@@ -92,6 +118,7 @@ object PinnedHttp {
             if (error.causes().any { it is PinFailure }) throw CertificateChangedException()
             throw DeviceRequestException(error.message?.take(240) ?: "Could not reach $host:$port")
         } finally {
+            requestScope?.untrack(connection)
             activeConnections -= connection
             connection.disconnect()
         }

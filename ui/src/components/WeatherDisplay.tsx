@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { WeatherIcon } from "./WeatherIcon";
 
-interface WeatherData {
+export interface WeatherData {
   location?: string;
   temperature?: number;
   feels_like?: number;
@@ -49,6 +49,13 @@ export function WeatherDisplay({ compact = false, currentOnly = false }: {
     };
   }, []);
 
+  return <WeatherContent weather={weather} error={error} compact={compact} currentOnly={currentOnly} />;
+}
+
+export function WeatherContent({ weather, error = "", compact = false, currentOnly = false, timeZone, timeOffsetMinutes = 0 }: {
+  weather: WeatherData | null; error?: string; compact?: boolean; currentOnly?: boolean;
+  timeZone?: string; timeOffsetMinutes?: number;
+}) {
   return (
     <section className={`weather-display${compact ? " weather-widget" : ""}${currentOnly ? " weather-summary" : ""}`} aria-label="Weather">
       <h2>{weather?.location || "Weather"}</h2>
@@ -83,7 +90,7 @@ export function WeatherDisplay({ compact = false, currentOnly = false }: {
           {!currentOnly && weather.forecast_error && <p role="status">{weather.forecast_error}</p>}
           <footer>
             OpenWeather{!currentOnly && " · Forecast ranges from 3-hour samples"}
-            {weather.observed_at && ` · Observed ${new Date(weather.observed_at * 1000).toLocaleTimeString()}`}
+            {weather.observed_at && ` · Observed ${new Date(weather.observed_at * 1000 + timeOffsetMinutes * 60000).toLocaleTimeString([], { timeZone })}`}
           </footer>
         </>
       )}

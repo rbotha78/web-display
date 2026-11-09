@@ -6,6 +6,59 @@
   font-display: swap;
 }
 
+.remote-preview-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: #000b;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+}
+
+.remote-preview {
+  width: min(64rem, 100%);
+  max-height: 95vh;
+  overflow: auto;
+  min-width: 0;
+}
+
+.remote-preview-scene {
+  overflow-wrap: anywhere;
+  overflow-x: auto;
+}
+
+.remote-preview-notice {
+  white-space: pre-wrap;
+  font-size: clamp(1.25rem, 3vw, 2rem);
+}
+
+.remote-preview-clock time {
+  font-size: clamp(2rem, 7vw, 5rem);
+  font-variant-numeric: tabular-nums;
+}
+
+.remote-preview .weather-display {
+  font-size: 1rem;
+}
+
+.remote-preview .weather-display :is(h2, h3, .weather-measurements, footer, .weather-forecast p) {
+  font-size: 1rem;
+}
+
+.remote-preview .weather-display .weather-current strong {
+  font-size: 2rem;
+}
+
+.remote-preview .weather-display .weather-icon {
+  width: 3rem;
+  height: 3rem;
+}
+
+.remote-preview .weather-forecast {
+  grid-template-columns: repeat(auto-fit, minmax(7rem, 1fr));
+}
+
 @font-face {
   font-family: "D-DIN";
   src: url("./fonts/D-DIN-Bold.otf") format("opentype");

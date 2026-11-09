@@ -1050,6 +1050,17 @@ def make_handler(app: Application) -> type[BaseHTTPRequestHandler]:
                     return
                 self._json(HTTPStatus.OK, status)
                 return
+            if self.path == "/api/remote-view":
+                if not self._require_session():
+                    return
+                from .remote_view import load
+                try:
+                    self._json(HTTPStatus.OK, load())
+                except (OSError, ValueError, TypeError, KeyError):
+                    self._json(HTTPStatus.SERVICE_UNAVAILABLE, {
+                        "error": "Remote view unavailable: kiosk runtime is missing, invalid or stale",
+                    })
+                return
             if self.path == "/api/status":
                 if not self._require_session():
                     return

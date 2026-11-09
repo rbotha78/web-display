@@ -60,6 +60,7 @@ fun ManagerScreen(viewModel: ManagerViewModel) {
     val notice by viewModel.notice.collectAsState()
     val storeError by viewModel.storeError.collectAsState()
     val managerVersion by viewModel.managerVersion.collectAsState()
+    val remoteView by viewModel.remoteView.collectAsState()
     var addDevice by remember { mutableStateOf<AddRequest?>(null) }
     var confirmUpdateAll by remember { mutableStateOf(false) }
     var updateResults by remember { mutableStateOf<List<UpdateOutcome>?>(null) }
@@ -143,6 +144,7 @@ fun ManagerScreen(viewModel: ManagerViewModel) {
                     }
                 }
             }
+            remoteView?.let { RemoteViewDialog(it, viewModel::closeRemoteView) }
         }
     }
 
@@ -285,6 +287,10 @@ private fun DeviceCard(
             if (status.error != null && !status.certificateChanged && !status.keyRejected) {
                 Text(status.error, color = MaterialTheme.colorScheme.error)
             }
+            OutlinedButton(
+                onClick = { viewModel.openRemoteView(status.id, status.name) },
+                enabled = !status.certificateChanged && !status.keyRejected,
+            ) { Text("Remote view") }
             if (healthy) {
                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text("Firmware: ${status.version ?: "unknown"}" +

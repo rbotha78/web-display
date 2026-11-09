@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { api, type Device } from "./api";
 import { DeviceKeys } from "./DeviceKeys";
+import { RemotePreview } from "./RemotePreview";
 
 interface Props {
   device: Device;
@@ -14,6 +15,8 @@ export function DeviceCard({ device, notify, refresh, readd }: Props) {
   const [editing, setEditing] = useState(false);
   const [available, setAvailable] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [preview, setPreview] = useState(false);
+  const closePreview = useCallback(() => setPreview(false), []);
 
   useEffect(() => {
     if (!editing) setUrl(device.url ?? "");
@@ -198,6 +201,7 @@ export function DeviceCard({ device, notify, refresh, readd }: Props) {
       )}
       {healthy && <DeviceKeys deviceId={device.id} deviceName={device.name} notify={notify} />}
       <div className="actions">
+        <button type="button" onClick={() => setPreview(true)}>Preview display</button>
         {healthy && (
           <button type="button" disabled={busy} onClick={openAdmin}>Open admin page</button>
         )}
@@ -208,6 +212,7 @@ export function DeviceCard({ device, notify, refresh, readd }: Props) {
           Remove
         </button>
       </div>
+      {preview && <RemotePreview deviceId={device.id} deviceName={device.name} close={closePreview} />}
     </section>
   );
 }

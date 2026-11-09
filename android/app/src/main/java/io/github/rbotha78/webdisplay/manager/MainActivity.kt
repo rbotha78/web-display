@@ -36,6 +36,7 @@ class MainActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         PinnedHttp.resumeNetwork()
+        viewModel.resumeRemoteView()
         discovery.start()
         viewModel.refresh()
     }

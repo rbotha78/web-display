@@ -284,6 +284,37 @@ class ServerTests(ManagerCase):
         status, _ = self.call("POST", "/api/enroll", {"host": "bad host"})
         self.assertEqual(status, 400)
 
+    def test_remote_view_proxy_uses_pinned_client_and_api_guards(self):
+        from webdisplay import remote_view
+        identifier = self.enroll()
+        path = f"/api/devices/{identifier}/remote-view"
+        self.assertEqual(self.call("GET", path, token=False)[0], 401)
+        self.assertEqual(self.call("GET", path, host="evil.example:80")[0], 403)
+        self.assertEqual(self.call("GET", path, headers={"Origin": "https://evil.example"})[0], 403)
+        runtime = self.root / "remote-view.json"
+        with patch.object(remote_view, "RUNTIME_PATH", runtime):
+            self.assertEqual(self.call("GET", path)[0], 503)
+            remote_view.publish(runtime, remote_view.snapshot(
+                "recovery", None, {"sleeping": False, "scheduled_sleep": False, "wake_until": None},
+                "Setup access point active",
+            ))
+            status, value = self.call("GET", path)
+            self.assertEqual(status, 200)
+            self.assertEqual(value["message"], "Setup access point active")
+            self.assertIsNone(value["scene"])
+        entry = self.store.get(identifier)
+        with patch.object(self.store, "get", return_value={**entry, "fingerprint": "00:" * 31 + "00"}):
+            self.assertEqual(self.call("GET", path)[0], 502)
+
+    def test_remote_view_old_firmware_is_a_useful_404(self):
+        identifier = self.enroll()
+        with patch.object(DeviceClient, "request", return_value=(404, {"error": "not found"}, {})):
+            # connect uses /health, whose call is patched separately.
+            with patch.object(self.manager, "client", return_value=DeviceClient("127.0.0.1", 1, self.device.fingerprint)):
+                status, value = self.call("GET", f"/api/devices/{identifier}/remote-view")
+        self.assertEqual(status, 404)
+        self.assertIn("newer device firmware", value["error"])
+
     def test_admin_login_over_http_uses_pinned_device_and_single_use_token(self):
         identifier = self.enroll()
         path = f"/api/devices/{identifier}/admin-login"

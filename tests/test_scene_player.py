@@ -154,6 +154,24 @@ class RendererTests(unittest.TestCase):
         self.browser.ready.side_effect = BrowserError("exited")
         self.assertEqual(self.renderer.state(), "failed")
 
+    def test_remote_preview_tracks_activated_scene_not_preparing_scene(self):
+        from webdisplay.remote_view import snapshot
+        sleep = {"sleeping": False, "scheduled_sleep": False, "wake_until": None}
+        active = make_scene(kind="web", id="active", url="https://first.example/page?private=secret")
+        pending = make_scene(id="pending", text="Next scene")
+        self.renderer.start(active)
+        self.assertEqual(self.renderer.state(), "playing")
+        self.renderer.start(pending)
+        self.assertEqual(self.renderer.state(), "starting")
+        preview = snapshot("carousel", self.renderer.active_scene, sleep)
+        self.assertEqual(preview["scene"]["id"], "active")
+        self.assertEqual(preview["scene"]["url"], "https://first.example/page")
+        self.renderer.server.ready.set()
+        self.assertEqual(self.renderer.state(), "playing")
+        preview = snapshot("carousel", self.renderer.active_scene, sleep)
+        self.assertEqual(preview["scene"]["id"], "pending")
+        self.assertEqual(preview["scene"]["text"], "Next scene")
+
     def test_weather_uses_local_browser_and_waits_for_render_acknowledgment(self):
         self.renderer.start(make_scene(kind="weather"))
         self.assertEqual(self.renderer.state(), "starting")

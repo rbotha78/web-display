@@ -82,6 +82,7 @@ class CarouselModeTests(unittest.TestCase):
             target.write_text("")
             playlist_path.write_text(json.dumps({"enabled": True, "scenes": scenes}))
             renderer = Mock()
+            renderer.active_scene = None
             renderer.state.return_value = playback_state
             iterations = 0
 
@@ -105,6 +106,7 @@ class CarouselModeTests(unittest.TestCase):
                  patch("webdisplay.kiosk.time.sleep", side_effect=next_iteration):
                 display.return_value.check.return_value = False
                 sleep_runtime.return_value.sleeping.side_effect = states
+                sleep_runtime.return_value.status = {"sleeping": False, "scheduled_sleep": False, "wake_until": None}
                 with self.assertRaises(KeyboardInterrupt):
                     main()
             return renderer
@@ -152,14 +154,18 @@ class CarouselModeTests(unittest.TestCase):
             ap = root / "setup-ap.json"
             fallback = root / "fallback.html"
             renderer = Mock()
+            renderer.active_scene = None
             renderer.state.return_value = "playing"
             monitor = Mock(ok=True, failures=0)
             process = Mock()
             process.poll.return_value = None
             iterations = 0
+            remote_views = []
 
             def next_iteration(_):
+                from webdisplay.remote_view import load
                 nonlocal iterations
+                remote_views.append(load(root / "remote-view.json"))
                 iterations += 1
                 if iterations == 1:
                     playlist["revision"] = "two"
@@ -196,6 +202,12 @@ class CarouselModeTests(unittest.TestCase):
             self.assertEqual(renderer.close.call_count, 2)
             self.assertEqual([call.args[1] for call in launch.call_args_list],
                              [fallback.as_uri(), "https://example.com/single"])
+            self.assertEqual([view["mode"] for view in remote_views],
+                             ["recovery", "recovery", "recovery", "recovery", "single"])
+            self.assertEqual(remote_views[2]["message"], "Setup access point active")
+            self.assertNotIn("password", json.dumps(remote_views))
+            self.assertEqual(remote_views[-1]["scene"]["url"], "https://example.com/single")
+            self.assertFalse((root / "remote-view.json").exists())
 
 
 if __name__ == "__main__":

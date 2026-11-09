@@ -92,6 +92,7 @@ class SleepRuntime:
     def __init__(self, path: Path):
         self.path = path
         self.failed = False
+        self.status = {"sleeping": False, "scheduled_sleep": False, "wake_until": None}
 
     def sleeping(self) -> bool:
         try:
@@ -103,11 +104,14 @@ class SleepRuntime:
                 raise ValueError("Invalid sleep runtime")
             schedule = validate_schedule({"days": value["days"]})
             deadline = validate_wake_until(value["wake_until"])
-            sleeping = sleep_status(schedule, deadline)["sleeping"]
+            status = sleep_status(schedule, deadline)
+            self.status = {key: status[key] for key in ("sleeping", "scheduled_sleep", "wake_until")}
+            sleeping = status["sleeping"]
         except (OSError, ValueError):
             if not self.failed:
                 LOG.error("Could not read sleep runtime; stopping music and skipping videos")
             self.failed = True
+            self.status = {"sleeping": True, "scheduled_sleep": False, "wake_until": None}
             return True
         self.failed = False
         return bool(sleeping)

@@ -35,7 +35,7 @@ interface CallingPoint {
   cancelled: boolean;
 }
 
-interface TrainBoard {
+export interface TrainBoard {
   crs?: string;
   station?: string;
   generated_at?: string;
@@ -47,12 +47,15 @@ interface TrainBoard {
   details_available?: boolean;
   details_error?: string;
   next?: {
+    scheduled?: string;
+    estimated?: string;
+    actual?: string;
     status: string;
     delay_minutes: number | null;
     calling_at?: CallingPoint[][];
     previous_stops?: CallingPoint[][];
     last_seen?: { station: string; actual: string } | null;
-  };
+  } | null;
   stale?: boolean;
   error?: string;
 }

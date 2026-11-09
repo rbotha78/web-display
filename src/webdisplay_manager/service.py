@@ -209,6 +209,16 @@ class Manager:
             return device.call("DELETE", "/api/debug-keys/" + key_id, timeout=60)
         raise LookupError("Unknown action")
 
+    def remote_view(self, identifier: str) -> dict[str, object]:
+        status, payload, _ = self.client(identifier).request("GET", "/api/remote-view")
+        if status == 404:
+            raise DeviceError("Remote preview needs newer device firmware. Update this device first.", 404)
+        if status != 200:
+            raise DeviceError(str(payload.get("error") or "Remote preview is unavailable"), status)
+        if payload.get("available") is not True:
+            raise DeviceError("The device returned an invalid remote preview", 502)
+        return payload
+
     def update_all(self) -> list[dict[str, object]]:
         def one(identifier: str, entry: dict[str, object]) -> dict[str, object]:
             result: dict[str, object] = {"id": identifier, "name": entry["name"]}
