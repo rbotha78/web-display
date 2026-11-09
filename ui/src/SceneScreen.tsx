@@ -13,6 +13,7 @@ interface DisplayScene {
   scene_id: string;
   title: string;
   station_crs: string;
+  show_previous_departure?: boolean;
   show_weather?: boolean;
   safe_area_percent?: number;
 }
@@ -278,7 +279,7 @@ export function SceneScreen() {
     <main ref={screenRef} className={`scene-screen safe-area-${safeArea} ${scene?.layout ?? ""}${scene?.show_weather ? " weather-dashboard" : ""}${scene?.kind === "train" ? " train-screen" : ""}`}>
       {error ? <p role="alert">{error}</p> : !scene ? <p>Loading scene...</p> :
         scene.kind === "train" ? (
-          <section className={`train-board${(trainBoard?.rows?.length ?? 0) > 5 ? " train-board-dense" : ""}`}>
+          <section className={`train-board${(trainBoard?.rows?.length ?? 0) > 5 ? " train-board-dense" : ""}${scene.show_previous_departure === false ? " train-board-no-previous" : ""}`}>
             <header>
               <p className="train-eyebrow">Live departures</p>
               <h1>{station}</h1>
@@ -334,17 +335,19 @@ export function SceneScreen() {
             )}
             </div>
             {scrolling && <p className="train-scroll-hint">More departures and notices — scrolling automatically</p>}
-            <section className="train-recent" aria-label={trainBoard?.recent && !trainBoard.recent.actual
-              ? "Previous scheduled service" : "Most recent departure"}>
-              <h2>{trainBoard?.recent && !trainBoard.recent.actual
-                ? "Previous scheduled service" : "Most recent departure"}</h2>
-              {trainBoard?.recent ? (
-                <RecentServiceContent recent={trainBoard.recent} station={station} />
-              ) : (
-                <p role="status">{trainBoard?.recent_error ||
-                  "Waiting for previous-service information; scheduled times are not departures."}</p>
-              )}
-            </section>
+            {scene.show_previous_departure !== false && (
+              <section className="train-recent" aria-label={trainBoard?.recent && !trainBoard.recent.actual
+                ? "Previous scheduled service" : "Most recent departure"}>
+                <h2>{trainBoard?.recent && !trainBoard.recent.actual
+                  ? "Previous scheduled service" : "Most recent departure"}</h2>
+                {trainBoard?.recent ? (
+                  <RecentServiceContent recent={trainBoard.recent} station={station} />
+                ) : (
+                  <p role="status">{trainBoard?.recent_error ||
+                    "Waiting for previous-service information; scheduled times are not departures."}</p>
+                )}
+              </section>
+            )}
             <WeatherDisplay key={scene.revision} compact currentOnly />
             <time className="train-current-time" dateTime={now.toISOString()}>
               {now.toLocaleTimeString([], {

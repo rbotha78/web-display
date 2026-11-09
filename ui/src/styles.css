@@ -270,6 +270,9 @@ body {
 .train-board > header { flex-shrink: 0; padding: 0 64px; overflow-wrap: anywhere; }
 .train-content { min-height: 0; flex: 1; overflow: auto; scrollbar-width: none; }
 .train-content::-webkit-scrollbar { display: none; }
+.train-board-no-previous .train-content { display: flex; flex-direction: column; }
+.train-board-no-previous .train-content > * { flex-shrink: 0; }
+.train-board-no-previous .train-subsequent { flex-grow: 1; }
 .train-scroll-hint { font-size: min(1.6vw, 2vh); margin: .3vh 0; color: #ffd447; }
 .train-board > .weather-summary, .train-current-time, .train-board > .train-recent,
 .train-next-service { flex-shrink: 0; }
@@ -293,7 +296,16 @@ body {
   font-size: 3vw;
   font-variant-numeric: tabular-nums;
 }
-.train-current-time { position: static; transform: none; align-self: center; font-size: min(3.4vw, 4vh); line-height: 1.2; margin-top: .6vh; }
+.train-current-time {
+  position: static;
+  transform: none;
+  align-self: center;
+  color: #ffd447;
+  font-size: min(5vw, 6vh);
+  font-weight: 700;
+  line-height: 1.1;
+  margin-top: .6vh;
+}
 .weather-current-time { font-size: min(3vw, 4vh); line-height: 1.2; }
 .scene-screen:has(> .weather-current-time) { padding-bottom: 6vh; }
 .scene-screen > .weather-display { flex-shrink: 0; }
@@ -519,7 +531,7 @@ body {
 .train-board-dense .train-recent h2 { font-size: min(1.8vw, 2.1vh); line-height: 1.1; margin-bottom: .2vh; }
 .train-board-dense .train-route-meta { line-height: 1.1; }
 .train-board-dense .weather-summary .weather-current { line-height: 1.15; }
-.train-board-dense .train-current-time { font-size: min(3.4vw, 3.3vh); margin-top: .3vh; }
+.train-board-dense .train-current-time { margin-top: .3vh; }
 .train-board-dense .train-scroll-hint { font-size: min(1.6vw, 1.7vh); line-height: 1.2; margin: .15vh 0; }
 
 .card.narrow {

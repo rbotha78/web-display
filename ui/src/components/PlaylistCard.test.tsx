@@ -91,6 +91,7 @@ test("adds a train board with uppercase station and optional destination codes",
   fireEvent.change(callingStation, { target: { value: "slg" } });
   expect(callingStation).toHaveProperty("value", "SLG");
   expect(screen.getByLabelText("Scene duration (seconds)")).toHaveProperty("value", "300");
+  expect(screen.getByLabelText("Show previous departure")).toHaveProperty("checked", true);
   fireEvent.click(screen.getByText("Save and apply"));
   await waitFor(() => expect(save).toHaveBeenCalled());
   expect(save.mock.calls[0][0].scenes[0]).toMatchObject({
@@ -98,10 +99,41 @@ test("adds a train board with uppercase station and optional destination codes",
   });
   fireEvent.change(destination, { target: { value: "" } });
   fireEvent.change(callingStation, { target: { value: "" } });
+  fireEvent.click(screen.getByLabelText("Show previous departure"));
   fireEvent.click(screen.getByText("Save and apply"));
   await waitFor(() => expect(save).toHaveBeenCalledTimes(2));
   expect(save.mock.calls[1][0].scenes[0].destination_crs).toBe("");
   expect(save.mock.calls[1][0].scenes[0].filter_station_crs).toBe("");
+  expect(save.mock.calls[1][0].scenes[0].show_previous_departure).toBe(false);
+});
+
+test("previous departure visibility is saved independently for existing train scenes", async () => {
+  vi.spyOn(api, "playlist").mockResolvedValue({
+    enabled: true,
+    scenes: [
+      { id: "default", kind: "train", station_crs: "PAD", title: "Default", enabled: true,
+        duration: 300, url: "", layout: "clock", text: "" },
+      { id: "hidden", kind: "train", station_crs: "PAD", title: "Hidden", enabled: true,
+        duration: 300, url: "", layout: "clock", text: "", show_previous_departure: false },
+    ],
+  });
+  vi.spyOn(api, "plexConfig").mockResolvedValue({
+    server_url: "", configured: false, default_bitrate_kbps: 4000,
+  });
+  const save = vi.spyOn(api, "savePlaylist").mockImplementation(async (playlist) => playlist);
+  render(<PlaylistCard notify={vi.fn()} fail={vi.fn()} />);
+  const toggles = await screen.findAllByLabelText("Show previous departure");
+  expect(toggles[0]).toHaveProperty("checked", true);
+  expect(toggles[1]).toHaveProperty("checked", false);
+  fireEvent.click(toggles[0]);
+  fireEvent.click(screen.getByText("Save and apply"));
+  await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+  expect(save.mock.calls[0][0].scenes.map((scene) => scene.show_previous_departure)).toEqual([false, false]);
+  await waitFor(() => expect(screen.getByText("Save and apply")).toHaveProperty("disabled", false));
+  fireEvent.click(toggles[1]);
+  fireEvent.click(screen.getByText("Save and apply"));
+  await waitFor(() => expect(save).toHaveBeenCalledTimes(2));
+  expect(save.mock.calls[1][0].scenes.map((scene) => scene.show_previous_departure)).toEqual([false, true]);
 });
 
 test("adds standalone weather and enables weather on a dashboard", async () => {

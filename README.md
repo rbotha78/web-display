@@ -62,6 +62,14 @@ which use slightly smaller text and scroll automatically without a visible
 scrollbar. The previous-service row stays fixed below the scrolling area. Weather
 uses a compact horizontal strip below it, wrapping only when needed to leave
 more vertical space for departures.
+The bottom clock shows hours, minutes and seconds in large, bold gold text in its
+own row below the weather, including on dense departure boards.
+
+Each train scene has a **Show previous departure** checkbox in the carousel
+configuration, enabled by default for new and existing scenes. Turn it off to
+hide the entire previous-service section. Upcoming-service rows expand vertically
+to use the freed space, keeping the smaller text size; longer lists still scroll.
+The manager's reconstructed preview follows the same setting.
 
 A fixed row below the vertically scrolling upcoming-services area fetches the previous scheduled train
 immediately using a departure-board API look-back of up to two hours, without

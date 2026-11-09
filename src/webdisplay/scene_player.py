@@ -195,6 +195,7 @@ class SceneServer:
                 "station_crs": scene["station_crs"] if scene and scene["kind"] == "train" else "",
                 "destination_crs": scene.get("destination_crs", "") if scene and scene["kind"] == "train" else "",
                 "filter_station_crs": scene.get("filter_station_crs", "") if scene and scene["kind"] == "train" else "",
+                "show_previous_departure": scene.get("show_previous_departure", True) if scene else False,
                 "show_weather": scene.get("show_weather", False) if scene else False,
                 "safe_area_percent": self.safe_area_percent,
             }

@@ -21,6 +21,20 @@ def make_scene(kind="dashboard", **changes):
 
 
 class SceneServerTests(unittest.TestCase):
+    def test_train_previous_departure_setting_is_published(self):
+        server = SceneServer()
+        self.addCleanup(server.close)
+        connection = http.client.HTTPConnection("127.0.0.1", server.server.server_port)
+        self.addCleanup(connection.close)
+        for changes, expected in (({}, True), ({"show_previous_departure": False}, False),
+                                  ({"show_previous_departure": True}, True)):
+            with self.subTest(changes=changes):
+                server.show(make_scene(kind="train", station_crs="PAD", **changes))
+                connection.request("GET", "/api/scene")
+                response = connection.getresponse()
+                self.assertEqual(response.status, 200)
+                self.assertIs(json.loads(response.read())["show_previous_departure"], expected)
+
     def test_weather_scene_and_widget_expose_cached_weather(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "weather.json"

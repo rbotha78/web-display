@@ -114,6 +114,13 @@ class RemoteViewTests(unittest.TestCase):
         self.assertNotIn("kiosk_start", value)
         self.assertLess(value["heartbeat_age_seconds"], 1)
 
+    def test_previous_departure_visibility_survives_snapshot_and_manager_boundary(self):
+        for enabled in (False, True):
+            with self.subTest(enabled=enabled):
+                self.publish({"id": "train", "kind": "train", "station_crs": "PAD",
+                              "show_previous_departure": enabled}, "carousel")
+                self.assertIs(load(self.path)["scene"]["show_previous_departure"], enabled)
+
     def test_train_cache_must_match_destination_in_snapshot_and_manager_boundary(self):
         train_path = self.root / "train.json"
         board = {"crs": "HWW", "destination_crs": "WFJ", "filter_station_crs": "BWO", "rows": []}

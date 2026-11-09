@@ -151,14 +151,16 @@ export function RemotePreview({ deviceId, deviceName, close }: {
                     station={train.station || scene.station_crs} lastSeen={train.next.last_seen} />
                 </div>}
                 {train?.alerts?.map((text, i) => <p key={i}>{text}</p>)}
-                <section aria-label={train?.recent && !train.recent.actual
-                  ? "Previous scheduled service" : "Most recent departure"}>
-                  <h4>{train?.recent && !train.recent.actual
-                    ? "Previous scheduled service" : "Most recent departure"}</h4>
-                  {train?.recent ? (
-                    <RecentServiceContent recent={train.recent} station={train.station} />
-                  ) : <p>{train?.recent_error || "Waiting for previous-service information."}</p>}
-                </section>
+                {scene.show_previous_departure !== false && (
+                  <section aria-label={train?.recent && !train.recent.actual
+                    ? "Previous scheduled service" : "Most recent departure"}>
+                    <h4>{train?.recent && !train.recent.actual
+                      ? "Previous scheduled service" : "Most recent departure"}</h4>
+                    {train?.recent ? (
+                      <RecentServiceContent recent={train.recent} station={train.station} />
+                    ) : <p>{train?.recent_error || "Waiting for previous-service information."}</p>}
+                  </section>
+                )}
               </section>
             )}
             {scene && (scene.kind === "weather" || scene.kind === "train" || scene.show_weather) &&

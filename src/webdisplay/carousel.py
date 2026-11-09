@@ -34,6 +34,7 @@ class Scene(TypedDict):
     station_crs: str
     destination_crs: str
     filter_station_crs: str
+    show_previous_departure: bool
     show_weather: bool
 
 
@@ -127,6 +128,9 @@ def validate_playlist(value: object, *, allow_runtime: bool = False) -> Playlist
         station_crs = validate_crs(item.get("station_crs", "")) if kind == "train" else ""
         destination_crs = validate_optional_crs(item.get("destination_crs", "")) if kind == "train" else ""
         filter_station_crs = validate_optional_crs(item.get("filter_station_crs", "")) if kind == "train" else ""
+        show_previous_departure = item.get("show_previous_departure", True) if kind == "train" else False
+        if not isinstance(show_previous_departure, bool):
+            raise ValueError("Show previous departure must be true or false")
         show_weather = item.get("show_weather", False) if kind == "dashboard" else False
         if not isinstance(show_weather, bool):
             raise ValueError("Weather widget must be true or false")
@@ -136,6 +140,7 @@ def validate_playlist(value: object, *, allow_runtime: bool = False) -> Playlist
             plex_rating_key=plex_rating_key, plex_bitrate_kbps=plex_bitrate,
             layout=layout, text=text, station_crs=station_crs, destination_crs=destination_crs,
             filter_station_crs=filter_station_crs,
+            show_previous_departure=show_previous_departure,
             show_weather=show_weather,
         )
         if allow_runtime and source == "plex":

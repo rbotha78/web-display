@@ -149,6 +149,22 @@ test("expires a near-stale kiosk heartbeat even while the preview connection rem
   expect(screen.queryByText("<script>Only text</script>")).toBeNull();
 });
 
+test("hides previous departure information when disabled on the active scene", async () => {
+  vi.stubGlobal("fetch", vi.fn(async () => reply({
+    ...initial,
+    scene: { id: "train", kind: "train", station_crs: "PAD", show_previous_departure: false },
+    train: {
+      station: "Paddington", rows: [{ scheduled: "15:30", destination: "Reading" }],
+      recent: { actual: "15:04", display_stops: [{ station: "Hidden stop", actual: "15:04" }] },
+    },
+  })));
+  render(<RemotePreview deviceId="aabbccddeeff" deviceName="Lobby" close={vi.fn()} />);
+  await settle();
+  expect(screen.getByText("Reading")).toBeTruthy();
+  expect(screen.queryByRole("region", { name: "Most recent departure" })).toBeNull();
+  expect(screen.queryByText("Hidden stop")).toBeNull();
+});
+
 test("distinguishes previous scheduled service from a confirmed departure", async () => {
   vi.stubGlobal("fetch", vi.fn(async () => reply({
     ...initial,

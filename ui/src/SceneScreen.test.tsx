@@ -9,6 +9,33 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+test.each([undefined, true, false])(
+  "respects previous departure visibility without hiding upcoming services (%s)", async (showPrevious) => {
+    vi.stubGlobal("fetch", vi.fn(async (path: string) => ({
+      ok: true,
+      json: async () => path === "/api/scene"
+        ? { kind: "train", revision: "visibility", scene_id: "pad", station_crs: "PAD", text: "",
+            show_previous_departure: showPrevious }
+        : path === "/api/weather" ? {}
+        : { station: "Paddington", rows: [
+              { scheduled: "12:00", destination: "Reading", estimated: "On time" },
+              { scheduled: "12:30", destination: "Oxford", estimated: "On time" },
+            ],
+            recent: { actual: "", display_stops: [{ station: "Earlier train", scheduled: "11:30" }] } },
+    })));
+    render(<SceneScreen />);
+    expect(await screen.findByRole("region", { name: "Next service" })).toBeTruthy();
+    expect(screen.getByRole("table", { name: "Later departures" }).textContent).toContain("Oxford");
+    const previous = screen.queryByRole("region", { name: "Previous scheduled service" });
+    if (showPrevious === false) {
+      expect(previous).toBeNull();
+      expect(document.querySelector(".train-recent")).toBeNull();
+    } else {
+      expect(previous?.textContent).toContain("Earlier train11:30");
+    }
+  },
+);
+
 test.each([null, { station: "Long station", actual: "On time" }])(
   "keeps the board station highlighted without inventing a last-seen location (%j)", async (lastSeen) => {
   vi.stubGlobal("fetch", vi.fn(async (path: string) => ({

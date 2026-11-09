@@ -60,6 +60,7 @@ export interface Scene {
   station_crs?: string;
   destination_crs?: string;
   filter_station_crs?: string;
+  show_previous_departure?: boolean;
   show_weather?: boolean;
 }
 

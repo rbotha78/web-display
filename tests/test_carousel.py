@@ -58,6 +58,20 @@ class PlaylistTests(unittest.TestCase):
                 "invalid", kind="video", url="https://example.com/stream", audio_enabled="yes",
             ))
 
+    def test_previous_departure_is_optional_and_validated_per_train_scene(self):
+        saved = playlist(
+            scene("existing", kind="train", station_crs="PAD"),
+            scene("hidden", kind="train", station_crs="PAD", show_previous_departure=False),
+            scene("shown", kind="train", station_crs="PAD", show_previous_departure=True),
+        )
+        self.assertEqual(
+            [item["show_previous_departure"] for item in saved["scenes"]], [True, False, True],
+        )
+        self.assertEqual(validate_playlist(saved), saved)
+        for invalid in ("false", 0, None):
+            with self.subTest(value=invalid), self.assertRaisesRegex(ValueError, "Show previous departure"):
+                playlist(scene("bad", kind="train", station_crs="PAD", show_previous_departure=invalid))
+
     def test_plex_bitrate_override_is_optional_and_bounded(self):
         default = playlist(scene(
             "plex-default", kind="video", source="plex", plex_rating_key="42",

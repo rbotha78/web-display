@@ -245,6 +245,11 @@ export function PlaylistCard({ notify, fail, active = true }: Props) {
                     })} />
                 </label>
                 <p className="muted">Match this station anywhere in the route, including earlier stops. With both filters set, the destination must also match the final destination.</p>
+                <label className="check">
+                  <input type="checkbox" checked={scene.show_previous_departure ?? true}
+                    onChange={(event) => update(scene.id, { show_previous_departure: event.target.checked })} />
+                  Show previous departure
+                </label>
               </>
             ) : scene.kind === "weather" ? (
               <p className="muted">Uses the city, country and API key in OpenWeather settings.</p>

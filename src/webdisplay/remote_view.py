@@ -76,7 +76,8 @@ def sanitize_scene(value: object) -> dict | None:
     if value is None:
         return None
     result = _fields(value, ("id", "kind", "title", "layout", "text", "station_crs", "destination_crs", "filter_station_crs",
-                             "source", "plex_rating_key"), ("duration",), ("show_weather", "audio_enabled"))
+                             "source", "plex_rating_key"), ("duration",),
+                     ("show_weather", "audio_enabled", "show_previous_departure"))
     if result.get("kind") not in KINDS or not result.get("id"):
         raise ValueError("Invalid active scene")
     if value.get("duration") is None:
