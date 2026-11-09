@@ -20,7 +20,35 @@ class MusicPlayerTests(unittest.TestCase):
         player.buffer = b""
         player.request_id = 0
         player.ended = None
+        player._now_playing = {"state": "disabled", "title": "", "artist": ""}
         return player
+
+    def test_song_is_announced_only_after_playback_has_started(self):
+        player = self.player()
+        player.process.poll.return_value = None
+        player.shutdown = threading.Event()
+        player._stop_player = Mock()
+        player._load = Mock(return_value=True)
+        player._control = Mock(return_value={"track_id": "1", "title": "Song", "artist": "Artist"})
+        player._command = Mock(side_effect=[None, 0.5])
+        seen = []
+
+        def wait(_):
+            seen.append(player.now_playing())
+            if len(seen) == 2:
+                player.shutdown.set()
+
+        player.shutdown.wait = wait
+        with tempfile.TemporaryDirectory() as directory:
+            player.config_path = Path(directory) / "music.json"
+            player.config_path.write_text(json.dumps({
+                "enabled": True, "station_key": "station", "control_url": self.endpoint, "volume": 30,
+            }))
+            player._run()
+        self.assertEqual(seen, [
+            {"state": "waiting", "title": "", "artist": ""},
+            {"state": "playing", "title": "Song", "artist": "Artist"},
+        ])
 
     def test_sleep_stops_instead_of_pausing_and_wake_requests_a_fresh_current_track(self):
         player = self.player()
@@ -93,12 +121,15 @@ class MusicPlayerTests(unittest.TestCase):
 
     def test_pause_releases_audio_device_and_resume_preserves_file(self):
         player = self.player()
+        player._now_playing = {"state": "playing", "title": "Song", "artist": "Artist"}
         player._command = Mock()
         player.pause_for_video(True)
+        self.assertEqual(player.now_playing(), {"state": "paused", "title": "Song", "artist": "Artist"})
         self.assertEqual(player._command.call_args_list[0].args[0], ["set_property", "pause", True])
         self.assertEqual(player._command.call_args_list[1].args[0], ["set_property", "aid", "no"])
         player._command.reset_mock()
         player.pause_for_video(False)
+        self.assertEqual(player.now_playing()["state"], "playing")
         self.assertEqual(player._command.call_args_list[0].args[0], ["set_property", "aid", "auto"])
         self.assertEqual(player._command.call_args_list[1].args[0], ["set_property", "pause", False])
 

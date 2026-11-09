@@ -280,7 +280,8 @@ class MusicRelay:
                 raise ValueError("Music sleeping")
             return {"track_id": self.track.get("playQueueItemID"),
                     "url": self.url + "/stream/" + self.stream_key,
-                    "title": self.track.get("title", "Music")}
+                    "title": self.track.get("title", "Music"),
+                    "artist": self.track.get("originalTitle") or self.track.get("grandparentTitle", "")}
 
     def get_status(self):
         with self.lock:

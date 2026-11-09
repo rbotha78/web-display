@@ -115,7 +115,8 @@ class FakePlexHandler(http.server.BaseHTTPRequestHandler):
     @staticmethod
     def queue_xml(queue_id, center=1):
         tracks = "".join(
-            f'<Track ratingKey="{i}" key="/library/metadata/{i}" playQueueItemID="{i}" title="Track {i}" duration="5000">'
+            f'<Track ratingKey="{i}" key="/library/metadata/{i}" playQueueItemID="{i}" title="Track {i}" '
+            f'grandparentTitle="Album artist" originalTitle="Artist {i}" duration="5000">'
             f'<Media><Part key="/library/parts/{i}/1/file.mp3" /></Media></Track>'
             for i in range(max(1, center - 5), min(32, center + 5) + 1)
         )
@@ -232,6 +233,7 @@ class PlexTests(unittest.TestCase):
             self.assertNotIn(FakePlexHandler.token, json.dumps(runtime))
             control = lambda value: relay.control(value)
             current = control({"action": "current"})
+            self.assertEqual((current["title"], current["artist"]), ("Track 1", "Artist 1"))
             self.assertEqual(FakePlexHandler.queues_created, 1)
             request = urllib.request.Request(current["url"], headers={"Range": "bytes=5-"})
             with urllib.request.urlopen(request) as response:
@@ -243,6 +245,7 @@ class PlexTests(unittest.TestCase):
                 current = control({"action": "next", "track_id": previous["track_id"]})
                 self.assertEqual(control({"action": "next", "track_id": previous["track_id"]}), current)
             self.assertEqual(current["track_id"], "32")
+            self.assertEqual((current["title"], current["artist"]), ("Track 32", "Artist 32"))
             renewed = control({"action": "next", "track_id": "32"})
             self.assertEqual(renewed["track_id"], "1")
             self.assertEqual(FakePlexHandler.queues_created, 2)

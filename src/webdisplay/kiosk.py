@@ -396,6 +396,9 @@ def main() -> None:
     display_recovery = DisplayRecovery()
     from .music_player import MusicPlayer
     music = MusicPlayer(target_path.with_name("music.json"), fallback_path.parent, args.mpv)
+    from .scene_windows import SceneWindows
+    notification = SceneWindows()
+    notification_retry_at = 0.0
     sleep_runtime = SleepRuntime(target_path.with_name("sleep.json"))
     from .remote_view import publish, snapshot
     remote_path = fallback_path.with_name("remote-view.json")
@@ -411,6 +414,23 @@ def main() -> None:
         except (OSError, ValueError):
             LOG.exception("Could not publish remote view")
             remote_path.unlink(missing_ok=True)
+
+    def update_notification() -> None:
+        nonlocal notification, notification_retry_at
+        if time.monotonic() < notification_retry_at:
+            return
+        try:
+            notification.safe_area_percent = safe_area
+            status = {} if ap_active or sleeping else music.now_playing()
+            notification.show_now_playing(status)
+        except (OSError, ValueError):
+            LOG.exception("Could not display now-playing information; retrying in five seconds")
+            try:
+                notification.close()
+            except OSError:
+                LOG.exception("Could not clean up the now-playing display")
+            notification = SceneWindows()
+            notification_retry_at = time.monotonic() + 5
 
     def stop(*_: object) -> None:
         raise SystemExit
@@ -445,7 +465,8 @@ def main() -> None:
                 playlist_error = True
                 playlist = Playlist(enabled=True, scenes=[])
             ap_active = read_setup_ap(setup_ap_path) is not None
-            if sleep_runtime.sleeping():
+            sleeping = sleep_runtime.sleeping()
+            if sleeping:
                 playlist = Playlist(
                     enabled=playlist["enabled"],
                     scenes=[scene for scene in playlist["scenes"] if scene["kind"] != "video"],
@@ -469,6 +490,7 @@ def main() -> None:
                     previous_revision = revision
                 icon.set_visible(False)
                 carousel.tick(time.monotonic())
+                update_notification()
                 active = renderer.active_scene
                 active_process = renderer.process if active and active["kind"] == "video" else renderer.browser.process
                 if active_process is None or active_process.poll() is not None:
@@ -510,6 +532,7 @@ def main() -> None:
                 process = launch(args.browser, desired)
                 destination = desired
             icon.set_visible(show_icon)
+            update_notification()
             if destination == target and target:
                 publish_remote("single", {"id": "single", "kind": "web", "url": target,
                                           "title": "Website"}, "Website offline; retaining the loaded page" if show_icon else "")
@@ -520,6 +543,7 @@ def main() -> None:
     finally:
         remote_path.unlink(missing_ok=True)
         music.close()
+        notification.close()
         stop_process(process)
         if renderer is not None:
             renderer.close()

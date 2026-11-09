@@ -42,6 +42,7 @@ class MusicPlayer:
         self.request_id = 0
         self.ended = None
         self.paused = False
+        self._now_playing = {"state": "disabled", "title": "", "artist": ""}
         self.audio_output = DEFAULT_AUDIO_OUTPUT
         self.sleep_runtime = SleepRuntime(config_path.with_name("sleep.json"))
         self.thread = threading.Thread(target=self._run, daemon=True)
@@ -67,6 +68,13 @@ class MusicPlayer:
             self.paused = paused
             if self.ipc is not None:
                 self._pause()
+
+    def now_playing(self) -> dict[str, str]:
+        with self.lock:
+            status = dict(self._now_playing)
+            if self.paused and status["state"] != "disabled":
+                status["state"] = "paused"
+            return status
 
     def _pause(self):
         if self.paused:
@@ -127,6 +135,7 @@ class MusicPlayer:
 
     def _stop_player(self):
         with self.lock:
+            self._now_playing = {"state": "disabled", "title": "", "artist": ""}
             stop_process(self.process)
             self.process = None
             if self.ipc is not None:
@@ -197,6 +206,9 @@ class MusicPlayer:
                         pending_next = False
                         failures, retry_at = 0, 0.0
                         endpoint = control_url(settings["control_url"]) if enabled else ""
+                        if enabled:
+                            with self.lock:
+                                self._now_playing = {"state": "waiting", "title": "", "artist": ""}
                     if not endpoint or time.monotonic() < retry_at:
                         self.shutdown.wait(1)
                         continue
@@ -225,6 +237,14 @@ class MusicPlayer:
                             self._command(["set_property", "volume", settings["volume"]])
                             volume = settings["volume"]
                         ended, paused = self.ended, self.paused
+                        if position is not None and ended is None:
+                            self._now_playing = {
+                                "state": "playing",
+                                "title": track.get("title", ""),
+                                "artist": track.get("artist", ""),
+                            }
+                        elif ended is not None:
+                            self._now_playing = {"state": "waiting", "title": "", "artist": ""}
                     if paused or (position is not None and position != last_position):
                         if not paused and last_position is not None and position != last_position:
                             failures = 0
@@ -243,6 +263,8 @@ class MusicPlayer:
                     self.shutdown.wait(0.5)
                 except (OSError, ValueError, KeyError, TypeError):
                     self._stop_player()
+                    with self.lock:
+                        self._now_playing = {"state": "error", "title": "", "artist": ""}
                     failures += 1
                     delay = 5 if failures == 1 else 15 if failures == 2 else 60
                     retry_at = time.monotonic() + delay

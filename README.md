@@ -16,6 +16,14 @@ The carousel supports websites, streamed/Plex video, clock/date/notice dashboard
 live National Rail departure boards and OpenWeather scenes. Plex radio stations
 can play in the background across scene changes, pausing for videos with audio.
 Display scenes and their outer safe-area border use a black background.
+Background music has a permanent, compact now-playing card floating in the
+top-left corner, showing the song and artist when available, including on websites
+and videos. It leaves browser and video layouts unchanged, so it can overlay scene
+content. Long titles are
+truncated to fit; paused music, loading and automatic retries are labelled
+explicitly. The card respects the overscan safe area and disappears when music
+is disabled or the display sleeps. Reconstructed manager previews do not include
+this native display notification.
 
 Train boards use locally bundled D-DIN regular and bold fonts (SIL Open Font
 License, bundled as `fonts/OFL.txt` with update-compatible filenames).

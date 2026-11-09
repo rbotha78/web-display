@@ -14,3 +14,11 @@ def countdown_position(width: int, height: int, percent: int) -> tuple[int, int]
         max(0, width - 48 - round(width * percent / 100) - 16),
         round(height * percent / 100) + 16,
     )
+
+
+def now_playing_geometry(width: int, height: int, percent: int) -> tuple[int, int, int, int]:
+    margin_x = round(width * percent / 100)
+    margin_y = round(height * percent / 100)
+    card_height = max(32, min(52, round(height * 0.04)))
+    card_width = min(width - 2 * margin_x, 640, max(240, round(width * 0.36)))
+    return margin_x, margin_y, card_width, card_height

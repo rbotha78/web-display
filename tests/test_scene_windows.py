@@ -4,10 +4,85 @@ import unittest
 from unittest.mock import Mock, patch
 
 from webdisplay.scene_windows import SceneWindows
-from webdisplay.display import countdown_position
+from webdisplay.display import countdown_position, now_playing_geometry
 
 
 class SceneWindowsTests(unittest.TestCase):
+    def test_now_playing_floats_at_top_left_inside_each_screen_safe_area(self):
+        for width, height in ((1920, 1080), (1280, 720), (1152, 864), (800, 600)):
+            for percent in (0, 5, 10):
+                with self.subTest(size=(width, height), percent=percent):
+                    x, y, strip_width, strip_height = now_playing_geometry(width, height, percent)
+                    self.assertGreaterEqual(x, width * percent / 100 - 1)
+                    self.assertLessEqual(x + strip_width, width * (1 - percent / 100) + 1)
+                    self.assertLessEqual(y + strip_height, height * (1 - percent / 100) + 1)
+                    self.assertGreaterEqual(y, height * percent / 100 - 1)
+                    self.assertLessEqual(strip_width, width / 2)
+
+    def test_floating_now_playing_does_not_resize_or_focus_browser_or_video(self):
+        xlib = types.ModuleType("Xlib")
+        xlib.X = types.SimpleNamespace(Above=0, InputOutput=1, CopyFromParent=0, Unsorted=0)
+        xlib.error = types.SimpleNamespace(
+            XError=ValueError, ConnectionClosedError=ConnectionError,
+            BadWindow=OSError, BadDrawable=OSError,
+        )
+        ext = types.ModuleType("Xlib.ext")
+        ext.shape = types.SimpleNamespace(
+            SO=types.SimpleNamespace(Set=0), SK=types.SimpleNamespace(Input=2),
+        )
+        windows = SceneWindows()
+        windows.display = Mock()
+        screen = windows.display.screen.return_value
+        screen.root.get_geometry.return_value = types.SimpleNamespace(width=1920, height=1080)
+        screen.root_depth = 24
+        browser, video = Mock(), Mock()
+        browser.id, video.id = 123, 456
+        screen.root.query_tree.return_value.children = [browser, video]
+        for window in (browser, video):
+            geometry = types.SimpleNamespace(x=0, y=0, width=1920, height=1080)
+            window.get_geometry.return_value = geometry
+            window.configure.side_effect = lambda geometry=geometry, **changes: vars(geometry).update(changes)
+        status = {"state": "playing", "title": "Song", "artist": "Bj\u00f6rk"}
+        with patch.dict(sys.modules, {"Xlib": xlib, "Xlib.ext": ext}), \
+                patch("webdisplay.display_text.DisplayText") as text:
+            windows.show_now_playing(status)
+            footer = windows.music_window
+            windows.show_now_playing(status)
+            text.return_value.draw.assert_called_once()
+            windows.show_now_playing({**status, "state": "paused"})
+            self.assertEqual(windows.music_text, "Music paused: Song - Bj\u00f6rk")
+            self.assertEqual(text.return_value.draw.call_count, 2)
+            footer.set_input_focus.assert_not_called()
+            browser.set_input_focus.assert_not_called()
+            video.set_input_focus.assert_not_called()
+            windows.show_now_playing({"state": "disabled"})
+            self.assertEqual(browser.get_geometry().height, 1080)
+            self.assertEqual(video.get_geometry().height, 1080)
+            footer.unmap.assert_called_once()
+            windows.show_now_playing(status)
+            screen.root.get_geometry.return_value = types.SimpleNamespace(width=1280, height=720)
+            windows.show_now_playing(status)
+            x, y, width, height = windows.music_geometry
+            self.assertEqual((x, y), (64, 36))
+            self.assertLess(x + width, 1280)
+            self.assertLess(y + height, 720)
+            windows.show_now_playing({"state": "disabled"})
+            browser.configure.assert_not_called()
+            video.configure.assert_not_called()
+            windows.close()
+            text.return_value.close.assert_called_once()
+
+    def test_native_connections_close_even_if_hiding_notification_fails(self):
+        windows = SceneWindows()
+        display, text = Mock(), Mock()
+        windows.display, windows.music_renderer = display, text
+        with patch.object(windows, "hide_now_playing", side_effect=OSError("Display disconnected")):
+            with self.assertRaisesRegex(OSError, "Display disconnected"):
+                windows.close()
+        text.close.assert_called_once()
+        display.close.assert_called_once()
+        self.assertIsNone(windows.display)
+
     def test_countdown_safe_area_tracks_each_screen_dimension(self):
         for width, height, percent, expected in (
             (1920, 1080, 5, (1760, 70)),

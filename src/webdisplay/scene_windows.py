@@ -1,8 +1,10 @@
-"""Small X11 stacking helper for the browser and one embedded video surface."""
+"""X11 surfaces for browser/video handover and non-interactive display indicators."""
 
 from __future__ import annotations
 
-from .display import DEFAULT_SAFE_AREA_PERCENT, countdown_position
+from contextlib import ExitStack
+
+from .display import DEFAULT_SAFE_AREA_PERCENT, countdown_position, now_playing_geometry
 
 
 class SceneWindows:
@@ -15,6 +17,9 @@ class SceneWindows:
         self.countdown_mask = None
         self.countdown_mask_gc = None
         self.safe_area_percent = DEFAULT_SAFE_AREA_PERCENT
+        self.music_window = self.music_pixmap = self.music_renderer = None
+        self.music_geometry = None
+        self.music_text = ""
 
     def _connect(self):
         if self.display is None:
@@ -51,7 +56,7 @@ class SceneWindows:
         self.video.set_input_focus(X.RevertToParent, X.CurrentTime)
         self.display.sync()
 
-    def show_browser(self, pid: int) -> None:
+    def _browser_window(self, pid: int):
         from Xlib import X, error
 
         display = self._connect()
@@ -59,17 +64,95 @@ class SceneWindows:
         for window in display.screen().root.query_tree().children:
             try:
                 prop = window.get_full_property(atom, X.AnyPropertyType)
+                if (
+                    prop is not None and len(prop.value) and prop.value[0] == pid
+                    and window.get_attributes().map_state == X.IsViewable
+                ):
+                    return window
             except error.BadWindow:
                 continue
-            if (
-                prop is not None and len(prop.value) and prop.value[0] == pid
-                and window.get_attributes().map_state == X.IsViewable
-            ):
-                window.configure(stack_mode=X.Above)
-                window.set_input_focus(X.RevertToParent, X.CurrentTime)
-                display.sync()
-                return
+
+    def show_browser(self, pid: int) -> None:
+        from Xlib import X
+
+        window = self._browser_window(pid)
+        if window is not None:
+            window.configure(stack_mode=X.Above)
+            window.set_input_focus(X.RevertToParent, X.CurrentTime)
+            self.display.sync()
+            return
         raise OSError("Browser window is not available")
+
+    def show_now_playing(self, status: dict) -> None:
+        if self.display is None and status.get("state") not in {"playing", "paused", "waiting", "error"}:
+            return
+        from Xlib import error
+
+        try:
+            self._draw_now_playing(status)
+        except (error.XError, error.ConnectionClosedError):
+            raise OSError("Could not update now-playing information on the display server") from None
+
+    def _draw_now_playing(self, status: dict) -> None:
+        from Xlib import X
+        from Xlib.ext import shape
+
+        state = status.get("state")
+        if state not in {"playing", "paused", "waiting", "error"}:
+            self.hide_now_playing()
+            return
+        from .display_text import DisplayText
+
+        display = self._connect()
+        screen = display.screen()
+        size = screen.root.get_geometry()
+        geometry = now_playing_geometry(size.width, size.height, self.safe_area_percent)
+        x, y, width, height = geometry
+        title = " ".join(str(status.get("title", "")).split())[:1024]
+        artist = " ".join(str(status.get("artist", "")).split())[:1024]
+        label = {"playing": "Now playing", "paused": "Music paused",
+                 "waiting": "Waiting for music", "error": "Music interrupted - retrying"}[state]
+        text = f"{label}: {title}" if title else label
+        if title and artist:
+            text += f" - {artist}"
+        if self.music_renderer is None:
+            self.music_renderer = DisplayText()
+        if geometry != self.music_geometry:
+            if self.music_window is not None:
+                self.music_window.destroy()
+                self.music_window = None
+            if self.music_pixmap is not None:
+                self.music_pixmap.free()
+            self.music_pixmap = screen.root.create_pixmap(width, height, screen.root_depth)
+            display.sync()
+            self.music_renderer.draw(self.music_pixmap.id, width, height, text)
+            self.music_window = screen.root.create_window(
+                x, y, width, height, 0, screen.root_depth, X.InputOutput, X.CopyFromParent,
+                background_pixmap=self.music_pixmap, override_redirect=True,
+            )
+            self.music_window.set_wm_name("Web Display now playing")
+            if display.has_extension("SHAPE"):
+                self.music_window.shape_rectangles(shape.SO.Set, shape.SK.Input, X.Unsorted, 0, 0, [])
+            self.music_geometry, self.music_text = geometry, text
+        elif text != self.music_text:
+            self.music_renderer.draw(self.music_pixmap.id, width, height, text)
+            self.music_window.clear_area()
+            self.music_text = text
+        self.music_window.map()
+        self.music_window.configure(stack_mode=X.Above)
+        display.sync()
+
+    def hide_now_playing(self) -> None:
+        if self.display is None:
+            return
+        from Xlib import error
+
+        try:
+            if self.music_window is not None:
+                self.music_window.unmap()
+            self.display.sync()
+        except (error.XError, error.ConnectionClosedError):
+            raise OSError("Could not hide now-playing information") from None
 
     def show_countdown(self, progress: float) -> None:
         from Xlib import error
@@ -134,16 +217,28 @@ class SceneWindows:
             self.display.sync()
 
     def close(self) -> None:
-        if self.display is not None:
-            if self.countdown_window is not None:
-                self.countdown_window.destroy()
-                self.countdown_gc.free()
-                self.countdown_pixmap.free()
-                self.countdown_mask_gc.free()
-                self.countdown_mask.free()
-            if self.video is not None:
-                self.video.destroy()
-            self.display.close()
-        self.video = self.display = None
-        self.countdown_window = self.countdown_gc = self.countdown_pixmap = None
-        self.countdown_mask = self.countdown_mask_gc = None
+        with ExitStack() as cleanup:
+            if self.display is not None:
+                cleanup.callback(self.display.close)
+            if self.music_renderer is not None:
+                cleanup.callback(self.music_renderer.close)
+            try:
+                if self.display is not None:
+                    self.hide_now_playing()
+                    if self.music_window is not None:
+                        self.music_window.destroy()
+                        self.music_pixmap.free()
+                    if self.countdown_window is not None:
+                        self.countdown_window.destroy()
+                        self.countdown_gc.free()
+                        self.countdown_pixmap.free()
+                        self.countdown_mask_gc.free()
+                        self.countdown_mask.free()
+                    if self.video is not None:
+                        self.video.destroy()
+            finally:
+                self.video = self.display = None
+                self.countdown_window = self.countdown_gc = self.countdown_pixmap = None
+                self.countdown_mask = self.countdown_mask_gc = None
+                self.music_window = self.music_pixmap = self.music_renderer = None
+                self.music_geometry = None
