@@ -1,6 +1,6 @@
 # Copilot Session Handoff
 
-Last updated: 2026-11-09.
+Last updated: 2026-11-12.
 
 ## Start Here
 
@@ -14,13 +14,17 @@ vitals or deployment instructions.
 ## Current Repository And Release
 
 - Branch `main`; use `git status` and `git log` for the actual checkout/commit.
-  Train layout refinements were committed in `f5a18e4`; this handoff accompanies
-  the subsequent Plex playlist/custom-mix implementation.
-- Latest published release and version metadata: **v0.5.17**. The release includes
-  enhanced train boards, manager remote views and the floating now-playing card.
-  The optional previous-departure section, reclaimed row space, larger footer
-  clock and Plex playlist/custom-mix extension are newer main-branch work, not
-  features of the published v0.5.17 artifacts. No newer release was requested.
+  Train layout refinements were committed in `f5a18e4`; Plex playlists/mixes and
+  the guidance refresh followed in `c82595c`. The v0.5.18 release work includes
+  the deployed animated equalizer icon, Plex smart-playlist builder, floating
+  admin music controls and admin landing/guidance refinements.
+- Release version/tag: **v0.5.18**. The user requested commit, push and release
+  publication on Nov 12. This release adds optional previous departures,
+  reclaimed row space, the larger footer clock, Plex playlists/custom mixes,
+  smart-playlist creation, floating admin music controls, the animated music
+  icon and Global settings as the default administration view.
+  Publishing triggers signed-update and full-image builds; check GitHub release
+  assets and workflow status rather than assuming either build has completed.
 - Confirmed on Nov 9: v0.5.17 has the signed `.wdupdate`, update checksum, Android
   APK, full `.img.xz` and image checksum. The image workflow completed successfully
   (run `42657619061`); it is no longer waiting to build. This is not a claim that
@@ -28,11 +32,12 @@ vitals or deployment instructions.
 - The local Android APK at
   `android/app/build/outputs/apk/debug/web-display-manager.apk` was built Nov 9
   at 14:58 UTC and matches the release APK (25,197,967 bytes). No Android source
-  changed for the subsequent music controls; no replacement APK was needed.
+  changed for v0.5.18; the same APK can be attached without rebuilding it.
 
-## Current Development Deployment (2026-11-09)
+## Current Development Deployment (2026-11-12)
 
-- Both targets listed in `AGENTS.md` received the final train and Plex changes
+- Both targets listed in `AGENTS.md` received the Global settings default and
+  carousel warning cleanup
   using `tools/push-to-device.sh --restart-kiosk`, with pinned SSH host checking.
   They remain development targets; confirm this again before future pushes.
 - Both now run the factory package at
@@ -40,7 +45,8 @@ vitals or deployment instructions.
   Development pushes removed installed update versions/state but preserved
   private configuration, API keys and carousel playlists. They are not signed
   update installations, even though version metadata still says 0.5.17.
-- Final deployed device UI: `static/assets/index-BtGYKjMG.js`.
+- Final deployed device UI: `static/assets/index-Dnu0bTpF.js`,
+  CSS `static/assets/style-BAC1ff-r.css`. The manager CSS was rebuilt too.
   Both services (`web-display` and `web-display-kiosk`) were active; HTTPS
   `/health`, Python module hashes, static index/JS hashes and served JS bytes
   matched the final local build on both devices.
@@ -54,8 +60,17 @@ vitals or deployment instructions.
 
 ## Latest Implemented Features
 
-- Administration opens on **Carousel**; the menu switches to **Global settings**
-  without discarding drafts. Display backgrounds are black.
+- Administration opens on **Global settings**; the menu switches to **Carousel**
+  without discarding either screen's drafts. The obsolete experimental/browser-
+  relaunch banner is removed; retained Chromium is the current transition path.
+  Display backgrounds are black. Existing endurance acceptance remains open.
+- Both admin screens have a floating bottom-pinned background-music player:
+  Play/Pause/Resume, Stop and Skip. Manual pause retains position through video
+  handovers; a paused skip defers loading until Resume. Stop persists disabled
+  playback but retains the source/volume; Play starts a fresh queue for that
+  source. Source/volume drafts remain intact and Play/Stop updates the enabled
+  checkbox. Sleep/video-audio guards still apply. Manual pause is transient and
+  clears on a source/enable/identity change or service restart.
 - Train boards support destination and calling-station filters (including earlier
   stops), actual-only last-seen/departure observations, compact previous-service
   routes and horizontally scrolling long routes with key stations pinned.
@@ -69,6 +84,13 @@ vitals or deployment instructions.
   regular/smart audio playlists and supported server-advertised mixes. Artist
   and album mix builders search/page through libraries and save up to 20
   selections on this display, not as a new Plex playlist.
+- **Create Plex smart playlist** saves dynamic audio playlists in the connected
+  Plex account, available to other Plex clients. Optional album-decade,
+  track-genre and track-mood filters match all selected criteria; at least one
+  is required. Choices come from Plex, a preview counts current matches and
+  new playlists use random ordering. Empty matches and duplicate names are
+  rejected. Creation does not change the display's music source or enabled state.
+  Edit/delete playlists in Plex; missing mood metadata limits filtering.
 - Custom mixes shuffle selected tracks, not sonic recommendations or Guest DJ.
   Plexamp-local mixes are not directly importable: save them as an audio playlist
   first unless the server already exposes them as a supported station/playlist.
@@ -77,11 +99,68 @@ vitals or deployment instructions.
   respects sleep/output selection, and has bounded automatic retries.
 - The native top-left now-playing card floats without resizing the scene; it
   can overlap content and is not included in reconstructed manager previews.
+  Playback shows animated equalizer bars instead of the "Now playing:" label;
+  paused/loading/retry states retain explicit text. The bars indicate playback,
+  not measured audio levels. Only the small icon is redrawn at five frames per
+  second; carousel/configuration polling retains its one-second cadence.
   PC/Android managers open device administration for music configuration; they
   have no dedicated native music editor or carousel playlist editor.
 
 ## Latest Validation
 
+- Release preparation: all 399 Python tests and 94 UI tests passed; both UIs
+  typechecked and rebuilt with the same final assets already deployed above.
+  Firmware/Python package versions are aligned at 0.5.18. The development
+  displays still report 0.5.17 metadata; release preparation does not imply a
+  signed update installation or new physical/endurance acceptance.
+- Admin landing/guidance cleanup: 24 UI tests passed across `App.test.tsx` and
+  `PlaylistCard.test.tsx`, including Global settings as the initial view,
+  active-menu state, removal of the obsolete banner and draft retention on both
+  screens. Both UI bundles rebuilt/typechecked; manager output unchanged.
+  Both Pis received the final bundle, with active services, healthy HTTPS health
+  and matching installed/served assets. This does not close endurance acceptance.
+- Admin player controls: 84 Python tests passed across `test_music_player`,
+  `test_plex`, `test_app`, `test_kiosk` and `test_scene_windows`; compilation
+  passed. 32 UI tests passed across `MusicControls.test.tsx`, `MusicCard.test.tsx`,
+  `PlexCard.test.tsx` and `App.test.tsx`; both UI bundles rebuilt/typechecked.
+  The new status poll is sequential, aborts on unmount and reports an outage once
+  until recovery rather than repeating notifications.
+- Real Chromium geometry checks passed at 320x640, 375x812, 480x600, 800x600 and
+  1280x720: the bar stays pinned through scrolling, long titles/buttons fit,
+  final save controls remain reachable and toasts sit above the bar.
+- Isolated real-mpv checks passed on both Pis with silent output and synthetic
+  local tracks: pause, video handover while manually paused, paused skip, resume,
+  queue-end skip, stop and play. Pause/skip reused mpv; Stop terminated it.
+  These checks did not use Plex or change either display's actual music settings.
+  Services/HTTPS health and installed/served final assets matched after deployment.
+  Physical listening and sustained endurance acceptance were not repeated.
+- Smart-playlist builder: 64 Python tests passed with
+  `PYTHONPATH=src:tests python3 -m unittest test_plex test_app test_music_player -q`;
+  compilation passed. 25 UI tests passed across `MusicCard.test.tsx`,
+  `PlexCard.test.tsx` and `App.test.tsx`; `npm run build` typechecked and rebuilt
+  both apps (manager output unchanged).
+- Live Plex check through Pi 2 created a temporary smart audio playlist combining
+  1990s, Pop/Rock and Acerbic: preview and saved membership both matched 21 tracks.
+  Verified all three stored filter IDs, track type, random sort, album years,
+  genre tags and discovery in the source catalog. Deleted the temporary playlist;
+  saved display music settings were unchanged.
+- Both Pis had active management/kiosk services, healthy HTTPS health, matching
+  installed Python/static hashes and matching served JS after the pinned-SSH
+  development pushes. New endpoints reject unauthenticated requests. No Android
+  code changed; the existing APK remains applicable. Physical audio/endurance
+  acceptance was not repeated.
+- Animated music icon: 29 tests passed with
+  `PYTHONPATH=src:tests python3 -m unittest test_scene_windows test_kiosk test_music_player -q`;
+  compilation and whitespace checks passed. Tests cover icon-only redraws,
+  unchanged captions, track/state/geometry changes and preserved carousel cadence.
+- Both Pis passed native off-screen X11/Cairo rendering checks: eight distinct
+  equalizer frames, unchanged caption pixels and paused-label rendering.
+  Pi 2's live notification produced six distinct sampled frames. Pi 3's live
+  notification was hidden; music settings were not changed to force playback.
+  Services and HTTPS health were healthy; installed Python/static hashes and
+  served JS matched, with no recent notification errors. This is not new physical
+  speaker or endurance acceptance. No web UI or Android source changed, so their
+  existing bundles/APK were retained.
 - Playlist/mix extension: 61 Python tests passed with
   `PYTHONPATH=src:tests python3 -m unittest test_plex test_music_player test_app -q`.
   Compilation and whitespace checks passed.
@@ -125,7 +204,7 @@ vitals or deployment instructions.
 
 ## Outstanding Work And Acceptance
 
-The latest requested playlist/mix implementation is complete and deployed; no
+The latest requested music features and admin player controls are complete and deployed; no
 further implementation is implied. Resume only the work the user requests.
 
 - `verify-persistent-scenes`: still open. Dashboard acknowledgment retries and

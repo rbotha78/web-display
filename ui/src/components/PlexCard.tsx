@@ -1,14 +1,15 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { api, type PlexConfig } from "../api";
+import { api, type MusicConfig, type PlexConfig } from "../api";
 import type { Notice } from "./Toast";
 import { MusicCard } from "./MusicCard";
 
 interface Props {
   notify: (text: string, kind?: Notice["kind"]) => void;
   fail: (error: unknown) => void;
+  playbackConfig?: MusicConfig;
 }
 
-export function PlexCard({ notify, fail }: Props) {
+export function PlexCard({ notify, fail, playbackConfig }: Props) {
   const [config, setConfig] = useState<PlexConfig | null>(null);
   const [serverUrl, setServerUrl] = useState("");
   const [token, setToken] = useState("");
@@ -100,7 +101,8 @@ export function PlexCard({ notify, fail }: Props) {
         )}
       </div>
     </form>
-    {config && <MusicCard key={config.server_url} configured={config.configured} notify={notify} fail={fail} />}
+    {config && <MusicCard key={config.server_url} configured={config.configured} notify={notify} fail={fail}
+      playbackConfig={playbackConfig} />}
     </>
   );
 }

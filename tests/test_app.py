@@ -470,7 +470,8 @@ class ApiTests(unittest.TestCase):
         self.assertNotIn("token", result)
 
     def test_music_settings_and_stations_require_authentication_and_csrf(self):
-        for path in ("/api/plex/music", "/api/plex/stations", "/api/plex/music/browse"):
+        for path in ("/api/plex/music", "/api/plex/stations", "/api/plex/music/browse",
+                     "/api/plex/music/filters?library=3"):
             response, _ = self.request("GET", path)
             self.assertEqual(response.status, 401)
         token, session = self.app.sessions.create()
@@ -508,6 +509,65 @@ class ApiTests(unittest.TestCase):
                 with self.subTest(query=query):
                     response, _ = self.request("GET", "/api/plex/music/browse?" + query, headers=cookie)
                     self.assertEqual(response.status, 502)
+
+    def test_audio_controls_require_authentication_and_csrf_and_return_sanitized_config(self):
+        token, session = self.app.sessions.create()
+        body = {"action": "pause"}
+        with patch.object(self.app, "control_music", return_value={
+            "enabled": True, "station_key": "/playlists/11/items", "volume": 30,
+            "status": {"state": "paused", "title": "Song", "error": "", "paused_by_user": True},
+        }) as control:
+            response, _ = self.request("POST", "/api/plex/music/control", body)
+            self.assertEqual(response.status, 401)
+            response, _ = self.request("POST", "/api/plex/music/control", body,
+                                       {"Cookie": f"session={token}"})
+            self.assertEqual(response.status, 403)
+            control.assert_not_called()
+            response, result = self.request("POST", "/api/plex/music/control", body,
+                                           {"Cookie": f"session={token}", "X-CSRF-Token": session.csrf})
+            self.assertEqual(response.status, 200)
+            self.assertTrue(result["status"]["paused_by_user"])
+            control.assert_called_once_with(body)
+            self.assertNotIn("control_url", result)
+
+    def test_smart_playlist_endpoints_authenticate_validate_queries_and_require_csrf(self):
+        token, session = self.app.sessions.create()
+        cookie = {"Cookie": f"session={token}"}
+        headers = {**cookie, "X-CSRF-Token": session.csrf}
+        client = Mock()
+        client.music_filters.return_value = {"decade": [], "genre": [], "mood": []}
+        client.preview_smart_playlist.return_value = {"count": 4}
+        client.create_smart_playlist.return_value = {
+            "key": "/playlists/901/items", "title": "90s", "smart": True,
+        }
+        with patch.object(self.app, "plex_client", return_value=client):
+            response, result = self.request("GET", "/api/plex/music/filters?library=3", headers=cookie)
+            self.assertEqual(response.status, 200)
+            self.assertEqual(result["mood"], [])
+            client.music_filters.assert_called_once_with("3")
+            for query in ("", "library=3&library=4", "library=3&url=http://other.invalid"):
+                response, _ = self.request("GET", "/api/plex/music/filters?" + query, headers=cookie)
+                self.assertEqual(response.status, 502)
+            criteria = {"library": "3", "decade": "1990"}
+            for path in ("/api/plex/music/playlists", "/api/plex/music/playlists/preview"):
+                response, _ = self.request("POST", path, criteria)
+                self.assertEqual(response.status, 401)
+                response, _ = self.request("POST", path, criteria, cookie)
+                self.assertEqual(response.status, 403)
+            client.create_smart_playlist.assert_not_called()
+            client.preview_smart_playlist.assert_not_called()
+            response, result = self.request("POST", "/api/plex/music/playlists/preview", criteria, headers)
+            self.assertEqual((response.status, result), (200, {"count": 4}))
+            client.preview_smart_playlist.assert_called_once_with(criteria)
+            response, result = self.request("POST", "/api/plex/music/playlists",
+                                           {**criteria, "title": "90s"}, headers)
+            self.assertEqual(response.status, 201)
+            self.assertTrue(result["smart"])
+            client.create_smart_playlist.assert_called_once_with({**criteria, "title": "90s"})
+            client.create_smart_playlist.side_effect = ValueError("No matching music")
+            response, result = self.request("POST", "/api/plex/music/playlists",
+                                           {**criteria, "title": "90s"}, headers)
+            self.assertEqual((response.status, result["error"]), (400, "No matching music"))
 
     def test_raildata_key_configuration_is_private_and_csrf_protected(self):
         response, _ = self.request("GET", "/api/raildata/config")

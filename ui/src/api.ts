@@ -87,7 +87,7 @@ export interface MusicConfig {
   enabled: boolean;
   station_key: string;
   volume: number;
-  status: { state: string; title: string; error: string };
+  status: { state: string; title: string; error: string; paused_by_user?: boolean };
 }
 
 export interface MusicStation {
@@ -109,6 +109,24 @@ export interface MusicBrowseResult {
   items: MusicBrowseItem[];
   total: number;
   offset: number;
+}
+
+export interface MusicFilterChoice {
+  id: string;
+  title: string;
+}
+
+export interface MusicFilters {
+  decade: MusicFilterChoice[];
+  genre: MusicFilterChoice[];
+  mood: MusicFilterChoice[];
+}
+
+export interface SmartPlaylistCriteria {
+  library: string;
+  decade: string;
+  genre: string;
+  mood: string;
 }
 
 export interface PlexBrowseItem {
@@ -208,7 +226,7 @@ export function setCsrf(value: string): void {
   csrf = value;
 }
 
-export async function request<T>(path: string, method = "GET", body?: unknown): Promise<T> {
+export async function request<T>(path: string, method = "GET", body?: unknown, signal?: AbortSignal): Promise<T> {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (csrf) headers["X-CSRF-Token"] = csrf;
   const response = await fetch(path, {
@@ -216,6 +234,7 @@ export async function request<T>(path: string, method = "GET", body?: unknown): 
     headers,
     body: body === undefined ? (method === "GET" ? undefined : "{}") : JSON.stringify(body),
     credentials: "same-origin",
+    signal,
   });
   let payload: { error?: string } = {};
   try {
@@ -269,8 +288,16 @@ export const api = {
   remoteView: () => request<RemoteView>("/api/remote-view"),
   savePlaylist: (playlist: Playlist) => request<Playlist>("/api/playlist", "PUT", playlist),
   plexConfig: () => request<PlexConfig>("/api/plex/config"),
-  musicConfig: () => request<MusicConfig>("/api/plex/music"),
+  musicConfig: (signal?: AbortSignal) => request<MusicConfig>("/api/plex/music", "GET", undefined, signal),
+  controlMusic: (action: "play" | "pause" | "resume" | "stop" | "skip") =>
+    request<MusicConfig>("/api/plex/music/control", "POST", { action }),
   musicStations: () => request<{ items: MusicStation[] }>("/api/plex/stations"),
+  musicFilters: (library: string) =>
+    request<MusicFilters>(`/api/plex/music/filters?${new URLSearchParams({ library })}`),
+  previewSmartPlaylist: (criteria: SmartPlaylistCriteria) =>
+    request<{ count: number }>("/api/plex/music/playlists/preview", "POST", criteria),
+  createSmartPlaylist: (criteria: SmartPlaylistCriteria & { title: string }) =>
+    request<MusicStation>("/api/plex/music/playlists", "POST", criteria),
   musicBrowse: (query: { library?: string; kind?: "artist" | "album"; search?: string; offset?: number; key?: string } = {}) => {
     const params = new URLSearchParams();
     for (const [key, value] of Object.entries(query)) params.set(key, String(value));

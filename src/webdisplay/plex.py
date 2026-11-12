@@ -260,6 +260,78 @@ class PlexClient:
             raise ValueError("Plex returned an invalid music result count")
         return {"items": items, "total": int(total), "offset": offset}
 
+    def music_filters(self, library: str) -> dict[str, list[dict[str, str]]]:
+        if not isinstance(library, str) or library not in {
+            item["id"] for item in self.music_browse()["items"]
+        }:
+            raise ValueError("Select a music library from this Plex server")
+        result = {}
+        for field, media_type in (("decade", 9), ("genre", 10), ("mood", 10)):
+            root = self.xml(f"/library/sections/{library}/{field}", {"type": media_type})
+            result[field] = [
+                {"id": item.get("key", ""), "title": item.get("title", "")}
+                for item in root.findall("Directory")
+                if RATING_KEY.fullmatch(item.get("key", "")) and item.get("title")
+            ]
+        return result
+
+    def _music_filter_query(self, criteria: dict) -> tuple[str, dict[str, object]]:
+        if set(criteria) - {"library", "decade", "genre", "mood"}:
+            raise ValueError("Invalid smart playlist criteria")
+        library = criteria.get("library", "")
+        choices = self.music_filters(library)
+        query: dict[str, object] = {"type": 10, "sort": "random"}
+        for field, plex_field in (("decade", "album.decade"), ("genre", "track.genre"),
+                                  ("mood", "track.mood")):
+            value = criteria.get(field, "")
+            if not isinstance(value, str):
+                raise ValueError("Invalid smart playlist criteria")
+            if value:
+                if value not in {item["id"] for item in choices[field]}:
+                    raise ValueError(f"Select a {field} available in this music library")
+                query[plex_field] = value
+        if len(query) == 2:
+            raise ValueError("Select at least one decade, genre or mood")
+        return library, query
+
+    def _music_match_count(self, library: str, query: dict[str, object]) -> int:
+        root = self.xml(f"/library/sections/{library}/all", {
+            **query, "X-Plex-Container-Start": 0, "X-Plex-Container-Size": 1,
+        })
+        count = root.get("totalSize", root.get("size", ""))
+        if not count.isascii() or not count.isdigit():
+            raise ValueError("Plex returned an invalid music result count")
+        return int(count)
+
+    def preview_smart_playlist(self, criteria: dict) -> dict[str, int]:
+        library, query = self._music_filter_query(criteria)
+        return {"count": self._music_match_count(library, query)}
+
+    def create_smart_playlist(self, body: dict) -> dict[str, object]:
+        title = body.get("title")
+        if (not isinstance(title, str) or not title.strip() or len(title) > 100
+                or any(ord(char) < 32 or ord(char) == 127 for char in title)):
+            raise ValueError("Playlist name must contain 1-100 characters without control characters")
+        title = title.strip()
+        library, query = self._music_filter_query({key: value for key, value in body.items() if key != "title"})
+        if not self._music_match_count(library, query):
+            raise ValueError("No tracks match all selected criteria; change the filters before creating a playlist")
+        playlists = self.xml("/playlists", {"playlistType": "audio"})
+        if any(item.get("title", "").casefold() == title.casefold() for item in playlists.findall("Playlist")):
+            raise ValueError("An audio playlist with this name already exists in Plex; choose another name")
+        machine = self.identity()["machine_identifier"]
+        uri = (f"server://{machine}/com.plexapp.plugins.library/library/sections/{library}/all?"
+               + urllib.parse.urlencode(query))
+        root = self.xml("/playlists", {"type": "audio", "smart": 1, "title": title, "uri": uri}, method="POST")
+        item = root.find("Playlist")
+        if (item is None or item.get("playlistType") != "audio" or item.get("smart") != "1"
+                or not RATING_KEY.fullmatch(item.get("ratingKey", ""))):
+            raise ValueError("Plex did not confirm smart playlist creation; check Plex before retrying")
+        return {
+            "key": f"/playlists/{item.get('ratingKey')}/items", "title": item.get("title", title),
+            "library": "Playlists", "kind": "playlist", "smart": True,
+        }
+
     def browse(self, key: str | None = None) -> list[dict[str, object]]:
         if key is None:
             return [

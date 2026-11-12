@@ -3,17 +3,19 @@
 A 32-bit Raspberry Pi OS appliance for Raspberry Pi 2 and Raspberry Pi 3,
 with Chromium on HDMI, authenticated HTTPS administration, Wi-Fi provisioning,
 signed application updates and PC and Android display managers.
-Release **[v0.5.17](https://github.com/rbotha78/web-display/releases/tag/v0.5.17)**
-adds enhanced train boards, manager remote views and floating now-playing information.
-The current `main` branch additionally includes optional previous departures,
-train-layout refinements and Plex playlists/custom mixes; those additions are
-not part of the v0.5.17 release artifacts.
+Release **[v0.5.18](https://github.com/rbotha78/web-display/releases/tag/v0.5.18)**
+adds optional previous departures, train-layout refinements, Plex playlists/custom
+mixes, a Plex smart-playlist builder, floating admin music controls and an animated
+now-playing icon. Global settings is now the default administration view.
 Saving settings retains the saved values when confirmation notifications appear,
 without reloading stale configuration into the editor.
-Administration opens on **Carousel**, with an **Administration** menu for
-switching to **Global settings** (display defaults, sleep, provider credentials,
+Administration opens on **Global settings** (display defaults, sleep, provider credentials,
 networking, updates and access keys). Draft edits stay intact when switching
-screens; global settings load when first opened.
+to **Carousel** through the **Administration** menu and back.
+The obsolete experimental/browser-relaunch warning has been removed; normal
+carousel transitions retain Chromium rather than relaunching it.
+Both administration screens have a floating audio player pinned to the bottom
+with **Play/Pause/Resume**, **Stop** and **Skip** controls for background music.
 
 ## Display features
 
@@ -23,10 +25,11 @@ audio playlists and artist/album shuffle mixes can play in the background across
 scene changes, pausing for videos with audio.
 Display scenes and their outer safe-area border use a black background.
 Background music has a permanent, compact now-playing card floating in the
-top-left corner, showing the song and artist when available, including on websites
-and videos. It leaves browser and video layouts unchanged, so it can overlay scene
-content. Long titles are
-truncated to fit; paused music, loading and automatic retries are labelled
+top-left corner, showing animated equalizer bars beside the song and artist when
+available, including on websites and videos. The bars animate only during playback;
+they indicate playback activity, not measured audio levels.
+It leaves browser and video layouts unchanged, so it can overlay scene content.
+Long titles are truncated to fit; paused music, loading and automatic retries are labelled
 explicitly. The card respects the overscan safe area and disappears when music
 is disabled or the display sleeps. Reconstructed manager previews do not include
 this native display notification.
@@ -327,6 +330,24 @@ the current playlist, so smart-playlist changes take effect at the next queue
 renewal or playback restart. Empty playlists report an explicit playback error
 rather than falling back to another source.
 
+Use **Global settings -> Background music -> Create Plex smart playlist** to
+create a dynamic audio playlist in Plex itself. Choose a music library, give the
+playlist a unique name and optionally select an **Album decade**, **Track genre**
+and **Track mood**. Select at least one filter; tracks must match **all** selected
+criteria. **Preview matching tracks** shows the current match count before
+creation. The playlist stores the filters, not a fixed list of tracks, and Plex
+updates membership as your library metadata changes. It uses shuffled ordering
+and is available to other Plex clients using the connected account.
+
+Filter choices come from Plex metadata: decade is the album's release decade,
+while genre and mood use track tags. Missing metadata cannot match a filter;
+some libraries have no mood tags. Empty matches and duplicate audio-playlist
+names are rejected. The configured Plex token must permit playlist creation.
+Creation does not enable music or change the current source: select the new
+playlist and **Save music settings** to play it here. Edit or delete its rules
+in Plex; this builder only creates new playlists. These are metadata filters,
+not Plexamp sonic/Guest DJ recommendations.
+
 Use **Build artist mix** or **Build album mix** to search and page through music
 libraries, then select up to 20 artists or albums. The device saves that selection
 and asks Plex to shuffle their tracks into a new mix on each queue renewal.
@@ -345,6 +366,22 @@ position. The kiosk sees only scoped loopback control/stream URLs in
 appear in player arguments. Tracks stream directly through a range-capable
 private relay using mpv's installed audio decoders; no Plex audio transcode or
 additional OS packages are required.
+
+The bottom-pinned admin player stays available while scrolling or switching
+between Carousel and Global settings. It shows the current song and playback
+state; space below settings and above notifications keeps controls and save
+buttons accessible on phones and desktops. These controls affect background
+music, not a carousel video's audio.
+
+**Pause** preserves the current position; **Resume** continues without overriding
+video-audio pauses or sleep. **Skip** moves to the next song; when manually paused,
+it stops the old song and waits for Resume before loading the next one.
+**Stop** disables saved background playback, releases the player/queue and keeps
+the selected source and volume. **Play** enables that saved source again with a
+fresh queue. Manual pause is temporary: changing the source, disabling/re-enabling
+music or restarting the administration service clears it. Stop remains effective
+across service/device restarts. Settings drafts keep their source and volume when
+using the player; Play/Stop updates their enabled checkbox.
 
 **Display → Audio output** selects the device-wide output for both background
 music and video audio. HDMI is the default; available playback devices include
@@ -369,7 +406,16 @@ resets the retry delay. The card reports sanitized playback state/errors.
 Authenticated endpoints: `GET /api/plex/stations`, `GET /api/plex/music/browse`, `GET /api/plex/music` and
 `PUT /api/plex/music` (session mutations require CSRF). Music settings are
 `enabled`, `station_key`, and integer `volume` (0–100, default 30).
+`POST /api/plex/music/control` accepts an `action` of `play`, `pause`, `resume`,
+`stop` or `skip` and returns the sanitized current music configuration/status.
+Session requests require CSRF; the private relay capability is never returned.
 The stations endpoint now includes audio playlists and advertised mixes.
+`GET /api/plex/music/filters?library=<id>` lists available decades/genres/moods.
+`POST /api/plex/music/playlists/preview` accepts `library`, `decade`, `genre` and
+`mood` (selected Plex choice IDs, blank for any) and returns `count`.
+`POST /api/plex/music/playlists` accepts the same criteria plus `title`, creates
+the Plex smart playlist and returns its source entry. Both POST endpoints require
+CSRF for session authentication; bearer authentication follows the existing rules.
 Music browsing accepts `library`, `kind` (`artist`/`album`), `search`, and
 `offset` (100 results per page), or `key` to resolve an existing custom mix.
 The backwards-compatible `station_key` also accepts `/playlists/<id>/items`

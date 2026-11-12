@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { ApiError, api, type NetworkStatus, type Status } from "../api";
+import { ApiError, api, type MusicConfig, type NetworkStatus, type Status } from "../api";
 import { DebugKeysCard } from "./DebugKeysCard";
 import { DisplayCard } from "./DisplayCard";
 import { PlaylistCard } from "./PlaylistCard";
@@ -13,6 +13,7 @@ import { ManagerKeysCard } from "./ManagerKeysCard";
 import { UpdatesCard } from "./UpdatesCard";
 import { WifiCard } from "./WifiCard";
 import { SleepCard } from "./SleepCard";
+import { MusicControls } from "./MusicControls";
 
 interface Props {
   notify: (text: string, kind?: Notice["kind"]) => void;
@@ -21,8 +22,8 @@ interface Props {
 }
 
 export function Dashboard({ notify, onExpired, canManageKeys }: Props) {
-  const [page, setPage] = useState<"carousel" | "global">("carousel");
-  const [globalVisited, setGlobalVisited] = useState(false);
+  const [page, setPage] = useState<"carousel" | "global">("global");
+  const [playbackConfig, setPlaybackConfig] = useState<MusicConfig | undefined>();
 
   const fail = useCallback(
     (error: unknown) => {
@@ -44,24 +45,26 @@ export function Dashboard({ notify, onExpired, canManageKeys }: Props) {
           onClick={() => setPage("carousel")}>Carousel</button>
         <button type="button" className={page === "global" ? "" : "ghost"}
           aria-current={page === "global" ? "page" : undefined} aria-controls="global-settings"
-          onClick={() => { setGlobalVisited(true); setPage("global"); }}>Global settings</button>
+          onClick={() => setPage("global")}>Global settings</button>
       </nav>
       <section id="carousel-settings" aria-label="Carousel configuration" hidden={page !== "carousel"}>
         <PlaylistCard notify={notify} fail={fail} active={page === "carousel"} />
       </section>
       <section id="global-settings" aria-label="Global settings" hidden={page !== "global"}>
-        {globalVisited && <GlobalSettings notify={notify} fail={fail}
-          canManageKeys={canManageKeys} active={page === "global"} />}
+        <GlobalSettings notify={notify} fail={fail}
+          canManageKeys={canManageKeys} active={page === "global"} playbackConfig={playbackConfig} />
       </section>
+      <MusicControls fail={fail} onEnabledChange={setPlaybackConfig} />
     </>
   );
 }
 
-function GlobalSettings({ notify, fail, canManageKeys, active }: {
+function GlobalSettings({ notify, fail, canManageKeys, active, playbackConfig }: {
   notify: Props["notify"];
   fail: (error: unknown) => void;
   canManageKeys: boolean;
   active: boolean;
+  playbackConfig?: MusicConfig;
 }) {
   const [status, setStatus] = useState<Status | null>(null);
   const [network, setNetwork] = useState<NetworkStatus | null>(null);
@@ -86,7 +89,7 @@ function GlobalSettings({ notify, fail, canManageKeys, active }: {
       <StatusCard status={status} network={network} />
       <DisplayCard notify={notify} fail={fail} />
       <SleepCard notify={notify} fail={fail} />
-      <PlexCard notify={notify} fail={fail} />
+      <PlexCard notify={notify} fail={fail} playbackConfig={playbackConfig} />
       <RailDataCard notify={notify} fail={fail} />
       <WeatherCard notify={notify} fail={fail} />
       <HostnameCard current={status?.hostname ?? null} notify={notify} fail={fail} />

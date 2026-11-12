@@ -230,23 +230,29 @@ function dashboardRoutes(extra: Record<string, Handler>): Record<string, Handler
   };
 }
 
-test("administration separates carousel and global settings without losing either draft", async () => {
+test("administration opens on global settings and preserves drafts when switching to the carousel", async () => {
   const calls = mockFetch(dashboardRoutes({}));
   render(<App />);
-  await screen.findByRole("region", { name: "Carousel configuration" });
+  await screen.findByRole("region", { name: "Global settings" });
+  expect(screen.getByRole("button", { name: "Global settings" }).getAttribute("aria-current")).toBe("page");
+  expect(screen.queryByRole("region", { name: "Carousel configuration" })).toBeNull();
+  const url = await screen.findByLabelText("Web page URL") as HTMLInputElement;
+  await waitFor(() => expect(url.value).toBe("https://example.com"));
+  fireEvent.change(url, { target: { value: "https://global-draft.example" } });
+
+  fireEvent.click(screen.getByRole("button", { name: "Carousel" }));
+  expect(screen.getByRole("button", { name: "Carousel" }).getAttribute("aria-current")).toBe("page");
+  expect(screen.queryByRole("region", { name: "Global settings" })).toBeNull();
+  expect(screen.queryByText(/Experimental:|scene changes relaunch the browser/)).toBeNull();
   await waitFor(() => expect((screen.getByLabelText("New scene type") as HTMLSelectElement).disabled).toBe(false));
-  expect(screen.queryByLabelText("Web page URL")).toBeNull();
-  expect(calls.some((call) => call.path === "/api/config")).toBe(false);
   fireEvent.click(screen.getByText("Add scene"));
   fireEvent.change(screen.getByLabelText("Scene web page URL"), {
     target: { value: "https://carousel-draft.example" },
   });
 
   await openGlobalSettings();
-  const url = await screen.findByLabelText("Web page URL") as HTMLInputElement;
-  await waitFor(() => expect(url.value).toBe("https://example.com"));
   expect(screen.queryByRole("region", { name: "Carousel configuration" })).toBeNull();
-  fireEvent.change(url, { target: { value: "https://global-draft.example" } });
+  expect(url.value).toBe("https://global-draft.example");
 
   fireEvent.click(screen.getByRole("button", { name: "Carousel" }));
   expect(screen.queryByRole("region", { name: "Global settings" })).toBeNull();

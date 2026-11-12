@@ -15,6 +15,7 @@ class MusicPlayerTests(unittest.TestCase):
         player = MusicPlayer.__new__(MusicPlayer)
         player.lock = threading.RLock()
         player.paused = False
+        player.user_paused = False
         player.ipc = Mock()
         player.process = Mock()
         player.buffer = b""
@@ -132,6 +133,67 @@ class MusicPlayerTests(unittest.TestCase):
         self.assertEqual(player.now_playing()["state"], "playing")
         self.assertEqual(player._command.call_args_list[0].args[0], ["set_property", "aid", "auto"])
         self.assertEqual(player._command.call_args_list[1].args[0], ["set_property", "pause", False])
+
+    def test_video_handover_cannot_resume_manually_paused_music(self):
+        player = self.player()
+        player.user_paused = True
+        player._now_playing = {"state": "playing", "title": "Song", "artist": "Artist"}
+        player._command = Mock()
+        player.pause_for_video(True)
+        player._command.reset_mock()
+        player.pause_for_video(False)
+        self.assertEqual(player.now_playing()["state"], "paused")
+        player._command.assert_any_call(["set_property", "pause", True])
+        player._command.assert_any_call(["set_property", "aid", "no"])
+        player._launch = Mock()
+        self.assertFalse(player._load({
+            "url": self.endpoint.removesuffix("control") + "stream/a", "track_id": "1",
+        }, self.endpoint, 30))
+        player._launch.assert_not_called()
+
+    def test_runtime_pause_skip_and_resume_preserve_queue_and_skip_once(self):
+        player = self.player()
+        player.process.poll.return_value = None
+        player.shutdown = threading.Event()
+        player._stop_player = Mock()
+        player._load = Mock(return_value=True)
+        player._command = Mock(return_value=1.0)
+        iterations = 0
+        observed = []
+        current = {"track_id": "1", "title": "First", "artist": "Artist"}
+        next_track = {"track_id": "2", "title": "Second", "artist": "Artist"}
+        player._control = Mock(side_effect=lambda _, action, **kwargs: next_track if action == "next" else current)
+        with tempfile.TemporaryDirectory() as directory:
+            player.config_path = Path(directory) / "music.json"
+            settings = {"enabled": True, "station_key": "station", "control_url": self.endpoint, "volume": 30}
+            player.config_path.write_text(json.dumps(settings))
+
+            def wait(_):
+                nonlocal iterations
+                observed.append(player.now_playing())
+                iterations += 1
+                if iterations == 1:
+                    settings["paused"] = True
+                elif iterations == 2:
+                    settings["skip"] = {"request_id": "skip-1", "track_id": "1"}
+                elif iterations == 3:
+                    self.assertEqual(player._load.call_count, 1)
+                    settings["paused"] = False
+                elif iterations == 4:
+                    settings["skip"] = {"request_id": "late-skip", "track_id": "1"}
+                elif iterations == 5:
+                    player.shutdown.set()
+                player.config_path.write_text(json.dumps(settings))
+
+            player.shutdown.wait = wait
+            player._run()
+        self.assertEqual([call.args[1] for call in player._control.call_args_list].count("next"), 1)
+        self.assertEqual(player._load.call_count, 2)
+        self.assertEqual(observed[1]["state"], "paused")
+        self.assertEqual(observed[-1]["title"], "Second")
+        player._command.assert_any_call(["stop"])
+        # Only initial setup and final cleanup stop the process, not pause/skip.
+        self.assertEqual(player._stop_player.call_count, 2)
 
     def test_output_change_restarts_music_with_selected_device(self):
         player = self.player()

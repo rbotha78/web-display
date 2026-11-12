@@ -408,9 +408,7 @@ class Application:
             with self.sleep_lock:
                 config = self.config.load()
                 self._publish_sleep(config)
-            music = self.music.configure(config["music"], (config["plex_server_url"], config["plex_token"]))
-            music["audio_output"] = config["audio_output"]
-            atomic_write(self.target_path.with_name("music.json"), json.dumps(music) + "\n", mode=0o640)
+            self._publish_music(config)
             playlist = validate_playlist(config["playlist"])
             self.plex_proxy.clear()
             runtime_scenes = []
@@ -447,6 +445,33 @@ class Application:
 
     def music_config(self) -> dict[str, object]:
         return {**self.config.load()["music"], "status": self.music.get_status()}
+
+    def _publish_music(self, config: dict[str, object]) -> None:
+        runtime = self.music.configure(config["music"], (config["plex_server_url"], config["plex_token"]))
+        runtime["audio_output"] = config["audio_output"]
+        atomic_write(self.target_path.with_name("music.json"), json.dumps(runtime) + "\n", mode=0o640)
+
+    def control_music(self, value: dict) -> dict[str, object]:
+        action = value.get("action")
+        if (set(value) != {"action"} or not isinstance(action, str)
+                or action not in {"pause", "resume", "play", "stop", "skip"}):
+            raise ValueError("Choose play, pause, resume, stop or skip")
+        with self.publish_lock:
+            config = self.config.load()
+            settings = dict(config["music"])
+            if action in {"play", "stop"}:
+                if action == "play" and settings["enabled"]:
+                    self.music.request_playback("resume")
+                settings["enabled"] = action == "play"
+                if action == "play":
+                    settings = validate_music(settings)
+                    self.plex_client().validate_music_source(settings["station_key"])
+                self.config.update(music=settings)
+                config = self.config.load()
+            else:
+                self.music.request_playback(action)
+            self._publish_music(config)
+        return self.music_config()
 
     def _publish_sleep(self, config: dict[str, object]) -> None:
         atomic_write(
@@ -487,9 +512,7 @@ class Application:
                 self.plex_client().validate_music_source(settings["station_key"])
             self.config.update(music=settings)
             config = self.config.load()
-            runtime = self.music.configure(settings, (config["plex_server_url"], config["plex_token"]))
-            runtime["audio_output"] = config["audio_output"]
-            atomic_write(self.target_path.with_name("music.json"), json.dumps(runtime) + "\n", mode=0o640)
+            self._publish_music(config)
         return self.music_config()
 
     def raildata_config(self) -> dict[str, object]:
@@ -1011,6 +1034,17 @@ def make_handler(app: Application) -> type[BaseHTTPRequestHandler]:
                 except ValueError as error:
                     self._json(HTTPStatus.BAD_GATEWAY, {"error": str(error)})
                 return
+            if request_path.path == "/api/plex/music/filters":
+                if not self._require_session():
+                    return
+                try:
+                    query = parse_qs(request_path.query, keep_blank_values=True)
+                    if set(query) != {"library"} or len(query["library"]) != 1:
+                        raise ValueError("Select one music library")
+                    self._json(HTTPStatus.OK, app.plex_client().music_filters(query["library"][0]))
+                except ValueError as error:
+                    self._json(HTTPStatus.BAD_GATEWAY, {"error": str(error)})
+                return
             if request_path.path == "/api/plex/music/browse":
                 if not self._require_session():
                     return
@@ -1182,6 +1216,17 @@ def make_handler(app: Application) -> type[BaseHTTPRequestHandler]:
                     if not self._require_session(csrf=True, allow_key=False):
                         return
                     self._json(HTTPStatus.CREATED, app.create_key(validate_key_name(body.get("name"))))
+                elif self.path in ("/api/plex/music/playlists", "/api/plex/music/playlists/preview"):
+                    if not self._require_session(csrf=True):
+                        return
+                    client = app.plex_client()
+                    if self.path.endswith("/preview"):
+                        self._json(HTTPStatus.OK, client.preview_smart_playlist(body))
+                    else:
+                        self._json(HTTPStatus.CREATED, client.create_smart_playlist(body))
+                elif self.path == "/api/plex/music/control":
+                    if self._require_session(csrf=True):
+                        self._json(HTTPStatus.OK, app.control_music(body))
                 elif self.path == "/api/debug-keys":
                     if not self._require_session(csrf=True):
                         return

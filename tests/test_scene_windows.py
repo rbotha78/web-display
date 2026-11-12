@@ -44,14 +44,42 @@ class SceneWindowsTests(unittest.TestCase):
             window.configure.side_effect = lambda geometry=geometry, **changes: vars(geometry).update(changes)
         status = {"state": "playing", "title": "Song", "artist": "Bj\u00f6rk"}
         with patch.dict(sys.modules, {"Xlib": xlib, "Xlib.ext": ext}), \
+                patch("webdisplay.scene_windows.time.monotonic", return_value=0) as clock, \
                 patch("webdisplay.display_text.DisplayText") as text:
             windows.show_now_playing(status)
             footer = windows.music_window
+            self.assertEqual(windows.music_text, "Song - Bj\u00f6rk")
+            text.return_value.draw.assert_called_once_with(
+                windows.music_pixmap.id, *windows.music_geometry[2:],
+                "Song - Bj\u00f6rk", music_icon=True,
+            )
+            first_bars = windows.music_pixmap.fill_rectangle.call_args_list[-4:]
             windows.show_now_playing(status)
             text.return_value.draw.assert_called_once()
+            self.assertEqual(windows.music_pixmap.fill_rectangle.call_count, 5)
+            clock.return_value = 0.2
+            windows.show_now_playing(status)
+            self.assertNotEqual(first_bars, windows.music_pixmap.fill_rectangle.call_args_list[-4:])
+            text.return_value.draw.assert_called_once()
+            screen.root.create_pixmap.assert_called_once()
             windows.show_now_playing({**status, "state": "paused"})
             self.assertEqual(windows.music_text, "Music paused: Song - Bj\u00f6rk")
             self.assertEqual(text.return_value.draw.call_count, 2)
+            self.assertFalse(text.return_value.draw.call_args.kwargs["music_icon"])
+            windows.music_pixmap.fill_rectangle.reset_mock()
+            clock.return_value = 0.4
+            windows.show_now_playing({**status, "state": "paused"})
+            windows.music_pixmap.fill_rectangle.assert_not_called()
+            for state, label in (("waiting", "Waiting for music"),
+                                 ("error", "Music interrupted - retrying")):
+                windows.show_now_playing({"state": state})
+                self.assertEqual(windows.music_text, label)
+                self.assertFalse(text.return_value.draw.call_args.kwargs["music_icon"])
+            windows.show_now_playing({"state": "playing"})
+            self.assertEqual(windows.music_text, "Unknown track")
+            windows.music_pixmap.fill_rectangle.reset_mock()
+            windows.show_now_playing({**status, "title": "Next song"})
+            self.assertEqual(windows.music_pixmap.fill_rectangle.call_count, 5)
             footer.set_input_focus.assert_not_called()
             browser.set_input_focus.assert_not_called()
             video.set_input_focus.assert_not_called()

@@ -5,6 +5,7 @@ import threading
 import urllib.parse
 import urllib.request
 import unittest
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -27,6 +28,7 @@ class FakePlexHandler(http.server.BaseHTTPRequestHandler):
     queue_queries = []
     created_queue_queries = []
     music_browse_queries = []
+    created_playlist_queries = []
     slow_music = None
     token = "private-test-token"
 
@@ -59,6 +61,26 @@ class FakePlexHandler(http.server.BaseHTTPRequestHandler):
                     b'<Playlist key="/playlists/13/items" title="Video" playlistType="video" />'
                     b'<Playlist key="https://other.invalid/private" title="Unsafe" playlistType="audio" />'
                     b'</MediaContainer>')
+            content_type = "application/xml"
+        elif parsed.path in ("/library/sections/3/decade", "/library/sections/3/genre", "/library/sections/3/mood"):
+            field = parsed.path.rsplit("/", 1)[1]
+            self.assertEqual_query(urllib.parse.parse_qs(parsed.query), "type", "9" if field == "decade" else "10")
+            choices = {
+                "decade": (("1990", "1990s"), ("2000", "2000s")),
+                "genre": (("101", "Rock"), ("102", "R&B")),
+                "mood": (("201", "Energetic"), ("202", "Unavailable mood")),
+            }[field]
+            root = ET.Element("MediaContainer")
+            for key, title in choices:
+                ET.SubElement(root, "Directory", key=key, title=title)
+            body, content_type = ET.tostring(root), "application/xml"
+        elif parsed.path == "/library/sections/3/all" and urllib.parse.parse_qs(parsed.query).get("type") == ["10"]:
+            query = urllib.parse.parse_qs(parsed.query)
+            self.music_browse_queries.append(query)
+            self.assertEqual_query(query, "X-Plex-Container-Start", "0")
+            self.assertEqual_query(query, "X-Plex-Container-Size", "1")
+            count = 0 if query.get("track.mood") == ["202"] else 7
+            body = f'<MediaContainer size="1" totalSize="{count}"><Track ratingKey="1" /></MediaContainer>'.encode()
             content_type = "application/xml"
         elif parsed.path == "/library/sections/3/all":
             query = urllib.parse.parse_qs(parsed.query)
@@ -156,6 +178,20 @@ class FakePlexHandler(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
         self.assert_token()
         parsed = urllib.parse.urlsplit(self.path)
+        if parsed.path == "/playlists":
+            query = urllib.parse.parse_qs(parsed.query)
+            self.assertEqual_query(query, "smart", "1")
+            self.assertEqual_query(query, "type", "audio")
+            self.created_playlist_queries.append(query)
+            root = ET.Element("MediaContainer")
+            ET.SubElement(root, "Playlist", ratingKey="901", key="/playlists/901/items",
+                          title=query["title"][0], playlistType="audio", smart="1")
+            body = ET.tostring(root)
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
         if parsed.path != "/playQueues":
             self.send_error(404)
             return
@@ -319,6 +355,59 @@ class PlexTests(unittest.TestCase):
                         self.assertEqual(first_query["playlistID"], [key.split("/")[2]])
                 finally:
                     relay.close()
+
+    def test_smart_playlist_filters_preview_and_persist_typed_match_all_query(self):
+        client = self.client()
+        self.assertEqual(client.music_filters("3")["decade"], [
+            {"id": "1990", "title": "1990s"}, {"id": "2000", "title": "2000s"},
+        ])
+        criteria = {"library": "3", "decade": "1990", "genre": "102", "mood": "201"}
+        self.assertEqual(client.preview_smart_playlist(criteria), {"count": 7})
+        preview = FakePlexHandler.music_browse_queries[-1]
+        self.assertEqual(preview["album.decade"], ["1990"])
+        self.assertEqual(preview["track.genre"], ["102"])
+        self.assertEqual(preview["track.mood"], ["201"])
+        created = client.create_smart_playlist({**criteria, "title": "  90s R&B + Energy  "})
+        self.assertEqual(created, {
+            "key": "/playlists/901/items", "title": "90s R&B + Energy",
+            "library": "Playlists", "kind": "playlist", "smart": True,
+        })
+        query = FakePlexHandler.created_playlist_queries[-1]
+        uri = urllib.parse.urlsplit(query["uri"][0])
+        self.assertEqual((uri.scheme, uri.netloc, uri.path),
+                         ("server", "machine-1", "/com.plexapp.plugins.library/library/sections/3/all"))
+        saved = urllib.parse.parse_qs(uri.query)
+        self.assertEqual(saved, {
+            "type": ["10"], "sort": ["random"], "album.decade": ["1990"],
+            "track.genre": ["102"], "track.mood": ["201"],
+        })
+        self.assertNotIn("X-Plex-Token", query["uri"][0])
+        self.assertNotIn("X-Plex-Container-Size", saved)
+        self.assertEqual(client.preview_smart_playlist({"library": "3", "mood": "202"}), {"count": 0})
+
+    def test_smart_playlist_rejects_invalid_empty_duplicate_or_no_match_rules_before_creating(self):
+        client = self.client()
+        before = len(FakePlexHandler.created_playlist_queries)
+        for body in (
+            {"library": "3", "title": "New"},
+            {"library": "1", "title": "New", "genre": "101"},
+            {"library": ["3"], "title": "New", "genre": "101"},
+            {"library": "3", "title": "", "genre": "101"},
+            {"library": "3", "title": "Bad\nname", "genre": "101"},
+            {"library": "3", "title": "x" * 101, "genre": "101"},
+            {"library": "3", "title": " favourites ", "genre": "101"},
+            {"library": "3", "title": "New", "mood": "202"},
+            {"library": "3", "title": "New", "decade": "1999"},
+            {"library": "3", "title": "New", "genre": "unknown"},
+            {"library": "3", "title": "New", "mood": True},
+            {"library": "3", "title": "New", "genre": "101", "url": "https://other.invalid"},
+        ):
+            with self.subTest(body=body), self.assertRaises(ValueError):
+                client.create_smart_playlist(body)
+        self.assertEqual(len(FakePlexHandler.created_playlist_queries), before)
+        with patch.object(client, "xml", return_value=ET.fromstring('<MediaContainer size="invalid" />')):
+            with self.assertRaisesRegex(ValueError, "invalid music result count"):
+                client._music_match_count("3", {"type": 10})
 
     def test_empty_playlist_reports_an_actionable_error(self):
         relay = MusicRelay(self.client)
@@ -498,6 +587,56 @@ class PlexTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     app.save_music_config({"enabled": True, "station_key": "/library/sections/3/stations/2",
                                            "volume": 20})
+            finally:
+                app.close()
+
+    def test_admin_transport_preserves_pause_across_publication_and_stop_keeps_saved_source(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            app = Application(root / "config.json", root / "pairing", root / "target", Path("/bin/true"))
+            try:
+                app.save_plex_config({"server_url": self.url, "token": FakePlexHandler.token})
+                settings = {"enabled": True, "station_key": "/playlists/11/items", "volume": 20}
+                app.save_music_config(settings)
+                current = app.music.control({"action": "current"})
+                queue = app.music.queue
+                capability = app.music.capability
+                paused = app.control_music({"action": "pause"})
+                self.assertEqual(paused["status"]["state"], "paused")
+                self.assertTrue(paused["status"]["paused_by_user"])
+                self.assertEqual(app.config.load()["music"], settings)
+                app.save_playlist({"enabled": False, "scenes": []})
+                runtime = json.loads((root / "music.json").read_text())
+                self.assertTrue(runtime["paused"])
+                self.assertEqual(app.music.capability, capability)
+                self.assertIs(app.music.queue, queue)
+                self.assertEqual((root / "music.json").stat().st_mode & 0o777, 0o640)
+                app.control_music({"action": "skip"})
+                runtime = json.loads((root / "music.json").read_text())
+                self.assertEqual(runtime["skip"]["track_id"], current["track_id"])
+                self.assertTrue(runtime["skip"]["request_id"])
+                app.control_music({"action": "resume"})
+                self.assertFalse(json.loads((root / "music.json").read_text())["paused"])
+                app.control_music({"action": "stop"})
+                self.assertIsNone(app.music.queue)
+                self.assertEqual(app.config.load()["music"], {**settings, "enabled": False})
+                self.assertFalse(json.loads((root / "music.json").read_text())["enabled"])
+                with self.assertRaisesRegex(ValueError, "Enable background music"):
+                    app.control_music({"action": "pause"})
+                app.control_music({"action": "play"})
+                self.assertEqual(app.config.load()["music"], settings)
+                self.assertFalse(app.music.user_paused)
+                self.assertIsNone(json.loads((root / "music.json").read_text())["skip"])
+                for value in ({"action": []}, {"action": "next"}, {"action": "pause", "url": "http://other.invalid"}):
+                    with self.subTest(value=value), self.assertRaises(ValueError):
+                        app.control_music(value)
+                with self.assertRaisesRegex(ValueError, "No current song"):
+                    app.control_music({"action": "skip"})
+                with patch.object(app.music, "sleeping", return_value=True):
+                    with self.assertRaisesRegex(ValueError, "sleeping"):
+                        app.control_music({"action": "resume"})
+                self.assertNotIn(FakePlexHandler.token, (root / "music.json").read_text())
+                self.assertNotIn("control_url", json.dumps(paused))
             finally:
                 app.close()
 

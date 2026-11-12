@@ -58,7 +58,7 @@ class DisplayText:
             raise OSError("Could not connect native text rendering to the display server")
         self.visual = self.default_visual(self.display, self.default_screen(self.display))
 
-    def draw(self, drawable: int, width: int, height: int, text: str) -> None:
+    def draw(self, drawable: int, width: int, height: int, text: str, *, music_icon: bool = False) -> None:
         surface = self.surface_create(self.display, drawable, self.visual, width, height)
         context = layout = font = None
         try:
@@ -73,7 +73,8 @@ class DisplayText:
             self.layout_font(layout, font)
             encoded = text.encode("utf-8")
             self.layout_text(layout, encoded, len(encoded))
-            self.layout_width(layout, max(1, width - 24) * 1024)
+            left = height + 12 if music_icon else 12
+            self.layout_width(layout, max(1, width - left - 12) * 1024)
             self.layout_height(layout, -1)
             self.layout_ellipsize(layout, 3)
             text_width, text_height = ctypes.c_int(), ctypes.c_int()
@@ -81,7 +82,7 @@ class DisplayText:
             self.color(context, 0, 0, 0)
             self.paint(context)
             self.color(context, 0.95, 0.96, 0.97)
-            self.move(context, 12, max(0, (height - text_height.value) / 2))
+            self.move(context, left, max(0, (height - text_height.value) / 2))
             self.layout_show(context, layout)
             self.surface_flush(surface)
             self.sync(self.display, 0)

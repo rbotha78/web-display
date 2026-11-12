@@ -131,6 +131,35 @@ body {
 
 .admin-menu { display: flex; flex-wrap: wrap; gap: .5rem; margin-bottom: 1rem; }
 
+.music-controls-space { height: 7rem; }
+.music-controls {
+  position: fixed;
+  z-index: 10;
+  left: 50%;
+  bottom: max(.75rem, env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  width: min(62rem, calc(100% - 2rem));
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: .8rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: 0 .4rem 1.5rem rgb(0 0 0 / 40%);
+}
+.music-controls-track { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.music-controls-track strong { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.music-controls-track :is(span, small) { color: var(--muted); font-size: .85rem; }
+.music-controls-buttons { display: flex; gap: .5rem; flex-shrink: 0; }
+.admin-shell .toast { bottom: 8rem; z-index: 30; }
+@media (max-width: 480px) {
+  .music-controls { flex-direction: column; align-items: stretch; gap: .5rem; padding: .75rem; }
+  .music-controls-buttons button { flex: 1; }
+  .music-controls-space { height: 11rem; }
+  .admin-shell .toast { bottom: 12rem; }
+}
+
 .grid {
   display: grid;
   gap: 1rem;

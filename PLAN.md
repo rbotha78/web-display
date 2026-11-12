@@ -245,7 +245,7 @@ uploads and manager playlist editing remain deferred. The dated status below and
 - Run extended loops and measure memory, temperature and dropped frames before
   treating the carousel as suitable for unattended use.
 
-## Subsequent Approved Scope (Implemented, 2026-11-09)
+## Subsequent Approved Scope (Implemented, 2026-11-12)
 
 - Live National Rail scenes with station/destination/calling-station CRS
   settings, earlier and upcoming calling-point filtering, configurable refresh,
@@ -258,15 +258,25 @@ uploads and manager playlist editing remain deferred. The dated status below and
 - OpenWeather scenes, dashboard widgets and compact train-board weather.
   Provider keys remain private; automated checks and live current-weather checks
   do not replace forecast/visual/endurance acceptance.
-- Carousel/global administration screens with retained drafts, black display
-  backgrounds, an overscan-safe countdown and retained Chromium/video renderers.
+- Carousel/global administration screens defaulting to Global settings, with
+  retained drafts, black display backgrounds, an overscan-safe countdown and
+  retained Chromium/video renderers.
 - Weekly local-time sleep stops music and skips videos without turning off the
   display; bounded temporary wake overrides are supported.
 - Background Plex library radio, regular/smart audio playlists and custom
   artist/album shuffle mixes (up to 20 selections), with output selection,
   video-audio pause/resume, queue renewal, automatic recovery and a floating
-  now-playing notification. Mixes do not implement Plexamp sonic recommendations
+  now-playing notification with animated playback equalizer bars in place of its
+  text label. Mixes do not implement Plexamp sonic recommendations
   or import app-local mixes; saved mixes must be exposed by Plex.
+- Create dynamic audio smart playlists in Plex using match-all album-decade,
+  track-genre and track-mood filters, with server-provided choices and a match
+  preview. New playlists use random ordering and do not change display playback;
+  rule editing/deletion stays in Plex.
+- Floating bottom-pinned administration music controls provide play,
+  pause/resume, stop and skip without controlling carousel video audio.
+  Manual pause survives video handovers; stop disables saved music while
+  retaining source/volume, and play starts a fresh queue for that source.
 - PC and Android managers with sanitized reconstructed remote views. The
   managers can open device administration; dedicated music configuration and
   playlist editing are not native manager features.

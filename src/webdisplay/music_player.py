@@ -42,6 +42,7 @@ class MusicPlayer:
         self.request_id = 0
         self.ended = None
         self.paused = False
+        self.user_paused = False
         self._now_playing = {"state": "disabled", "title": "", "artist": ""}
         self.audio_output = DEFAULT_AUDIO_OUTPUT
         self.sleep_runtime = SleepRuntime(config_path.with_name("sleep.json"))
@@ -72,12 +73,12 @@ class MusicPlayer:
     def now_playing(self) -> dict[str, str]:
         with self.lock:
             status = dict(self._now_playing)
-            if self.paused and status["state"] != "disabled":
+            if (self.paused or self.user_paused) and status["state"] != "disabled":
                 status["state"] = "paused"
             return status
 
     def _pause(self):
-        if self.paused:
+        if self.paused or self.user_paused:
             self._command(["set_property", "pause", True])
             # Pausing alone retains ALSA's device; release it for the video player.
             self._command(["set_property", "aid", "no"])
@@ -158,7 +159,7 @@ class MusicPlayer:
                 or not url.path.startswith(base.path.removesuffix("control") + "stream/")):
             raise ValueError("Invalid audio stream")
         with self.lock:
-            if self.paused or (hasattr(self, "sleep_runtime") and self.sleep_runtime.sleeping()):
+            if self.paused or self.user_paused or (hasattr(self, "sleep_runtime") and self.sleep_runtime.sleeping()):
                 return False
             if self.process is None:
                 self._launch()
@@ -182,6 +183,7 @@ class MusicPlayer:
         failures, retry_at, timeline_at = 0, 0.0, 0.0
         volume = None
         pending_next = False
+        last_skip_request = None
         last_position, last_progress = None, time.monotonic()
         try:
             while not self.shutdown.is_set():
@@ -209,12 +211,31 @@ class MusicPlayer:
                         if enabled:
                             with self.lock:
                                 self._now_playing = {"state": "waiting", "title": "", "artist": ""}
+                        last_skip_request = None
+                    with self.lock:
+                        user_paused = bool(settings.get("paused", False))
+                        if self.user_paused != user_paused:
+                            self.user_paused = user_paused
+                            timeline_at = 0
+                            if self.ipc is not None:
+                                self._pause()
+                        skip = settings.get("skip") or {}
+                        if skip.get("request_id") != last_skip_request:
+                            last_skip_request = skip.get("request_id")
+                            if track is not None and skip.get("track_id") == track["track_id"]:
+                                pending_next = True
+                                retry_at = 0
+                                if self.process is not None and self.ipc is not None:
+                                    self._command(["stop"])
+                                self._now_playing = {"state": "waiting", "title": "", "artist": ""}
                     if not endpoint or time.monotonic() < retry_at:
                         self.shutdown.wait(1)
                         continue
                     with self.lock:
-                        waiting_for_video = self.paused and (track is None or pending_next or self.process is None)
-                    if waiting_for_video:
+                        waiting_for_pause = (self.paused or self.user_paused) and (
+                            track is None or pending_next or self.process is None
+                        )
+                    if waiting_for_pause:
                         self.shutdown.wait(0.5)
                         continue
                     if track is None or pending_next or self.process is None:
@@ -236,7 +257,7 @@ class MusicPlayer:
                         if volume != settings["volume"]:
                             self._command(["set_property", "volume", settings["volume"]])
                             volume = settings["volume"]
-                        ended, paused = self.ended, self.paused
+                        ended, paused = self.ended, self.paused or self.user_paused
                         if position is not None and ended is None:
                             self._now_playing = {
                                 "state": "playing",

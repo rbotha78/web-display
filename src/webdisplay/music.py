@@ -50,6 +50,8 @@ class MusicRelay:
         self.queue = None
         self.track = None
         self.stream_key = ""
+        self.user_paused = False
+        self.skip_request = None
         self.status = {"state": "disabled", "title": "", "error": ""}
         self.sleep_runtime = SleepRuntime(sleep_path) if sleep_path is not None else None
         self.shutdown = threading.Event()
@@ -184,9 +186,32 @@ class MusicRelay:
                 self.capability = secrets.token_urlsafe(24)
                 self.queue = self.track = self.client = None
                 self.stream_key = ""
+                self.user_paused = False
+                self.skip_request = None
                 self.status = {"state": "waiting" if settings["enabled"] else "disabled", "title": "", "error": ""}
             self.settings, self.identity = dict(settings), identity
-            return {**settings, "control_url": self.url + "/control"}
+            return {**settings, "control_url": self.url + "/control",
+                    "paused": self.user_paused, "skip": self.skip_request}
+
+    def request_playback(self, action: str) -> None:
+        with self.lock:
+            if not self.settings["enabled"]:
+                raise ValueError("Enable background music before controlling playback")
+            if action == "pause":
+                self.user_paused = True
+            elif action == "resume":
+                if self.sleeping():
+                    raise ValueError("Music is sleeping; wake the display before resuming")
+                self.user_paused = False
+            elif action == "skip":
+                if self.sleeping() or self.track is None:
+                    raise ValueError("No current song is available to skip")
+                self.skip_request = {
+                    "request_id": secrets.token_urlsafe(12),
+                    "track_id": self.track.get("playQueueItemID"),
+                }
+            else:
+                raise ValueError("Invalid music playback action")
 
     def _timeline(self, state, position):
         if self.client is not None and self.queue is not None and self.track is not None:
@@ -305,7 +330,11 @@ class MusicRelay:
         with self.lock:
             if self.sleeping():
                 return {"state": "sleeping", "title": "", "error": ""}
-            return dict(self.status)
+            status = dict(self.status)
+            status["paused_by_user"] = self.user_paused
+            if self.user_paused and self.settings["enabled"]:
+                status["state"] = "paused"
+            return status
 
     def close(self):
         self.shutdown.set()

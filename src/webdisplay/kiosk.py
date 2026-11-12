@@ -432,6 +432,15 @@ def main() -> None:
             notification = SceneWindows()
             notification_retry_at = time.monotonic() + 5
 
+    def wait_for_next_tick() -> None:
+        deadline = time.monotonic() + 1
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return
+            time.sleep(min(0.2, remaining))
+            update_notification()
+
     def stop(*_: object) -> None:
         raise SystemExit
 
@@ -500,7 +509,7 @@ def main() -> None:
                     "" if active else ("No carousel scenes are currently available" if renderer.recovering
                                        else "Loading carousel scene"),
                 )
-                time.sleep(1)
+                wait_for_next_tick()
                 continue
             if renderer is not None:
                 renderer.close()
@@ -539,7 +548,7 @@ def main() -> None:
             else:
                 publish_remote("recovery", None, "Setup access point active" if ap_active else
                                "No display URL configured" if not target else "Waiting for website connection")
-            time.sleep(1)
+            wait_for_next_tick()
     finally:
         remote_path.unlink(missing_ok=True)
         music.close()

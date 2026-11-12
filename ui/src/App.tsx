@@ -73,7 +73,7 @@ export function App() {
   };
 
   return (
-    <div className="shell">
+    <div className={`shell${view === "admin" ? " admin-shell" : ""}`}>
       <header className="topbar">
         <h1>Web Display</h1>
         {view === "admin" && (

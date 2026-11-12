@@ -151,11 +151,6 @@ export function PlaylistCard({ notify, fail, active = true }: Props) {
         The carousel replaces the single web page while enabled. Edits take effect only
         after Save and apply. Disabling it restores the URL in Display settings.
       </p>
-      <p className="warn">
-        Experimental: scene changes relaunch the browser. Streaming video is muted by
-        default and requires mpv on the base image. Image uploads are not included yet.
-        Plex playback uses the private server configuration in Global settings.
-      </p>
       <fieldset className="playlist-fields" disabled={!playlist || busy}>
         <label className="check">
           <input type="checkbox" checked={playlist?.enabled ?? false}

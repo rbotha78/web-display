@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from contextlib import ExitStack
+import time
 
 from .display import DEFAULT_SAFE_AREA_PERCENT, countdown_position, now_playing_geometry
 
@@ -18,6 +19,8 @@ class SceneWindows:
         self.countdown_mask_gc = None
         self.safe_area_percent = DEFAULT_SAFE_AREA_PERCENT
         self.music_window = self.music_pixmap = self.music_renderer = None
+        self.music_gc = None
+        self.music_frame = None
         self.music_geometry = None
         self.music_text = ""
 
@@ -110,11 +113,14 @@ class SceneWindows:
         x, y, width, height = geometry
         title = " ".join(str(status.get("title", "")).split())[:1024]
         artist = " ".join(str(status.get("artist", "")).split())[:1024]
-        label = {"playing": "Now playing", "paused": "Music paused",
+        label = {"playing": "", "paused": "Music paused",
                  "waiting": "Waiting for music", "error": "Music interrupted - retrying"}[state]
-        text = f"{label}: {title}" if title else label
+        text = f"{label}: {title}" if label and title else title or label
+        if not text:
+            text = "Unknown track"
         if title and artist:
             text += f" - {artist}"
+        frame = int(time.monotonic() * 5) % 8 if state == "playing" else None
         if self.music_renderer is None:
             self.music_renderer = DisplayText()
         if geometry != self.music_geometry:
@@ -122,10 +128,14 @@ class SceneWindows:
                 self.music_window.destroy()
                 self.music_window = None
             if self.music_pixmap is not None:
+                self.music_gc.free()
                 self.music_pixmap.free()
             self.music_pixmap = screen.root.create_pixmap(width, height, screen.root_depth)
+            self.music_gc = self.music_pixmap.create_gc()
             display.sync()
-            self.music_renderer.draw(self.music_pixmap.id, width, height, text)
+            self.music_renderer.draw(
+                self.music_pixmap.id, width, height, text, music_icon=frame is not None,
+            )
             self.music_window = screen.root.create_window(
                 x, y, width, height, 0, screen.root_depth, X.InputOutput, X.CopyFromParent,
                 background_pixmap=self.music_pixmap, override_redirect=True,
@@ -133,14 +143,35 @@ class SceneWindows:
             self.music_window.set_wm_name("Web Display now playing")
             if display.has_extension("SHAPE"):
                 self.music_window.shape_rectangles(shape.SO.Set, shape.SK.Input, X.Unsorted, 0, 0, [])
-            self.music_geometry, self.music_text = geometry, text
-        elif text != self.music_text:
-            self.music_renderer.draw(self.music_pixmap.id, width, height, text)
+            self.music_geometry, self.music_text, self.music_frame = geometry, text, None
+        elif text != self.music_text or (frame is None) != (self.music_frame is None):
+            self.music_renderer.draw(
+                self.music_pixmap.id, width, height, text, music_icon=frame is not None,
+            )
             self.music_window.clear_area()
             self.music_text = text
+            self.music_frame = None
+        if frame is not None and frame != self.music_frame:
+            self._draw_music_icon(frame, height)
+            self.music_window.clear_area(0, 0, height, height)
+        self.music_frame = frame
         self.music_window.map()
         self.music_window.configure(stack_mode=X.Above)
         display.sync()
+
+    def _draw_music_icon(self, frame: int, size: int) -> None:
+        screen = self.display.screen()
+        self.music_gc.change(foreground=screen.black_pixel)
+        self.music_pixmap.fill_rectangle(self.music_gc, 0, 0, size, size)
+        self.music_gc.change(foreground=screen.white_pixel)
+        levels = (0.25, 0.4, 0.65, 0.9, 1.0, 0.75, 0.5, 0.3)
+        bar_width, gap = max(2, size // 12), max(2, size // 14)
+        for index in range(4):
+            bar_height = max(2, round(size * 0.65 * levels[(frame + index * 2) % 8]))
+            self.music_pixmap.fill_rectangle(
+                self.music_gc, 12 + index * (bar_width + gap),
+                (size - bar_height) // 2, bar_width, bar_height,
+            )
 
     def hide_now_playing(self) -> None:
         if self.display is None:
@@ -227,6 +258,7 @@ class SceneWindows:
                     self.hide_now_playing()
                     if self.music_window is not None:
                         self.music_window.destroy()
+                        self.music_gc.free()
                         self.music_pixmap.free()
                     if self.countdown_window is not None:
                         self.countdown_window.destroy()
@@ -241,4 +273,5 @@ class SceneWindows:
                 self.countdown_window = self.countdown_gc = self.countdown_pixmap = None
                 self.countdown_mask = self.countdown_mask_gc = None
                 self.music_window = self.music_pixmap = self.music_renderer = None
+                self.music_gc = self.music_frame = None
                 self.music_geometry = None

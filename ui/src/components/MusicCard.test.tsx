@@ -132,3 +132,101 @@ test("shows sanitized playback failure and permits disabling an unavailable stat
     enabled: false, station_key: "/library/sections/3/stations/1", volume: 15,
   }));
 });
+
+test("creates a Plex smart playlist matching all selected filters without changing playback", async () => {
+  const config = { enabled: false, station_key: "", volume: 30,
+    status: { state: "disabled", title: "", error: "" } };
+  vi.spyOn(api, "musicConfig").mockResolvedValue(config);
+  vi.spyOn(api, "musicStations").mockResolvedValue({ items: [] });
+  vi.spyOn(api, "musicBrowse").mockResolvedValue({
+    items: [{ id: "3", title: "Music", type: "library" }], total: 1, offset: 0,
+  });
+  vi.spyOn(api, "musicFilters").mockResolvedValue({
+    decade: [{ id: "1990", title: "1990s" }], genre: [{ id: "101", title: "Rock" }],
+    mood: [{ id: "201", title: "Energetic" }],
+  });
+  const preview = vi.spyOn(api, "previewSmartPlaylist").mockResolvedValue({ count: 12 });
+  const create = vi.spyOn(api, "createSmartPlaylist").mockResolvedValue({
+    key: "/playlists/901/items", title: "90s Energy", library: "Playlists", kind: "playlist", smart: true,
+  });
+  const save = vi.spyOn(api, "saveMusicConfig");
+  const notify = vi.fn();
+  render(<MusicCard configured notify={notify} fail={vi.fn()} />);
+  await screen.findByText("Music: disabled");
+  fireEvent.click(screen.getByRole("button", { name: "Create Plex smart playlist" }));
+  await screen.findByRole("option", { name: "Energetic" });
+  expect(screen.getByText("Create playlist in Plex")).toHaveProperty("disabled", true);
+  fireEvent.change(screen.getByLabelText("Playlist name"), { target: { value: "90s Energy" } });
+  fireEvent.keyDown(screen.getByLabelText("Playlist name"), { key: "Enter" });
+  expect(save).not.toHaveBeenCalled();
+  fireEvent.change(screen.getByLabelText("Album decade"), { target: { value: "1990" } });
+  fireEvent.change(screen.getByLabelText("Track genre"), { target: { value: "101" } });
+  fireEvent.change(screen.getByLabelText("Track mood"), { target: { value: "201" } });
+  fireEvent.click(screen.getByText("Preview matching tracks"));
+  await screen.findByText("12 tracks match all selected criteria.");
+  const criteria = { library: "3", decade: "1990", genre: "101", mood: "201" };
+  expect(preview).toHaveBeenCalledWith(criteria);
+  fireEvent.click(screen.getByText("Create playlist in Plex"));
+  await screen.findByRole("option", { name: "Playlists: 90s Energy (smart playlist)" });
+  expect(create).toHaveBeenCalledWith({ ...criteria, title: "90s Energy" });
+  expect(screen.getByLabelText("Music source")).toHaveProperty("value", "");
+  expect(save).not.toHaveBeenCalled();
+  expect(notify).toHaveBeenCalledWith(expect.stringContaining("created in Plex"), "success");
+});
+
+test("clears smart rules on library changes, handles empty choices and reports creation failures", async () => {
+  vi.spyOn(api, "musicConfig").mockResolvedValue({ enabled: false, station_key: "", volume: 30,
+    status: { state: "disabled", title: "", error: "" } });
+  vi.spyOn(api, "musicStations").mockResolvedValue({ items: [] });
+  vi.spyOn(api, "musicBrowse").mockResolvedValue({
+    items: [{ id: "3", title: "Music", type: "library" }, { id: "4", title: "Other", type: "library" }],
+    total: 2, offset: 0,
+  });
+  vi.spyOn(api, "musicFilters").mockImplementation(async (library) => ({
+    decade: [{ id: library === "3" ? "1990" : "2000", title: library === "3" ? "1990s" : "2000s" }],
+    genre: [], mood: [],
+  }));
+  const preview = vi.spyOn(api, "previewSmartPlaylist").mockResolvedValue({ count: 0 });
+  const create = vi.spyOn(api, "createSmartPlaylist").mockRejectedValue(new Error("Plex denied playlist creation"));
+  const fail = vi.fn();
+  render(<MusicCard configured notify={vi.fn()} fail={fail} />);
+  await screen.findByText("Music: disabled");
+  fireEvent.click(screen.getByRole("button", { name: "Create Plex smart playlist" }));
+  await screen.findByText("No track moods are available in this library.");
+  fireEvent.change(screen.getByLabelText("Playlist name"), { target: { value: "Decade" } });
+  fireEvent.change(screen.getByLabelText("Album decade"), { target: { value: "1990" } });
+  fireEvent.click(screen.getByText("Preview matching tracks"));
+  await screen.findByText("0 tracks match all selected criteria.");
+  expect(screen.getByText("Create playlist in Plex")).toHaveProperty("disabled", true);
+  fireEvent.change(screen.getByLabelText("Smart playlist library"), { target: { value: "4" } });
+  await screen.findByRole("option", { name: "2000s" });
+  expect(screen.getByLabelText("Album decade")).toHaveProperty("value", "");
+  expect(screen.queryByText("0 tracks match all selected criteria.")).toBeNull();
+  fireEvent.change(screen.getByLabelText("Album decade"), { target: { value: "2000" } });
+  fireEvent.click(screen.getByText("Create playlist in Plex"));
+  await waitFor(() => expect(fail).toHaveBeenCalledWith(expect.objectContaining({ message: "Plex denied playlist creation" })));
+  expect(create).toHaveBeenCalledWith({ title: "Decade", library: "4", decade: "2000", genre: "", mood: "" });
+  expect(screen.getByLabelText("Playlist name")).toHaveProperty("value", "Decade");
+  expect(preview).toHaveBeenCalledTimes(1);
+});
+
+test("updates enabled state from player controls without discarding music source or volume drafts", async () => {
+  const config = { enabled: true, station_key: "/playlists/11/items", volume: 30,
+    status: { state: "playing", title: "Song", error: "" } };
+  vi.spyOn(api, "musicConfig").mockResolvedValue(config);
+  vi.spyOn(api, "musicStations").mockResolvedValue({ items: [
+    { key: "/playlists/11/items", title: "Saved", library: "Playlists" },
+    { key: "/playlists/12/items", title: "Draft", library: "Playlists" },
+  ] });
+  const notify = vi.fn(), fail = vi.fn();
+  const rendered = render(<MusicCard configured notify={notify} fail={fail} />);
+  await screen.findByText("Playlists: Draft");
+  fireEvent.change(screen.getByLabelText("Music source"), { target: { value: "/playlists/12/items" } });
+  fireEvent.change(screen.getByLabelText("Music volume"), { target: { value: "45" } });
+  rendered.rerender(<MusicCard configured notify={notify} fail={fail} playbackConfig={{
+    ...config, enabled: false, status: { state: "disabled", title: "", error: "" },
+  }} />);
+  expect(screen.getByLabelText("Enable background music")).toHaveProperty("checked", false);
+  expect(screen.getByLabelText("Music source")).toHaveProperty("value", "/playlists/12/items");
+  expect(screen.getByLabelText("Music volume")).toHaveProperty("value", "45");
+});

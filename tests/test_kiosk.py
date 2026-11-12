@@ -85,9 +85,14 @@ class CarouselModeTests(unittest.TestCase):
             renderer.active_scene = None
             renderer.state.return_value = playback_state
             iterations = 0
+            clock = [0.0]
+            notification_times = []
 
-            def next_iteration(_):
+            def next_iteration(delay):
                 nonlocal iterations
+                clock[0] += delay
+                if clock[0] < iterations + 1:
+                    return
                 iterations += 1
                 if iterations == len(states):
                     raise KeyboardInterrupt
@@ -98,17 +103,23 @@ class CarouselModeTests(unittest.TestCase):
                  patch("webdisplay.kiosk.Reachability"), \
                  patch("webdisplay.kiosk.SceneRenderer", return_value=renderer), \
                  patch("webdisplay.music_player.MusicPlayer"), \
+                 patch("webdisplay.scene_windows.SceneWindows") as notification, \
                  patch("webdisplay.kiosk.SleepRuntime") as sleep_runtime, \
                  patch("webdisplay.kiosk.stop_process"), \
                  patch("webdisplay.kiosk.OfflineIcon"), \
                  patch("webdisplay.kiosk.DisplayRecovery") as display, \
                  patch("webdisplay.kiosk.signal.signal"), \
+                 patch("webdisplay.kiosk.time.monotonic", side_effect=lambda: clock[0]), \
                  patch("webdisplay.kiosk.time.sleep", side_effect=next_iteration):
                 display.return_value.check.return_value = False
+                notification.return_value.show_now_playing.side_effect = (
+                    lambda _: notification_times.append(clock[0])
+                )
                 sleep_runtime.return_value.sleeping.side_effect = states
                 sleep_runtime.return_value.status = {"sleeping": False, "scheduled_sleep": False, "wake_until": None}
                 with self.assertRaises(KeyboardInterrupt):
                     main()
+            self.assertTrue(any(0 < stamp < 1 for stamp in notification_times))
             return renderer
 
     def test_sleep_stops_active_or_preparing_video_and_does_not_rebuild_each_poll(self):
@@ -160,11 +171,15 @@ class CarouselModeTests(unittest.TestCase):
             process = Mock()
             process.poll.return_value = None
             iterations = 0
+            clock = [0.0]
             remote_views = []
 
-            def next_iteration(_):
+            def next_iteration(delay):
                 from webdisplay.remote_view import load
                 nonlocal iterations
+                clock[0] += delay
+                if clock[0] < iterations + 1:
+                    return
                 remote_views.append(load(root / "remote-view.json"))
                 iterations += 1
                 if iterations == 1:
@@ -194,6 +209,7 @@ class CarouselModeTests(unittest.TestCase):
                  patch("webdisplay.kiosk.fallback_html", return_value="setup"), \
                  patch("webdisplay.kiosk.write_fallback"), \
                  patch("webdisplay.kiosk.signal.signal"), \
+                 patch("webdisplay.kiosk.time.monotonic", side_effect=lambda: clock[0]), \
                  patch("webdisplay.kiosk.time.sleep", side_effect=next_iteration):
                 display.return_value.check.return_value = False
                 with self.assertRaises(KeyboardInterrupt):

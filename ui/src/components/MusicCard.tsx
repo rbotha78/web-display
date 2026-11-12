@@ -1,11 +1,13 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { api, type MusicBrowseItem, type MusicBrowseResult, type MusicConfig, type MusicStation } from "../api";
 import type { Notice } from "./Toast";
+import { SmartPlaylistBuilder } from "./SmartPlaylistBuilder";
 
-export function MusicCard({ configured, notify, fail }: {
+export function MusicCard({ configured, notify, fail, playbackConfig }: {
   configured: boolean;
   notify: (text: string, kind?: Notice["kind"]) => void;
   fail: (error: unknown) => void;
+  playbackConfig?: MusicConfig;
 }) {
   const [config, setConfig] = useState<MusicConfig | null>(null);
   const [stations, setStations] = useState<MusicStation[]>([]);
@@ -23,6 +25,13 @@ export function MusicCard({ configured, notify, fail }: {
   const [loading, setLoading] = useState(false);
   const [selected, setSelected] = useState<MusicBrowseItem[]>([]);
   const [loadingSaved, setLoadingSaved] = useState(false);
+  const [smartBuilder, setSmartBuilder] = useState(false);
+
+  useEffect(() => {
+    if (!playbackConfig) return;
+    setEnabled(playbackConfig.enabled);
+    setConfig(playbackConfig);
+  }, [playbackConfig]);
 
   useEffect(() => {
     let active = true;
@@ -92,6 +101,7 @@ export function MusicCard({ configured, notify, fail }: {
   }
 
   function startMix(kind: "artist" | "album") {
+    setSmartBuilder(false);
     setBuilder(kind);
     setOffset(0);
     setSearch("");
@@ -115,6 +125,7 @@ export function MusicCard({ configured, notify, fail }: {
       <select value={station} disabled={!configured || busy || !config || loadingSaved} onChange={(event) => {
         setStation(event.target.value);
         setBuilder("");
+        setSmartBuilder(false);
         setSelected([]);
       }}>
         <option value="">Select a station or playlist</option>
@@ -130,7 +141,15 @@ export function MusicCard({ configured, notify, fail }: {
     <div className="actions">
       <button type="button" disabled={!configured || busy || !config || loadingSaved} onClick={() => startMix("artist")}>Build artist mix</button>
       <button type="button" disabled={!configured || busy || !config || loadingSaved} onClick={() => startMix("album")}>Build album mix</button>
+      <button type="button" disabled={!configured || busy || !config || loadingSaved}
+        onClick={() => { setBuilder(""); setSmartBuilder(true); }}>Create Plex smart playlist</button>
     </div>
+    {smartBuilder && configured && <SmartPlaylistBuilder disabled={busy} fail={fail}
+      onClose={() => setSmartBuilder(false)} onCreated={(playlist) => {
+        setStations((current) => [...current.filter((item) => item.key !== playlist.key), playlist]);
+        setSmartBuilder(false);
+        notify("Smart playlist created in Plex. Select it as a music source to use it here.", "success");
+      }} />}
     {loadingSaved && <p role="status">Loading saved mix...</p>}
     {builder && <fieldset disabled={busy}>
       <legend>Custom {builder} mix</legend>
