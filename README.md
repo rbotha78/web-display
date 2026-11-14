@@ -3,11 +3,12 @@
 A 32-bit Raspberry Pi OS appliance for Raspberry Pi 2 and Raspberry Pi 3,
 with Chromium on HDMI, authenticated HTTPS administration, Wi-Fi provisioning,
 signed application updates and PC and Android display managers.
-Release **[v0.5.19](https://github.com/rbotha78/web-display/releases/tag/v0.5.19)**
-adds synchronized music groups across displays, per-weekday music sources, a
-five-star Plex Like button in the floating player, device configuration inside
-both managers without a browser tab, and a simplified manager home with player
-controls.
+Release **[v0.5.20](https://github.com/rbotha78/web-display/releases/tag/v0.5.20)**
+adds Bluetooth speaker pairing, automatic wired fallback and adjustable
+music-group delay, with controls in both managers. Bluetooth requires the new
+base image; a signed application update alone cannot install its system packages
+and helpers. This release also stabilizes the Chromium and sleep tests used by
+CI and release builds.
 Saving settings retains the saved values when confirmation notifications appear,
 without reloading stale configuration into the editor.
 Administration opens on **Global settings** (display defaults, sleep, provider credentials,
@@ -741,6 +742,13 @@ PYTHONPATH=src python3 -m unittest discover -s tests -v
 python3 -m compileall -q src tests
 bash -n build-image.sh image/stage-web-display/{prerun.sh,01-install/00-run.sh}
 ```
+
+When Chrome or Chromium is installed, the Python suite also runs a real-browser
+smoke test against local fixture files. It waits for each page to finish
+loading before testing tab freezing/retention, uses a temporary browser profile
+and disk-backed shared memory for constrained CI runners, and prints Chromium
+diagnostics on failure. Browser startup and assertion failures still fail the
+suite; they are not retried or silently skipped.
 
 Cold boot, HDMI rendering, browser performance, certificate onboarding, service
 recovery, memory use and unattended operation still require validation on an

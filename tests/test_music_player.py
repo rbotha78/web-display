@@ -58,6 +58,8 @@ class MusicPlayerTests(unittest.TestCase):
         player._stop_player = Mock()
         player._control = Mock(return_value={"track_id": "1"})
         player._load = Mock(return_value=False)
+        player.sleep_runtime = Mock()
+        player.sleep_runtime.sleeping.side_effect = [False, True, True, False]
         iterations = 0
 
         def wait(_):
@@ -72,8 +74,7 @@ class MusicPlayerTests(unittest.TestCase):
             player.config_path.write_text(json.dumps({
                 "enabled": True, "station_key": "station", "control_url": self.endpoint, "volume": 30,
             }))
-            with patch("webdisplay.music_player.SleepRuntime.sleeping", side_effect=[False, True, True, False]):
-                player._run()
+            player._run()
         self.assertEqual([call.args[1] for call in player._control.call_args_list],
                          ["current", "stop", "current", "stop"])
         self.assertEqual(player._load.call_count, 2)

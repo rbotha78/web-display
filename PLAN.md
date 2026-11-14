@@ -341,13 +341,13 @@ also tested on both devices. Phase B (A/B root images) remains deferred.
 Milestone 4 (central device management) is implemented and hardware-tested,
 including discovery/enrolment, multi-address reporting, management actions and
 device-side API-key revocation. The latest published application/manager release
-is **v0.5.19**; verify its asset-building workflows before assuming completion.
+is **v0.5.20**; verify its asset-building workflows before assuming completion.
 It includes native manager configuration, Plex liking, weekday music sources and
 leader-coordinated music sync groups.
-Bluetooth speaker output (all audio, wired fallback, delay compensation) is
-implemented after v0.5.19 but needs a new base image and hardware validation.
-Both development Pis also have newer train-layout and Plex playlist/mix changes.
-Version metadata remains 0.5.17 until a separately requested release.
+Bluetooth speaker output (all audio, wired fallback, delay compensation) and
+CI/release test stability fixes are included in v0.5.20. Bluetooth needs a new
+base image. Pi 3 music, wired fallback, reconnection and delay were validated
+with a JBL Flip 4; video audio and a Pi 2 USB Bluetooth adapter remain untested.
 
 Production hardening, full release acceptance and the two Wi-Fi reliability
 investigations remain outstanding. Persistent-renderer/dashboard acknowledgment,

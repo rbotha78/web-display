@@ -1,6 +1,6 @@
 # Copilot Session Handoff
 
-Last updated: 2026-11-12.
+Last updated: 2026-11-14.
 
 ## Start Here
 
@@ -22,9 +22,14 @@ vitals or deployment instructions.
   the guidance refresh followed in `c82595c`. The v0.5.18 release work includes
   the deployed animated equalizer icon, Plex smart-playlist builder, floating
   admin music controls and admin landing/guidance refinements.
-- Latest published release/tag: **v0.5.19**, published Nov 14 with the APK
-  below; signed-update and image assets come from release workflows.
-- Previous release **v0.5.18**, committed in `552e85d` and published
+- Release/tag: **v0.5.20**, adding Bluetooth speaker controls to both managers,
+  live output switching, wired fallback and manual group-delay compensation.
+  It also stabilizes the Chromium smoke test and isolates the music sleep mock
+  from background threads. All 436 Python tests and 60 single-CPU browser runs
+  passed locally. Signed-update and image assets come from release workflows;
+  check their status rather than assuming completion. Bluetooth requires the
+  new base image; signed updates cannot install its system packages/helpers.
+- Earlier release **v0.5.18**, committed in `552e85d` and published
   on Nov 12. That release added optional previous departures,
   reclaimed row space, the larger footer clock, Plex playlists/custom mixes,
   smart-playlist creation, floating admin music controls, the animated music
@@ -36,12 +41,13 @@ vitals or deployment instructions.
   (run `42657619061`); it is no longer waiting to build. This is not a claim that
   this newly built image has been flashed/boot-accepted on both Pis.
 - The local Android APK at
-  `android/app/build/outputs/apk/debug/web-display-manager.apk` was rebuilt Nov 12
-  Nov 14 at 08:34 UTC with native configuration, compact home, stable sync
-  indicators, fixed-width refresh, discovery matching, weekday music sources and
-  music sync groups (26,200,539 bytes), SHA-256
-  `643f86748f1068aeea37cfe04663fc0884533c96ddfa23ea33c720b966244523`.
-  This APK is attached to v0.5.19.
+  `android/app/build/outputs/apk/debug/web-display-manager.apk` was rebuilt
+  Nov 14 with native Bluetooth speaker settings, including the existing
+  configuration, music controls and sync-group screens (26,247,279 bytes),
+  SHA-256 `b86f7786a6d9ac62603c6e6ea8583fdd14867d752cc21e92203763ef707d5ae5`.
+  This APK is attached to v0.5.20; keep using the local development signing key
+  for release APKs so existing installations can upgrade without a signature
+  mismatch.
 
 ## Current Development Deployment (2026-11-12)
 
