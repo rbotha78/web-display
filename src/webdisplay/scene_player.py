@@ -31,6 +31,7 @@ from .browser import BrowserError, PersistentBrowser, Tab
 from .scene_windows import SceneWindows
 from .display import DEFAULT_SAFE_AREA_PERCENT
 from .audio import DEFAULT_AUDIO_OUTPUT, audio_outputs
+from .bluetooth import is_bluetooth_output
 from .raildata import board_matches
 
 LOG = logging.getLogger(__name__)
@@ -283,6 +284,16 @@ class SceneRenderer:
         except OSError:
             LOG.exception("Could not display carousel countdown")
             self.countdown_failed = True
+
+    def set_audio_output(self, output: str) -> None:
+        if output == self.audio_output:
+            return
+        self.audio_output = output
+        if self.ipc is not None and self.process is not None and self.process.poll() is None:
+            try:
+                self._command(["set_property", "audio-device", output])
+            except (OSError, ValueError):
+                LOG.warning("Could not switch video audio output")
 
     def set_safe_area(self, percent: int) -> None:
         self.server.safe_area_percent = percent
@@ -573,7 +584,9 @@ class SceneRenderer:
     def state(self) -> PlaybackState:
         if self.scene is None or self.preparation_failed:
             return "failed"
-        if self.scene["kind"] == "video" and self.scene.get("audio_enabled"):
+        # The kiosk only selects a Bluetooth output while its supervisor reports it connected.
+        if (self.scene["kind"] == "video" and self.scene.get("audio_enabled")
+                and not is_bluetooth_output(self.audio_output)):
             try:
                 available = {item["id"] for item in audio_outputs()}
             except OSError:

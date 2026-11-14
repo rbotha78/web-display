@@ -7,6 +7,17 @@ import java.util.UUID
 data class DisplayConfig(val url: String, val autoAp: Boolean, val safeAreaPercent: Int, val audioOutput: String)
 data class DisplayDraft(val url: String, val autoAp: Boolean, val safeArea: String, val audioOutput: String)
 data class AudioOutput(val id: String, val label: String)
+data class BluetoothStatus(
+    val supported: Boolean,
+    val adapter: Boolean?,
+    val address: String,
+    val name: String,
+    val enabled: Boolean,
+    val delayMs: Int,
+    val connected: Boolean,
+    val active: Boolean,
+)
+data class BluetoothDevice(val address: String, val name: String, val paired: Boolean, val connected: Boolean, val audio: Boolean)
 
 data class SleepWindow(val enabled: Boolean, val start: String, val end: String)
 data class SleepSchedule(val days: Map<String, SleepWindow>)
@@ -149,6 +160,35 @@ object SettingsRules {
 
     fun parseAudioOutputs(json: JSONObject): List<AudioOutput> = parsing("audio output") {
         json.objects("items").map { AudioOutput(it.str("id"), it.str("label")) }
+    }
+
+    fun parseBluetooth(json: JSONObject): BluetoothStatus = parsing("Bluetooth speaker") {
+        val adapter = json.opt("adapter")
+        require(adapter == null || adapter is Boolean || adapter === JSONObject.NULL)
+        BluetoothStatus(
+            json.bool("supported"), (adapter as? Boolean), json.str("address"), json.str("name"),
+            json.bool("enabled"), json.int("delay_ms").also { require(it in -1000..1000) },
+            json.bool("connected"), json.bool("active"),
+        )
+    }
+
+    fun parseBluetoothScan(json: JSONObject): List<BluetoothDevice> = parsing("Bluetooth scan") {
+        json.objects("items").map {
+            BluetoothDevice(it.str("address"), it.str("name"), it.bool("paired"), it.bool("connected"), it.bool("audio"))
+        }
+    }
+
+    fun bluetoothEnabledPayload(enabled: Boolean) = JSONObject().put("enabled", enabled)
+
+    fun bluetoothDelayPayload(value: String): JSONObject {
+        val delay = value.trim().toIntOrNull()
+        require(delay != null && delay in -1000..1000) { "Speaker delay must be between -1000 and 1000 ms" }
+        return JSONObject().put("delay_ms", delay)
+    }
+
+    fun bluetoothPairPayload(address: String, name: String): JSONObject {
+        require(address.isNotBlank()) { "Select a Bluetooth speaker to pair" }
+        return JSONObject().put("address", address).put("name", name)
     }
 
     fun parseSleep(json: JSONObject): SleepConfig = parsing("sleep schedule") {

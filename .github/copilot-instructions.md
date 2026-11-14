@@ -217,6 +217,14 @@ HTTPS service and upstream headers, never in scene data or player URLs.
   `sync` with prime-then-unpause plus speed/seek drift correction. In sync mode
   legacy player actions are rejected; video/sleep mute locally only. The device
   package must not import `webdisplay_manager`.
+- Bluetooth speaker (`webdisplay.bluetooth`): root `bluetooth-action` sudo helper
+  (scan/pair/connect/disconnect/remove via `bluetoothctl`, whose exit codes are
+  unreliable, so verify with `info`) and root `web-display-bluetooth.service`
+  supervisor. The app publishes `/run/web-display/bluetooth.json`; the supervisor
+  publishes `bluetooth-status.json`; `active_output` picks
+  `alsa/bluealsa:DEV=..,PROFILE=a2dp` only while freshly connected, else the
+  wired output. Players switch `audio-device` live; positive `delay_ms` shifts
+  group playback earlier. BlueALSA runs source-only (`a2dp-source`).
 - Keep background-music settings backwards compatible as
   `{enabled, station_key, volume, day_sources}`; a PUT omitting `day_sources`
   preserves the saved weekday schedule. Blank days use `station_key`. The relay

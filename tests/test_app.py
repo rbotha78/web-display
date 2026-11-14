@@ -396,6 +396,51 @@ class ApiTests(unittest.TestCase):
             self.assertEqual(response.status, 400)
         self.assertEqual(self.app.config.load()["audio_output"], output)
 
+    def test_bluetooth_pairing_settings_and_runtime_publication(self):
+        import subprocess
+        import time
+        root = Path(self.directory.name)
+        speaker = "AA:BB:CC:DD:EE:01"
+        response, _ = self.request("GET", "/api/bluetooth")
+        self.assertEqual(response.status, 401)
+        key = self.app.create_key("Bluetooth manager")["key"]
+        headers = {"Authorization": f"Bearer {key}"}
+        response, payload = self.request("GET", "/api/bluetooth", headers=headers)
+        self.assertEqual((payload["supported"], payload["address"], payload["active"]), (False, "", False))
+        response, payload = self.request("POST", "/api/bluetooth/scan", {}, headers)
+        self.assertEqual(response.status, 400)
+        self.assertIn("base image", payload["error"])
+        self.app.bluetooth_helper = root / "bluetooth-action"
+        self.app.bluetooth_helper.write_text("")
+        requests = []
+
+        def helper(command, input, **_kwargs):
+            request = json.loads(input)
+            requests.append(request)
+            result = {"device": {"name": "Kitchen", "paired": True}} if request["action"] == "pair" else {"ok": True}
+            return subprocess.CompletedProcess(command, 0, json.dumps(result), "")
+
+        with patch("webdisplay.app.subprocess.run", side_effect=helper):
+            response, _ = self.request("PUT", "/api/bluetooth", {"enabled": True}, headers)
+            self.assertEqual(response.status, 400)
+            response, payload = self.request("POST", "/api/bluetooth/pair", {"address": speaker.lower()}, headers)
+            self.assertEqual(response.status, 200)
+            self.assertEqual((payload["address"], payload["name"], payload["enabled"]), (speaker, "Kitchen", True))
+            self.assertEqual(json.loads((root / "bluetooth.json").read_text()),
+                             {"address": speaker, "enabled": True, "delay_ms": 0})
+            (root / "bluetooth-status.json").write_text(json.dumps(
+                {"available": True, "address": speaker, "connected": True, "updated": time.time()}))
+            response, payload = self.request("PUT", "/api/bluetooth", {"delay_ms": 120}, headers)
+            self.assertEqual((payload["delay_ms"], payload["active"], payload["adapter"]), (120, True, True))
+            response, _ = self.request("PUT", "/api/bluetooth", {"delay_ms": 5000}, headers)
+            self.assertEqual(response.status, 400)
+            response, payload = self.request("PUT", "/api/bluetooth", {"enabled": False}, headers)
+            self.assertEqual((payload["enabled"], payload["active"]), (False, False))
+            response, payload = self.request("POST", "/api/bluetooth/forget", {}, headers)
+            self.assertEqual(payload["address"], "")
+        self.assertEqual([request["action"] for request in requests], ["pair", "disconnect", "remove"])
+        self.assertEqual(self.app.config.load()["bluetooth"]["address"], "")
+
     def test_playlist_auth_validation_and_atomic_publication(self):
         response, _ = self.request("GET", "/api/playlist")
         self.assertEqual(response.status, 401)

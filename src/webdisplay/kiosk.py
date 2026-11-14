@@ -23,6 +23,7 @@ from .sleep import SleepRuntime
 from .scene_player import SceneRenderer, reachable, stop_process
 from .display import DEFAULT_SAFE_AREA_PERCENT, validate_safe_area
 from .audio import DEFAULT_AUDIO_OUTPUT, validate_audio_output
+from . import bluetooth
 
 LOG = logging.getLogger(__name__)
 
@@ -492,11 +493,15 @@ def main() -> None:
                         lambda url, pipes: launch(args.browser, url, pipes), fallback_path.parent, args.mpv,
                         music.pause_for_video,
                     )
+                # Video audio follows a connected Bluetooth speaker, otherwise the wired output.
+                renderer.set_audio_output(bluetooth.active_output(
+                    audio_output, Path(args.playlist).with_name("bluetooth.json"),
+                    Path(args.playlist).with_name("bluetooth-status.json"),
+                )[0])
                 if carousel is None or playlist != previous_playlist or revision != previous_revision:
                     if carousel:
                         carousel.stop()
                     renderer.set_safe_area(safe_area)
-                    renderer.audio_output = audio_output
                     carousel = Carousel(playlist, renderer, control_generation)
                     new_carousel = True
                     previous_playlist = playlist

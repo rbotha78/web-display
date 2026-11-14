@@ -344,6 +344,8 @@ device-side API-key revocation. The latest published application/manager release
 is **v0.5.19**; verify its asset-building workflows before assuming completion.
 It includes native manager configuration, Plex liking, weekday music sources and
 leader-coordinated music sync groups.
+Bluetooth speaker output (all audio, wired fallback, delay compensation) is
+implemented after v0.5.19 but needs a new base image and hardware validation.
 Both development Pis also have newer train-layout and Plex playlist/mix changes.
 Version metadata remains 0.5.17 until a separately requested release.
 

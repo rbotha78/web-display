@@ -1,6 +1,7 @@
 import json
 import tempfile
 import threading
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
@@ -219,6 +220,38 @@ class MusicPlayerTests(unittest.TestCase):
         self.assertEqual(player.audio_output, "alsa/plughw:CARD=USB,DEV=0")
         self.assertEqual(player._load.call_count, 2)
         self.assertEqual(player._stop_player.call_count, 3)
+
+    def test_connected_speaker_switches_output_live_and_offsets_group_clock(self):
+        player = self.player()
+        player._command = Mock(return_value=None)
+        player.audio_output = "alsa/hdmi:CARD=vc4hdmi,DEV=0"
+        speaker = "AA:BB:CC:DD:EE:01"
+        with tempfile.TemporaryDirectory() as directory:
+            player.config_path = Path(directory) / "music.json"
+            (Path(directory) / "bluetooth.json").write_text(
+                json.dumps({"address": speaker, "enabled": True, "delay_ms": 200}))
+            status = Path(directory) / "bluetooth-status.json"
+            status.write_text(json.dumps({"address": speaker, "connected": True, "updated": time.time()}))
+            wired, output = player._resolve_output({})
+            player._apply_output(output)
+            self.assertEqual(player.output_delay, 0.2)
+            player._command.assert_called_once_with(["set_property", "audio-device",
+                                                     f"alsa/bluealsa:DEV={speaker},PROFILE=a2dp"])
+            status.write_text(json.dumps({"address": speaker, "connected": False, "updated": time.time()}))
+            _, output = player._resolve_output({})
+            player._apply_output(output)
+            self.assertEqual((player.audio_output, player.output_delay), (wired, 0.0))
+        # Playing ahead of the group by the speaker delay: 10 s into a track heard 0.2 s late.
+        player.output_delay = 0.2
+        player.sync = {"track": "1", "armed": True, "settle_at": 0.0, "volume": 30}
+        player.process.poll.return_value = None
+        player._command = Mock(return_value=10.2)
+        player.sleep_runtime = Mock()
+        with patch("webdisplay.music_player.time.time", return_value=1010.0):
+            player._sync_apply({"state": "playing", "url": self.endpoint.removesuffix("control") + "stream/" + "b" * 32,
+                                "track_id": "1", "started_at": 1000.0, "duration": 100},
+                               self.endpoint, False, False, 30)
+        player._command.assert_called_with(["set_property", "speed", 1.0])
 
     def test_next_track_reuses_process_and_defers_loading_while_video_paused(self):
         player = self.player()

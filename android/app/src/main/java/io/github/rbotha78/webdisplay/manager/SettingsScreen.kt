@@ -60,6 +60,7 @@ fun SettingsScreen(state: SettingsState, editor: SettingsSession, viewModel: Man
         item { Header(state, dirty, working, editor, ask, leave) }
         if (state.tab == SettingsTab.GLOBAL) {
             item { DisplaySection(state, editor, working) }
+            item { BluetoothSection(state, editor, working, ask) }
             item { SleepSection(state, editor, working) }
             item { PlexSection(state, editor, working, ask) }
             item { MusicSection(state, editor, working) }
@@ -168,6 +169,87 @@ private fun DisplaySection(state: SettingsState, editor: SettingsSession, workin
             }
         }
         Button(onClick = editor::saveDisplay, enabled = !working && state.dirty(SettingsPart.DISPLAY)) { Text("Save display settings") }
+    }
+}
+
+@Composable
+private fun BluetoothSection(
+    state: SettingsState,
+    editor: SettingsSession,
+    working: Boolean,
+    ask: (Confirmation) -> Unit,
+) {
+    SectionCard("Bluetooth speaker", state.bluetooth, SettingsPart.BLUETOOTH, editor, false, working) { server, _ ->
+        if (!server.supported) {
+            Hint("This display's base image does not include Bluetooth audio. Flash a newer image to use a speaker.")
+            return@SectionCard
+        }
+        if (server.adapter == false) {
+            Hint("No Bluetooth adapter found. Raspberry Pi 2 needs a USB Bluetooth adapter.")
+            return@SectionCard
+        }
+
+        val paired = server.address.isNotEmpty()
+        if (paired) {
+            Text(server.name.ifBlank { server.address }, fontWeight = FontWeight.SemiBold)
+            Hint(when {
+                server.active -> "Playing through speaker"
+                server.enabled -> "Not connected · using wired output"
+                else -> "Off · using wired output"
+            })
+            CheckRow(
+                "Play video audio and music through this speaker",
+                server.enabled,
+                editor::setBluetoothEnabled,
+                enabled = !working,
+                switch = true,
+            )
+            var delay by remember(state.identity.id, server.address, server.delayMs) {
+                mutableStateOf(server.delayMs.toString())
+            }
+            DraftField(delay, { delay = it }, "Extra speaker delay (ms)", number = true, signedNumber = true, maxLength = 5)
+            val delayValue = delay.trim().toIntOrNull()
+            if (delayValue == null || delayValue !in -1000..1000) {
+                ErrorText("Enter a whole number from -1000 to 1000 ms.")
+            }
+            Hint("Only affects synced group music. The speaker's reported latency is already compensated; raise this if this display still sounds behind the others.")
+            Button(
+                onClick = { editor.saveBluetoothDelay(delay) },
+                enabled = !working && delayValue?.let { it in -1000..1000 && it != server.delayMs } == true,
+            ) { Text("Save delay") }
+            OutlinedButton(onClick = {
+                ask(Confirmation(
+                    "Forget ${server.name.ifBlank { "this speaker" }}?",
+                    "The speaker will be unpaired from this display. Audio will use the wired output.",
+                    "Forget speaker",
+                ) { editor.forgetBluetooth() })
+            }, enabled = !working) { Text("Forget speaker") }
+        } else {
+            Hint("No speaker paired. Audio uses the wired output.")
+            Hint("Put the speaker in pairing mode, then search. Pairing takes up to a minute. While the speaker is off or out of range, audio falls back to the wired output and the display keeps trying to reconnect.")
+            val searching = state.working == "Searching for Bluetooth speakers"
+            OutlinedButton(onClick = editor::scanBluetooth, enabled = !working) {
+                Text(if (searching) "Searching…" else "Find speakers")
+            }
+            state.bluetoothScan?.let { devices ->
+                if (devices.isEmpty()) Hint("No Bluetooth devices found.")
+                else ChoiceField(
+                    "Speakers found",
+                    devices.map { device ->
+                        device.address to (device.name.ifBlank { device.address } +
+                            (if (device.audio) "" else " (not an audio device)") +
+                            (if (device.paired) " · paired" else ""))
+                    },
+                    state.bluetoothSelectedAddress,
+                    editor::selectBluetooth,
+                    enabled = !working,
+                )
+                Button(onClick = editor::pairBluetooth, enabled = !working && state.bluetoothSelectedAddress.isNotBlank()) {
+                    Text("Pair and use")
+                }
+            }
+        }
+        TextButton(onClick = editor::refreshBluetooth, enabled = !working) { Text("Refresh Bluetooth status") }
     }
 }
 

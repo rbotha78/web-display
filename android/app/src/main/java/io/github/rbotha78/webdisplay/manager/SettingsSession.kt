@@ -24,6 +24,7 @@ enum class SettingsTab { GLOBAL, CAROUSEL }
 enum class SettingsPart(val path: String, val label: String) {
     DISPLAY("/api/config", "Display"),
     AUDIO("/api/audio/outputs", "Audio outputs"),
+    BLUETOOTH("/api/bluetooth", "Bluetooth speaker"),
     SLEEP("/api/sleep", "Sleep schedule"),
     PLEX("/api/plex/config", "Plex"),
     MUSIC("/api/plex/music", "Background music"),
@@ -71,6 +72,9 @@ data class SettingsState(
     val working: String? = null,
     val display: Section<DisplayConfig, DisplayDraft> = Section(),
     val audio: Section<List<AudioOutput>, Unit> = Section(),
+    val bluetooth: Section<BluetoothStatus, Unit> = Section(),
+    val bluetoothScan: List<BluetoothDevice>? = null,
+    val bluetoothSelectedAddress: String = "",
     val sleep: Section<SleepConfig, SleepSchedule> = Section(),
     val plex: Section<PlexSettings, PlexDraft> = Section(),
     val music: Section<MusicSettings, MusicDraft> = Section(),
@@ -119,6 +123,8 @@ class SettingsSession(
                 SettingsRules::parseDisplay, SettingsRules::displayDraft),
             SettingsPart.AUDIO to Binding({ it.audio }, { s, v -> s.copy(audio = v) },
                 SettingsRules::parseAudioOutputs, { null }),
+            SettingsPart.BLUETOOTH to Binding({ it.bluetooth }, { s, v -> s.copy(bluetooth = v) },
+                SettingsRules::parseBluetooth, { null }, tracksDrafts = false),
             SettingsPart.SLEEP to Binding({ it.sleep }, { s, v -> s.copy(sleep = v) },
                 SettingsRules::parseSleep, { it.schedule }),
             SettingsPart.PLEX to Binding({ it.plex }, { s, v -> s.copy(plex = v) },
@@ -379,6 +385,71 @@ class SettingsSession(
     /** Refreshes the music status; a dirty music draft and its baseline are left untouched. */
     fun refreshMusic() = load(setOf(SettingsPart.MUSIC), discard = false)
 
+    fun refreshBluetooth() = load(setOf(SettingsPart.BLUETOOTH), discard = false)
+
+    fun setBluetoothEnabled(enabled: Boolean) = mutate(
+        if (enabled) "Enabling Bluetooth speaker" else "Disabling Bluetooth speaker", SettingsPart.BLUETOOTH,
+    ) { id, current ->
+        val saved = SettingsRules.parseBluetooth(backend.send(
+            id, "PUT", SettingsPart.BLUETOOTH.path, SettingsRules.bluetoothEnabledPayload(enabled), 60_000,
+        ))
+        if (current()) ownWrite(SettingsPart.BLUETOOTH, saved)
+    }
+
+    fun saveBluetoothDelay(value: String) {
+        val body = try { SettingsRules.bluetoothDelayPayload(value) } catch (error: IllegalArgumentException) {
+            setError(SettingsPart.BLUETOOTH, error.message)
+            notify(error.message.orEmpty())
+            return
+        }
+        mutate("Saving speaker delay", SettingsPart.BLUETOOTH) { id, current ->
+            val saved = SettingsRules.parseBluetooth(backend.send(id, "PUT", SettingsPart.BLUETOOTH.path, body, 60_000))
+            if (current()) ownWrite(SettingsPart.BLUETOOTH, saved)
+        }
+    }
+
+    fun scanBluetooth() = mutate("Searching for Bluetooth speakers", SettingsPart.BLUETOOTH) { id, current ->
+        val devices = SettingsRules.parseBluetoothScan(backend.send(
+            id, "POST", "/api/bluetooth/scan", JSONObject(), 60_000,
+        ))
+        if (current()) mutable.update { state ->
+            state?.copy(
+                bluetoothScan = devices,
+                bluetoothSelectedAddress = (devices.firstOrNull { it.audio } ?: devices.firstOrNull())?.address.orEmpty(),
+            )
+        }
+        if (current()) notify("${devices.size} Bluetooth devices found.")
+    }
+
+    fun selectBluetooth(address: String) = mutable.update { it?.copy(bluetoothSelectedAddress = address) }
+
+    fun pairBluetooth() {
+        val state = mutable.value ?: return
+        val device = state.bluetoothScan?.firstOrNull { it.address == state.bluetoothSelectedAddress } ?: return
+        val body = try { SettingsRules.bluetoothPairPayload(device.address, device.name) } catch (error: IllegalArgumentException) {
+            setError(SettingsPart.BLUETOOTH, error.message)
+            notify(error.message.orEmpty())
+            return
+        }
+        mutate("Pairing Bluetooth speaker", SettingsPart.BLUETOOTH) { id, current ->
+            val saved = SettingsRules.parseBluetooth(backend.send(id, "POST", "/api/bluetooth/pair", body, 120_000))
+            if (current()) {
+                ownWrite(SettingsPart.BLUETOOTH, saved)
+                mutable.update { it?.copy(bluetoothScan = null, bluetoothSelectedAddress = "") }
+                notify("Bluetooth speaker paired.")
+            }
+        }
+    }
+
+    fun forgetBluetooth() = mutate("Forgetting Bluetooth speaker", SettingsPart.BLUETOOTH) { id, current ->
+        val saved = SettingsRules.parseBluetooth(backend.send(id, "POST", "/api/bluetooth/forget", JSONObject(), 60_000))
+        if (current()) {
+            ownWrite(SettingsPart.BLUETOOTH, saved)
+            mutable.update { it?.copy(bluetoothScan = null, bluetoothSelectedAddress = "") }
+            notify("Bluetooth speaker forgotten.")
+        }
+    }
+
     fun setHostname() {
         val draft = mutable.value?.status?.draft ?: return
         val body = try { SettingsRules.hostnamePayload(draft) } catch (error: IllegalArgumentException) {
@@ -615,9 +686,12 @@ class SettingsSession(
                 { error ->
                     val status = (error as? DeviceRequestException)?.status
                     val unsupported = status == 404 || status == 405
+                    val bluetoothOldFirmware = part == SettingsPart.BLUETOOTH && status == 404
                     val plexOff = part == SettingsPart.STATIONS && state.plex.server?.configured == false
                     when {
                         plexOff -> Section<Any?, Any?>(server = emptyList<MusicStation>())
+                        bluetoothOldFirmware -> Section(loading = false, unsupported = true,
+                            error = "Bluetooth audio is unavailable on this firmware. Update the device to use a speaker.")
                         section.server != null && !discard -> section.copy(loading = false, error = error.message)
                         else -> Section(loading = false, unsupported = unsupported,
                             error = if (unsupported) UNSUPPORTED else error.message ?: "Could not load ${part.label}")

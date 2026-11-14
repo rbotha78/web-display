@@ -190,6 +190,17 @@ vitals or deployment instructions.
 
 ## Latest Validation
 
+- Bluetooth speaker: full Python suite 436 tests, 111 UI tests, typecheck/both
+  builds, Android 75 tests/lint (0 errors)/APK passed. Pi 3 (BlueALSA installed
+  manually, source-only) paired a JBL Flip 4 through the no-input agent; synced
+  group music switched live to `alsa/bluealsa:...`, fell back to the jack when
+  the speaker was switched off (one mpv error, 5 s retry) and returned live on
+  automatic reconnection. A `delay_ms` of 180 ms aligned it with the wired Pi 2
+  leader (BlueALSA's reported delay alone left it late). Video audio over
+  Bluetooth and the admin/Android UIs were not exercised on hardware. Pi 2 has
+  no adapter (`available: false`). Testing tip: instantiating `Application`
+  outside the service republishes `music.json` with a dead relay URL.
+
 - Music sync groups (leader-coordinated): full Python suite 429 tests, 109 UI
   tests, typecheck/both builds, Android 73 tests/lint (0 errors, 5 warnings)/APK
   passed. Deployed Nov 14 to both Pis (development targets): services active,

@@ -35,6 +35,7 @@ from .carousel import (
 )
 from .display import DEFAULT_SAFE_AREA_PERCENT, validate_safe_area
 from .audio import DEFAULT_AUDIO_OUTPUT, audio_outputs, validate_audio_output
+from . import bluetooth
 from .hostname_helper import validate_hostname
 from .network import default_route_interface, internet_status, website_status
 from .plex import RATING_KEY, PlexClient, PlexPlaybackProxy, validate_server_url, validate_token
@@ -97,6 +98,7 @@ class ConfigStore:
                 return {"url": "", "password": None, "auto_ap": False,
                         "safe_area_percent": DEFAULT_SAFE_AREA_PERCENT,
                         "audio_output": DEFAULT_AUDIO_OUTPUT,
+                        "bluetooth": bluetooth.validate_bluetooth_config({}),
                         "api_keys": [], "playlist": {"enabled": False, "scenes": []},
                         "plex_server_url": "", "plex_token": "", "plex_client_identifier": "",
                         "plex_default_bitrate_kbps": DEFAULT_PLEX_BITRATE_KBPS,
@@ -112,6 +114,7 @@ class ConfigStore:
                 "password": data.get("password"),
                 "auto_ap": data.get("auto_ap") is True,
                 "audio_output": validate_audio_output(data.get("audio_output", DEFAULT_AUDIO_OUTPUT)),
+                "bluetooth": bluetooth.validate_bluetooth_config(data.get("bluetooth", {})),
                 "safe_area_percent": validate_safe_area(
                     data.get("safe_area_percent", DEFAULT_SAFE_AREA_PERCENT)
                 ),
@@ -153,6 +156,7 @@ class ConfigStore:
             data["url"] = validate_url(data.get("url", ""))
             data["auto_ap"] = validate_flag(data.get("auto_ap", False))
             data["audio_output"] = validate_audio_output(data.get("audio_output", DEFAULT_AUDIO_OUTPUT))
+            data["bluetooth"] = bluetooth.validate_bluetooth_config(data.get("bluetooth", {}))
             data["safe_area_percent"] = validate_safe_area(
                 data.get("safe_area_percent", DEFAULT_SAFE_AREA_PERCENT)
             )
@@ -334,8 +338,11 @@ class Application:
         update_helper: Path | None = None,
         updater: Updater | None = None,
         debug_keys_helper: Path | None = None,
+        bluetooth_helper: Path | None = None,
     ):
         self.update_helper = update_helper
+        self.bluetooth_helper = bluetooth_helper
+        self.bluetooth_lock = threading.Lock()
         self.debug_keys_helper = debug_keys_helper
         self.debug_keys_lock = threading.Lock()
         self.updater = updater or Updater()
@@ -414,6 +421,7 @@ class Application:
                 config = self.config.load()
                 self._publish_sleep(config)
             self._publish_music(config)
+            self._publish_bluetooth(config)
             playlist = validate_playlist(config["playlist"])
             self.plex_proxy.clear()
             runtime_scenes = []
@@ -772,6 +780,93 @@ class Application:
             message = payload.get("error") if isinstance(payload, dict) else None
             raise ValueError(str(message or "Wi-Fi helper failed"))
         return payload
+
+    def _publish_bluetooth(self, config: dict[str, object]) -> None:
+        settings = config["bluetooth"]
+        atomic_write(self.target_path.with_name("bluetooth.json"), json.dumps(
+            {key: settings[key] for key in ("address", "enabled", "delay_ms")}  # type: ignore[index]
+        ) + "\n", mode=0o640)
+
+    def bluetooth_status(self) -> dict[str, object]:
+        settings = self.config.load()["bluetooth"]
+        status_path = self.target_path.with_name("bluetooth-status.json")
+        try:
+            status = json.loads(status_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            status = {}
+        adapter = status.get("available") if isinstance(status, dict) else None
+        connected = bool(settings["address"]) and bluetooth.connected_address(status_path) == settings["address"]
+        return {**settings,  # type: ignore[dict-item]
+                "supported": self.bluetooth_helper is not None and self.bluetooth_helper.exists(),
+                "adapter": adapter if isinstance(adapter, bool) else None,
+                "connected": connected, "active": connected and bool(settings["enabled"])}  # type: ignore[index]
+
+    def run_bluetooth(self, request: dict[str, object], timeout: float = 30) -> dict[str, object]:
+        if self.bluetooth_helper is None or not self.bluetooth_helper.exists():
+            raise ValueError("Bluetooth needs a newer display base image")
+        result = subprocess.run(
+            ["sudo", "--non-interactive", str(self.bluetooth_helper)],
+            input=json.dumps(request), capture_output=True, text=True, timeout=timeout, check=False,
+        )
+        try:
+            payload = json.loads(result.stdout)
+        except ValueError:
+            LOG.error("Bluetooth helper returned invalid output (exit %d)", result.returncode)
+            raise ValueError("Bluetooth helper failed") from None
+        if result.returncode != 0 or not isinstance(payload, dict):
+            message = payload.get("error") if isinstance(payload, dict) else None
+            raise ValueError(str(message or "Bluetooth helper failed"))
+        return payload
+
+    def _save_bluetooth(self, settings: dict[str, object]) -> None:
+        with self.publish_lock:
+            # Only the Bluetooth runtime file changes, so the carousel keeps playing.
+            self._publish_bluetooth(self.config.update(bluetooth=settings))
+
+    def bluetooth_scan(self) -> dict[str, object]:
+        with self.bluetooth_lock:
+            return {"items": self.run_bluetooth({"action": "scan"}, timeout=60)["items"]}
+
+    def bluetooth_pair(self, body: dict[str, object]) -> dict[str, object]:
+        if set(body) - {"address", "name"}:
+            raise ValueError("Only address and name can be supplied")
+        address = bluetooth.validate_address(body.get("address"))
+        with self.bluetooth_lock:
+            device = self.run_bluetooth({"action": "pair", "address": address}, timeout=100)["device"]
+            previous = self.config.load()["bluetooth"]
+            name = bluetooth.validate_name(device.get("name") or body.get("name") or address)  # type: ignore[union-attr]
+            self._save_bluetooth({**previous, "address": address, "name": name, "enabled": True})  # type: ignore[dict-item]
+            old = previous["address"]  # type: ignore[index]
+            if old and old != address:
+                try:
+                    self.run_bluetooth({"action": "disconnect", "address": old})
+                except (ValueError, OSError, subprocess.SubprocessError):
+                    LOG.warning("Could not disconnect the previous Bluetooth speaker")
+        return self.bluetooth_status()
+
+    def save_bluetooth(self, body: dict[str, object]) -> dict[str, object]:
+        if not body or set(body) - {"enabled", "delay_ms"}:
+            raise ValueError("Supply enabled or delay_ms")
+        with self.bluetooth_lock:
+            current = self.config.load()["bluetooth"]
+            if body.get("enabled") is True and not current["address"]:  # type: ignore[index]
+                raise ValueError("Pair a Bluetooth speaker first")
+            settings = bluetooth.validate_bluetooth_config({**current, **body})  # type: ignore[dict-item]
+            self._save_bluetooth(settings)
+            if current["enabled"] and not settings["enabled"]:  # type: ignore[index]
+                try:
+                    self.run_bluetooth({"action": "disconnect", "address": settings["address"]})
+                except (ValueError, OSError, subprocess.SubprocessError):
+                    LOG.warning("Could not disconnect the Bluetooth speaker")
+        return self.bluetooth_status()
+
+    def bluetooth_forget(self) -> dict[str, object]:
+        with self.bluetooth_lock:
+            address = self.config.load()["bluetooth"]["address"]  # type: ignore[index]
+            if address:
+                self.run_bluetooth({"action": "remove", "address": address})
+            self._save_bluetooth({})
+        return self.bluetooth_status()
 
     def set_hostname(self, name: str) -> dict[str, object]:
         if self.hostname_helper is None:
@@ -1134,6 +1229,10 @@ def make_handler(app: Application) -> type[BaseHTTPRequestHandler]:
                 if self._require_session():
                     self._json(HTTPStatus.OK, app.music_sync_status())
                 return
+            if request_path.path == "/api/bluetooth" and not request_path.query:
+                if self._require_session():
+                    self._json(HTTPStatus.OK, app.bluetooth_status())
+                return
             if request_path.path in ("/api/plex/music", "/api/plex/stations") and not request_path.query:
                 if not self._require_session():
                     return
@@ -1400,6 +1499,15 @@ def make_handler(app: Application) -> type[BaseHTTPRequestHandler]:
                         if field in body:
                             request[field] = body[field]
                     self._json(HTTPStatus.OK, app.run_wifi(request))
+                elif self.path in ("/api/bluetooth/scan", "/api/bluetooth/pair", "/api/bluetooth/forget"):
+                    if not self._require_session(csrf=True):
+                        return
+                    if self.path.endswith("/scan"):
+                        self._json(HTTPStatus.OK, app.bluetooth_scan())
+                    elif self.path.endswith("/pair"):
+                        self._json(HTTPStatus.OK, app.bluetooth_pair(body))
+                    else:
+                        self._json(HTTPStatus.OK, app.bluetooth_forget())
                 else:
                     self._json(HTTPStatus.NOT_FOUND, {"error": "not found"})
             except ValueError as error:
@@ -1456,6 +1564,10 @@ def make_handler(app: Application) -> type[BaseHTTPRequestHandler]:
                 if self.path == "/api/music/sync":
                     if self._require_session(csrf=True):
                         self._json(HTTPStatus.OK, app.save_music_sync(self._body()))
+                    return
+                if self.path == "/api/bluetooth":
+                    if self._require_session(csrf=True):
+                        self._json(HTTPStatus.OK, app.save_bluetooth(self._body()))
                     return
                 if self.path == "/api/raildata/config":
                     if self._require_session(csrf=True):
@@ -1593,6 +1705,7 @@ def serve(args: argparse.Namespace) -> None:
         Path(args.hostname_helper),
         Path(args.update_helper),
         debug_keys_helper=Path(args.debug_keys_helper),
+        bluetooth_helper=Path(args.bluetooth_helper),
     )
     server = ThreadingHTTPServer((args.bind, args.port), make_handler(app))
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
@@ -1627,6 +1740,7 @@ def main() -> None:
     parser.add_argument(
         "--debug-keys-helper", default="/usr/lib/web-display/debug-keys-action"
     )
+    parser.add_argument("--bluetooth-helper", default="/usr/lib/web-display/bluetooth-action")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     serve(args)

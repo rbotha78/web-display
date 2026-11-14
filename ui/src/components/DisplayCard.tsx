@@ -75,7 +75,8 @@ export function DisplayCard({ notify, fail }: Props) {
           {outputs.map((output) => <option key={output.id} value={output.id}>{output.label}</option>)}
         </select>
       </label>
-      <p className="hint">Applies to video audio and background music. HDMI is the default.
+      <p className="hint">Applies to video audio and background music. HDMI is the default. A connected
+        Bluetooth speaker takes priority; this output is used whenever the speaker is unavailable.
         Changing output restarts playback. Unavailable outputs are not replaced automatically.
         Reload this page after connecting a USB audio device.</p>
       <label>

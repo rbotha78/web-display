@@ -107,6 +107,25 @@ export interface MusicSyncStatus {
   error: string;
 }
 
+export interface BluetoothStatus {
+  supported: boolean;
+  adapter: boolean | null;
+  address: string;
+  name: string;
+  enabled: boolean;
+  delay_ms: number;
+  connected: boolean;
+  active: boolean;
+}
+
+export interface BluetoothDevice {
+  address: string;
+  name: string;
+  paired: boolean;
+  connected: boolean;
+  audio: boolean;
+}
+
 export interface MusicStation {
   key: string;
   title: string;
@@ -322,6 +341,13 @@ export function createApi(request: ApiRequest, upload: typeof uploadUpdate | nul
     request<MusicConfig>("/api/plex/music/like", "POST", { rating_key: ratingKey }),
   musicSync: () => request<MusicSyncStatus>("/api/music/sync"),
   leaveMusicSync: () => request<MusicSyncStatus>("/api/music/sync", "PUT", { role: "off" }),
+  bluetooth: () => request<BluetoothStatus>("/api/bluetooth"),
+  saveBluetooth: (settings: { enabled?: boolean; delay_ms?: number }) =>
+    request<BluetoothStatus>("/api/bluetooth", "PUT", settings),
+  scanBluetooth: () => request<{ items: BluetoothDevice[] }>("/api/bluetooth/scan", "POST"),
+  pairBluetooth: (address: string, name: string) =>
+    request<BluetoothStatus>("/api/bluetooth/pair", "POST", { address, name }),
+  forgetBluetooth: () => request<BluetoothStatus>("/api/bluetooth/forget", "POST"),
   musicStations: () => request<{ items: MusicStation[] }>("/api/plex/stations"),
   musicFilters: (library: string) =>
     request<MusicFilters>(`/api/plex/music/filters?${new URLSearchParams({ library })}`),

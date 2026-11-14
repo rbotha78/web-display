@@ -50,6 +50,7 @@ fun DraftField(
     enabled: Boolean = true,
     secret: Boolean = false,
     number: Boolean = false,
+    signedNumber: Boolean = false,
     singleLine: Boolean = true,
     placeholder: String? = null,
     maxLength: Int? = null,
@@ -73,6 +74,7 @@ fun DraftField(
         keyboardOptions = KeyboardOptions(
             keyboardType = when {
                 secret -> KeyboardType.Password
+                number && signedNumber -> KeyboardType.Decimal
                 number -> KeyboardType.Number
                 else -> KeyboardType.Text
             },

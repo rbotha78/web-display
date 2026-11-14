@@ -12,6 +12,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from .scene_player import RendererStopError, stop_process
+from . import bluetooth
 from .audio import DEFAULT_AUDIO_OUTPUT, audio_outputs, validate_audio_output
 from .sleep import SleepRuntime
 
@@ -60,6 +61,7 @@ class MusicPlayer:
         self.sync = {"track": None, "armed": False, "settle_at": 0.0}
         self._now_playing = {"state": "disabled", "title": "", "artist": ""}
         self.audio_output = DEFAULT_AUDIO_OUTPUT
+        self.output_delay = 0.0
         self.sleep_runtime = SleepRuntime(config_path.with_name("sleep.json"))
         self.thread = threading.Thread(target=self._run, daemon=True)
         self.sleep_thread = threading.Thread(target=self._watch_sleep, daemon=True)
@@ -135,8 +137,29 @@ class MusicPlayer:
             self.buffer += chunk
         raise OSError("Audio player timed out")
 
+    def _resolve_output(self, settings):
+        """Return (configured wired output, output to use now), preferring a connected speaker."""
+        wired = validate_audio_output(settings.get("audio_output", DEFAULT_AUDIO_OUTPUT))
+        output, self.output_delay = bluetooth.active_output(
+            wired, self.config_path.with_name("bluetooth.json"), self.config_path.with_name("bluetooth-status.json"))
+        return wired, output
+
+    def _apply_output(self, output):
+        with self.lock:
+            if output == self.audio_output:
+                return
+            self.audio_output = output
+            if self.ipc is not None:
+                LOG.info("Switching music output to %s", output)
+                self._command(["set_property", "audio-device", output])
+
+    def _output_available(self):
+        if bluetooth.is_bluetooth_output(self.audio_output):
+            return bluetooth.output_available(self.audio_output, self.config_path.with_name("bluetooth-status.json"))
+        return self.audio_output in {item["id"] for item in audio_outputs()}
+
     def _launch(self):
-        if self.audio_output not in {item["id"] for item in audio_outputs()}:
+        if not self._output_available():
             raise OSError("Selected audio output is unavailable")
         self.ipc_path.unlink(missing_ok=True)
         self.process = subprocess.Popen([
@@ -223,7 +246,7 @@ class MusicPlayer:
                         identity, track, endpoint = None, None, ""
                         self._run_sync()
                         continue
-                    audio_output = validate_audio_output(settings.get("audio_output", DEFAULT_AUDIO_OUTPUT))
+                    audio_output, effective_output = self._resolve_output(settings)
                     enabled = bool(settings.get("enabled") and not self.sleep_runtime.sleeping())
                     new_identity = (enabled, settings.get("station_key"),
                                     settings.get("control_url"), audio_output)
@@ -235,7 +258,7 @@ class MusicPlayer:
                             except (OSError, ValueError):
                                 pass
                         identity, track = new_identity, None
-                        self.audio_output = audio_output
+                        self.audio_output = effective_output
                         pending_next = False
                         failures, retry_at = 0, 0.0
                         endpoint = control_url(settings["control_url"]) if enabled else ""
@@ -243,6 +266,7 @@ class MusicPlayer:
                             with self.lock:
                                 self._now_playing = {"state": "waiting", "title": "", "artist": ""}
                         last_skip_request = None
+                    self._apply_output(effective_output)
                     with self.lock:
                         user_paused = bool(settings.get("paused", False))
                         if self.user_paused != user_paused:
@@ -313,14 +337,15 @@ class MusicPlayer:
                                       state="paused" if paused else "playing", time=int((position or 0) * 1000))
                         timeline_at = time.monotonic() + 10
                     self.shutdown.wait(0.5)
-                except (OSError, ValueError, KeyError, TypeError):
+                except (OSError, ValueError, KeyError, TypeError) as error:
                     self._stop_player()
                     with self.lock:
                         self._now_playing = {"state": "error", "title": "", "artist": ""}
                     failures += 1
                     delay = 5 if failures == 1 else 15 if failures == 2 else 60
                     retry_at = time.monotonic() + delay
-                    LOG.warning("Music playback interrupted; retrying in %s seconds", delay)
+                    LOG.warning("Music playback interrupted (%s: %s); retrying in %s seconds",
+                                type(error).__name__, error, delay)
                     if failures >= 3 and endpoint:
                         track, pending_next = None, False
                         try:
@@ -353,11 +378,12 @@ class MusicPlayer:
                     return
                 try:
                     new_endpoint = control_url(settings["control_url"])
-                    output = validate_audio_output(settings.get("audio_output", DEFAULT_AUDIO_OUTPUT))
-                    if new_endpoint != endpoint or output != self.audio_output:
+                    _, output = self._resolve_output(settings)
+                    if new_endpoint != endpoint:
                         self._stop_player()
-                        endpoint, self.audio_output = new_endpoint, output
+                        endpoint = new_endpoint
                         self.sync["track"], failures, retry_at = None, 0, 0.0
+                    self._apply_output(output)
                     if time.monotonic() < retry_at:
                         self.shutdown.wait(0.5)
                         continue
@@ -367,7 +393,7 @@ class MusicPlayer:
                     state = self._control(endpoint, "sync", listening=not muted)
                     self._sync_apply(state, endpoint, muted, sleeping, settings["volume"])
                     failures = 0
-                except (OSError, ValueError, KeyError, TypeError):
+                except (OSError, ValueError, KeyError, TypeError) as error:
                     self._stop_player()
                     with self.lock:
                         self._now_playing = {"state": "error", "title": "", "artist": ""}
@@ -375,7 +401,8 @@ class MusicPlayer:
                     failures += 1
                     delay = 5 if failures == 1 else 15
                     retry_at = time.monotonic() + delay
-                    LOG.warning("Synced music interrupted; retrying in %s seconds", delay)
+                    LOG.warning("Synced music interrupted (%s: %s); retrying in %s seconds",
+                                type(error).__name__, error, delay)
                 self.shutdown.wait(0.5)
         finally:
             self._stop_player()
@@ -396,7 +423,9 @@ class MusicPlayer:
         prefix = endpoint.removesuffix("control") + "stream/"
         if not url.startswith(prefix) or not re.fullmatch(r"[A-Za-z0-9_-]{32}", url[len(prefix):]):
             raise ValueError("Invalid audio stream")
-        started_at, duration = float(state["started_at"]), float(state["duration"])
+        # Run ahead of the group by the speaker's extra latency so sound leaves it in step.
+        started_at = float(state["started_at"]) - getattr(self, "output_delay", 0.0)
+        duration = float(state["duration"])
         with self.lock:
             self._now_playing = {"state": "playing" if state["state"] == "playing" and not muted else "paused",
                                  "title": str(state.get("title", "")), "artist": str(state.get("artist", ""))}

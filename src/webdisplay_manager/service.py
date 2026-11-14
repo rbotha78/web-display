@@ -22,11 +22,11 @@ SETTINGS_PATHS = {
         "/api/status", "/api/network", "/api/plex/config", "/api/plex/music", "/api/plex/stations",
         "/api/plex/browse", "/api/plex/music/browse", "/api/plex/music/filters",
         "/api/raildata/config", "/api/weather/config", "/api/update/status", "/api/debug-keys",
-        "/api/music/sync",
+        "/api/music/sync", "/api/bluetooth",
     },
     "PUT": {
         "/api/config", "/api/sleep", "/api/playlist", "/api/plex/config", "/api/plex/music",
-        "/api/raildata/config", "/api/weather/config", "/api/music/sync",
+        "/api/raildata/config", "/api/weather/config", "/api/music/sync", "/api/bluetooth",
     },
     "POST": {
         "/api/playlist/control",
@@ -34,6 +34,7 @@ SETTINGS_PATHS = {
         "/api/plex/music/playlists", "/api/plex/music/playlists/preview",
         "/api/hostname", "/api/wifi/scan", "/api/wifi/country", "/api/wifi/connect",
         "/api/wifi/forget", "/api/update/check", "/api/update/install", "/api/reboot", "/api/debug-keys",
+        "/api/bluetooth/scan", "/api/bluetooth/pair", "/api/bluetooth/forget",
     },
 }
 

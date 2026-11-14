@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { ApiError, type MusicConfig, type NetworkStatus, type Status } from "../api";
 import { useDeviceApi } from "../DeviceApiContext";
 import { DebugKeysCard } from "./DebugKeysCard";
+import { BluetoothCard } from "./BluetoothCard";
 import { DisplayCard } from "./DisplayCard";
 import { PlaylistCard } from "./PlaylistCard";
 import { PlexCard } from "./PlexCard";
@@ -90,6 +91,7 @@ function GlobalSettings({ notify, fail, canManageKeys, active, playbackConfig }:
     <div className="grid">
       <StatusCard status={status} network={network} />
       <DisplayCard notify={notify} fail={fail} />
+      <BluetoothCard notify={notify} fail={fail} active={active} />
       <SleepCard notify={notify} fail={fail} />
       <PlexCard notify={notify} fail={fail} playbackConfig={playbackConfig} />
       <RailDataCard notify={notify} fail={fail} />

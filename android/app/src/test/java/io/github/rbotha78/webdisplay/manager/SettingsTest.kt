@@ -97,6 +97,51 @@ class SettingsTest {
     }
 
     @Test
+    fun bluetoothStatusAndScanParsingValidateDeviceResponses() {
+        val status = SettingsRules.parseBluetooth(JSONObject()
+            .put("supported", true).put("adapter", JSONObject.NULL).put("address", "AA:BB:CC:DD:EE:01")
+            .put("name", "Living room speaker").put("enabled", true).put("delay_ms", -250)
+            .put("connected", true).put("active", true))
+        assertEquals("Living room speaker", status.name)
+        assertNull(status.adapter)
+        assertEquals(-250, status.delayMs)
+        assertTrue(status.active)
+
+        val devices = SettingsRules.parseBluetoothScan(JSONObject().put("items", JSONArray()
+            .put(JSONObject().put("address", "AA:BB:CC:DD:EE:01").put("name", "Speaker")
+                .put("paired", true).put("connected", false).put("audio", true))
+            .put(JSONObject().put("address", "AA:BB:CC:DD:EE:02").put("name", "Keyboard")
+                .put("paired", false).put("connected", false).put("audio", false))))
+        assertEquals(2, devices.size)
+        assertTrue(devices.first().audio)
+        assertTrue(devices.first().paired)
+        assertFalse(devices.last().audio)
+
+        assertThrows(DeviceRequestException::class.java) {
+            SettingsRules.parseBluetooth(JSONObject().put("supported", true).put("adapter", false)
+                .put("address", "").put("name", "").put("enabled", false).put("delay_ms", 1001)
+                .put("connected", false).put("active", false))
+        }
+        assertThrows(DeviceRequestException::class.java) {
+            SettingsRules.parseBluetoothScan(JSONObject().put("items", JSONArray().put(JSONObject().put("address", "AA"))))
+        }
+    }
+
+    @Test
+    fun bluetoothRequestsContainOnlyRequestedValuesAndValidateDelay() {
+        assertEquals(setOf("enabled"), SettingsRules.bluetoothEnabledPayload(true).keys().asSequence().toSet())
+        assertTrue(SettingsRules.bluetoothEnabledPayload(true).getBoolean("enabled"))
+        assertEquals(-1000, SettingsRules.bluetoothDelayPayload(" -1000 ").getInt("delay_ms"))
+        assertEquals(1000, SettingsRules.bluetoothDelayPayload("1000").getInt("delay_ms"))
+        assertEquals(setOf("address", "name"), SettingsRules.bluetoothPairPayload("AA:BB", "Speaker")
+            .keys().asSequence().toSet())
+        assertThrows(IllegalArgumentException::class.java) { SettingsRules.bluetoothDelayPayload("1001") }
+        assertThrows(IllegalArgumentException::class.java) { SettingsRules.bluetoothDelayPayload("-1001") }
+        assertThrows(IllegalArgumentException::class.java) { SettingsRules.bluetoothDelayPayload("1.5") }
+        assertThrows(IllegalArgumentException::class.java) { SettingsRules.bluetoothPairPayload("", "Speaker") }
+    }
+
+    @Test
     fun displayPayloadSendsOnlyChangedFields() {
         val server = DisplayConfig("https://a.example", false, 2, "hdmi")
         val body = SettingsRules.displayPayload(SettingsRules.displayDraft(server).copy(safeArea = "5"), server)
@@ -205,6 +250,8 @@ class SettingsTest {
         assertEquals("AA:BB", state.identity.fingerprint)
         assertTrue(state.weather.unsupported)
         assertNull(state.weather.server)
+        assertTrue(state.bluetooth.unsupported)
+        assertTrue(state.bluetooth.error!!.contains("Update the device"))
         assertNull(state.weather.draft)
         assertEquals(1, state.playlist.draft!!.scenes.size)
         session.close()

@@ -434,6 +434,34 @@ not card numbers; changing output restarts playback. A disconnected selected
 device is shown as unavailable and playback fails visibly rather than silently
 switching outputs. This setting does not enable audio on muted video scenes.
 
+#### Bluetooth speaker
+
+**Settings → Bluetooth speaker** (also embedded in the PC manager and native in
+the Android manager) scans for nearby speakers, pairs one, and enables or
+forgets it. Put the speaker in pairing mode before scanning; pairing uses
+no-PIN "just works" pairing and takes up to about a minute. While the enabled
+speaker is connected it carries **all** display audio (background music and
+video), switching live without restarting playback. When it disconnects,
+audio returns to the wired output above; a root supervisor
+(`web-display-bluetooth.service`) reconnects with backoff (15–60 seconds).
+**Delay** (−1000 to 1000 ms, positive when the speaker plays late) shifts
+music-group playback earlier only while the speaker is active, in addition to
+the latency the audio stack reports.
+
+API: `GET`/`PUT /api/bluetooth` (`enabled`, `delay_ms`), and
+`POST /api/bluetooth/scan`, `/pair` (`{"address": "AA:BB:..."}`) and `/forget`.
+Session mutations require CSRF.
+
+Limitations: requires a base image with BlueZ/BlueALSA and the Bluetooth helper
+(older images report it as unsupported; a signed update alone cannot add it).
+The Pi 2 has no built-in Bluetooth and needs a supported USB adapter. On the
+Pi 3, Bluetooth shares its radio with Wi-Fi, so heavy Wi-Fi use can cause audio
+dropouts; Ethernet is preferable. A2DP adds noticeable latency, so tune the
+delay by ear. Validated on a Pi 3 with a JBL Flip 4: pairing, live switching,
+wired fallback (about 5–10 seconds of silence) and automatic reconnection all
+worked; about 180 ms delay aligned it with a wired group member. Bluetooth on
+the Pi 2 via a USB adapter is untested.
+
 The service owns a server-generated music queue, reports playing/paused/stopped
 timelines and retrieves a window centered on the completed track to find the
 next item. Station queues on the tested server are finite: reaching their actual

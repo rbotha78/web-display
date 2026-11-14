@@ -1,4 +1,6 @@
 avahi-daemon
+bluez
+bluez-alsa-utils
 ca-certificates
 chromium
 curl
@@ -9,6 +11,7 @@ ethtool
 firmware-realtek
 iproute2
 iw
+libasound2-plugin-bluez
 mpv
 network-manager
 openssl

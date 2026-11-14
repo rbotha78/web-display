@@ -45,11 +45,17 @@ rm -f /etc/X11/xorg.conf.d/20-web-display-fbdev.conf
 rm -rf ${stage}
 systemctl daemon-reload
 nmcli general reload conf || true
-systemctl enable web-display-network.service web-display-update-guard.service web-display-update-confirm.service
+systemctl enable web-display-network.service web-display-update-guard.service web-display-update-confirm.service web-display-bluetooth.service
+# Apply the source-only BlueALSA drop-in without interrupting an already-correct daemon.
+bluealsa_pid=\$(systemctl show -p MainPID --value bluealsa.service 2>/dev/null || echo 0)
+if [ "\${bluealsa_pid:-0}" != 0 ] && tr '\0' ' ' < /proc/\${bluealsa_pid}/cmdline | grep -q a2dp-sink; then
+	systemctl try-restart bluealsa.service
+fi
 # A development push replaces the base copy, so drop any installed update bundle.
 rm -rf /var/lib/web-display-app/current /var/lib/web-display-app/current.tmp /var/lib/web-display-app/versions /var/lib/web-display-app/state.json
 systemctl restart web-display.service
 systemctl restart web-display-network.service
+systemctl restart web-display-bluetooth.service
 if [ "${restart_kiosk}" = 1 ]; then
 	systemctl restart web-display-kiosk.service
 fi
