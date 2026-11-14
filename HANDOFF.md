@@ -34,7 +34,11 @@ vitals or deployment instructions.
   the guidance refresh followed in `c82595c`. The v0.5.18 release work includes
   the deployed animated equalizer icon, Plex smart-playlist builder, floating
   admin music controls and admin landing/guidance refinements.
-- Release/tag: **v0.5.21** adds the Now playing carousel scene (album cover,
+- Release/tag: **v0.5.22** adds the default-gateway setup-AP connectivity mode
+  (`ap_check`, internet probe optional) and automatic `brcmfmac` reload when the
+  Pi 3 built-in radio's boot firmware download fails (seen once on the Pi 3,
+  recovered by a manual reload).
+- Earlier release **v0.5.21** adds the Now playing carousel scene (album cover,
   up-next and clock), floating group players in the PC and Android managers,
   saved Wi-Fi SSID display, pause-free sync drift correction, the empty-body
   manager mutation fix and the fresh-image Wi-Fi country preset (image only).

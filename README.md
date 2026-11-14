@@ -3,8 +3,10 @@
 A 32-bit Raspberry Pi OS appliance for Raspberry Pi 2 and Raspberry Pi 3,
 with Chromium on HDMI, authenticated HTTPS administration, Wi-Fi provisioning,
 signed application updates and PC and Android display managers.
-Release **[v0.5.21](https://github.com/rbotha78/web-display/releases/tag/v0.5.21)**
-adds a **Now playing** carousel scene (song, artist, album, Plex cover, next
+Release **[v0.5.22](https://github.com/rbotha78/web-display/releases/tag/v0.5.22)**
+makes the automatic setup AP treat the display as offline only when its default
+gateway is unreachable (an internet-probe mode remains selectable), and reloads the
+Pi 3 built-in Wi-Fi driver when its firmware fails to load at boot. v0.5.21 added a **Now playing** carousel scene (song, artist, album, Plex cover, next
 song and clock), floating music-group players in both managers, the saved Wi-Fi
 SSID on settings and device cards, and drift correction for music sync groups
 without mid-song pauses. Fresh images preset the Wi-Fi country. v0.5.20 added
@@ -643,7 +645,10 @@ profile is rolled back and the setup AP is immediately restored with rotated cre
 The saved Wi-Fi profile retries indefinitely, and the supervisor reactivates it every
 60 seconds if it is inactive and no setup AP is running, even when Ethernet is online or
 automatic AP is disabled. On supervisor restart, any stale setup AP is removed and the
-saved client profile is explicitly reactivated. Wi-Fi routes use metric 600; the standard
+saved client profile is explicitly reactivated. If a saved Wi-Fi profile exists but the Pi 3's
+built-in Broadcom radio never appeared (its firmware download can fail at boot), the
+supervisor reloads the `brcmfmac` driver after two minutes, up to three times, 15
+minutes apart. Wi-Fi routes use metric 600; the standard
 Ethernet route metric is 100, so Ethernet remains preferred when both links are active.
 On older images without a preset country, it must first be set while an
 administration route (such as Ethernet) exists. New images remove that country

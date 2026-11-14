@@ -44,6 +44,11 @@ CLIENT_RETRY_INTERVAL = 60
 TICK_SECONDS = 10
 ADAPTER_RESET_FAILURES = 5
 ADAPTER_RESET_COOLDOWN = 900
+# A missing built-in radio (failed firmware download at boot) gets a few driver reloads.
+MISSING_RADIO_GRACE = 120
+MISSING_RADIO_RELOADS = 3
+SDIO_DEVICES = Path("/sys/bus/sdio/devices")
+BRCMFMAC_HOLDERS = Path("/sys/module/brcmfmac/holders")
 PASSWORD_ALPHABET = "abcdefghjkmnpqrstuvwxyz23456789"
 
 
@@ -152,6 +157,33 @@ def reset_usb_adapter(usb_id: str) -> bool:
     return True
 
 
+def builtin_radio_present() -> bool:
+    """A Broadcom SDIO Wi-Fi chip is on the board (Pi 3), whether or not its driver came up."""
+    try:
+        return any((device / "vendor").read_text(encoding="ascii").strip() == "0x02d0"
+                   for device in SDIO_DEVICES.iterdir())
+    except OSError:
+        return False
+
+
+def reload_builtin_driver() -> bool:
+    """Reload brcmfmac so the chip's firmware is downloaded again."""
+    try:
+        holders = sorted(path.name for path in BRCMFMAC_HOLDERS.iterdir())
+    except OSError:
+        holders = []
+    unloaded = run(["modprobe", "-r", *holders, "brcmfmac"])
+    if unloaded.returncode != 0:
+        LOG.warning("Could not unload the Wi-Fi driver: %s", unloaded.stderr.strip())
+        return False
+    time.sleep(2)
+    loaded = run(["modprobe", "brcmfmac"])
+    if loaded.returncode != 0:
+        LOG.warning("Could not load the Wi-Fi driver: %s", loaded.stderr.strip())
+        return False
+    return True
+
+
 def write_private(path: Path, content: str, mode: int, group: str | None = None) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     descriptor, temporary = tempfile.mkstemp(dir=path.parent, prefix=".wd-")
@@ -202,6 +234,25 @@ class Supervisor:
         self.last_client_retry = 0.0
         self.client_failures = 0
         self.last_adapter_reset = -ADAPTER_RESET_COOLDOWN
+        self.radio_missing_since: float | None = None
+        self.radio_reloads = 0
+        self.last_radio_reload = -ADAPTER_RESET_COOLDOWN
+
+    def recover_missing_radio(self) -> None:
+        """The Pi 3 chip sometimes fails its boot firmware download and never appears."""
+        now = self.clock()
+        if self.radio_missing_since is None:
+            self.radio_missing_since = now
+        if (now - self.radio_missing_since < MISSING_RADIO_GRACE
+                or self.radio_reloads >= MISSING_RADIO_RELOADS
+                or now - self.last_radio_reload < ADAPTER_RESET_COOLDOWN
+                or not builtin_radio_present()):
+            return
+        self.radio_reloads += 1
+        self.last_radio_reload = now
+        LOG.warning("Built-in Wi-Fi adapter is missing; reloading its driver (attempt %d of %d)",
+                    self.radio_reloads, MISSING_RADIO_RELOADS)
+        reload_builtin_driver()
 
     def recover_adapter(self, device: str) -> None:
         """Some USB radios stop seeing any networks and never recover by themselves."""
@@ -267,7 +318,10 @@ class Supervisor:
             device = wifi_device() or ""
             if not device:
                 LOG.warning("Saved Wi-Fi profile exists but no Wi-Fi adapter was found")
+                self.recover_missing_radio()
                 return
+            self.radio_missing_since = None
+            self.radio_reloads = 0
             active = run(
                 ["nmcli", "-t", "-f", "NAME", "connection", "show", "--active"]
             )

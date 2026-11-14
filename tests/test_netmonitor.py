@@ -2,7 +2,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from webdisplay import kiosk, netmonitor, wifi_helper
 from webdisplay.netmonitor import CLIENT_RETRY_INTERVAL, OUTAGE_GRACE, RETRY_INTERVAL, Supervisor
@@ -329,6 +329,43 @@ class DestinationTests(unittest.TestCase):
         self.assertEqual(self.choose("http://site", False, 1, False, ""), ("file:///offline", True))
         self.assertEqual(self.choose("http://site", True, 0, False, "file:///offline"), ("http://site", False))
 
+
+
+class MissingRadioTests(unittest.TestCase):
+    def setUp(self):
+        self.now = [10_000.0]
+        self.supervisor = netmonitor.Supervisor(clock=lambda: self.now[0], auto_ap=lambda: False)
+
+    def restore(self, device=None, present=True):
+        with (
+            patch.object(netmonitor, "CLIENT_KEYFILE", Mock(exists=lambda: True)),
+            patch.object(netmonitor, "wifi_device", return_value=device),
+            patch.object(netmonitor, "builtin_radio_present", return_value=present),
+            patch.object(netmonitor, "reload_builtin_driver", return_value=True) as reload,
+            patch.object(netmonitor, "run", return_value=Mock(stdout="web-display-wifi\n", returncode=0)),
+        ):
+            self.supervisor.restore_client()
+        return reload.call_count
+
+    def test_reloads_builtin_driver_after_grace_with_cooldown_and_cap(self):
+        self.assertEqual(self.restore(), 0)
+        self.now[0] += netmonitor.MISSING_RADIO_GRACE
+        self.assertEqual(self.restore(), 1)
+        self.now[0] += 60
+        self.assertEqual(self.restore(), 0)
+        for _ in range(netmonitor.MISSING_RADIO_RELOADS + 1):
+            self.now[0] += netmonitor.ADAPTER_RESET_COOLDOWN
+            self.restore()
+        self.assertEqual(self.supervisor.radio_reloads, netmonitor.MISSING_RADIO_RELOADS)
+
+    def test_no_reload_without_builtin_chip_and_reset_when_adapter_returns(self):
+        self.restore(present=False)
+        self.now[0] += netmonitor.MISSING_RADIO_GRACE
+        self.assertEqual(self.restore(present=False), 0)
+        self.assertEqual(self.restore(), 1)
+        self.restore(device="wlan0")
+        self.assertIsNone(self.supervisor.radio_missing_since)
+        self.assertEqual(self.supervisor.radio_reloads, 0)
 
 if __name__ == "__main__":
     unittest.main()
