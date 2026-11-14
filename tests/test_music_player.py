@@ -254,6 +254,37 @@ class MusicPlayerTests(unittest.TestCase):
                                self.endpoint, False, False, 30)
         player._command.assert_called_with(["set_property", "speed", 1.0])
 
+    def test_large_mid_track_drift_never_pauses_or_seeks(self):
+        player = self.player()
+        player.process.poll.return_value = None
+        player.output_delay = 0.0
+        player.sync = {"track": "1", "armed": True, "settle_at": 0.0, "volume": 30}
+        player._command = Mock(return_value=8.5)
+        state = {"state": "playing", "url": self.endpoint.removesuffix("control") + "stream/" + "b" * 32,
+                 "track_id": "1", "started_at": 1000.0, "duration": 100}
+        with patch("webdisplay.music_player.time.time", return_value=1010.0):
+            player._sync_apply(state, self.endpoint, False, False, 30)
+        commands = [call.args[0] for call in player._command.call_args_list]
+        self.assertEqual(commands[-1], ["set_property", "speed", 1.005])
+        self.assertNotIn(["set_property", "pause", True], commands)
+        self.assertFalse(any(command[0] == "seek" for command in commands))
+        self.assertTrue(player.sync["armed"])
+        # The next track is still started at the group's scheduled position.
+        with patch("webdisplay.music_player.time.time", return_value=1112.0):
+            player._sync_apply({**state, "track_id": "2", "started_at": 1110.0}, self.endpoint, False, False, 30)
+        player._command.assert_any_call(["set_property", "start", "2.800"])
+
+    def test_sync_rate_changes_resample_instead_of_time_stretching(self):
+        player = self.player()
+        player.shutdown = threading.Event()
+        player.shutdown.set()
+        player.audio_output = "alsa/bluealsa:DEV=AA:BB:CC:DD:EE:01,PROFILE=a2dp"
+        player.mpv, player.ipc_path = "/usr/bin/mpv", Path("/nonexistent/music-mpv.sock")
+        player._output_available = Mock(return_value=True)
+        with patch("webdisplay.music_player.subprocess.Popen") as popen, self.assertRaises(OSError):
+            player._launch()
+        self.assertIn("--audio-pitch-correction=no", popen.call_args.args[0])
+
     def test_next_track_reuses_process_and_defers_loading_while_video_paused(self):
         player = self.player()
         process = player.process

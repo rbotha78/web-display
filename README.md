@@ -367,9 +367,14 @@ that display; it rejoins the live group position afterwards. When no member is
 listening for 15 seconds, the group freezes instead of advancing through Plex.
 
 The leader schedules each song about 1.5 seconds ahead; followers poll it over
-pinned HTTPS every 2 seconds, estimate the clock offset, then correct drift with
-small speed changes (at most 3%) or a re-seek above 0.25 seconds. Expect sync
-within tens of milliseconds on a quiet network, not sample-accurate playback.
+pinned HTTPS every 2 seconds, estimate the clock offset, then correct drift by
+resampling at most 0.5% faster or slower (about 250 ms per 50 seconds, with an
+inaudible pitch change). A playing song is never paused or re-seeked to resync;
+any drift left at the end of a song is removed when the next song starts at the
+group's scheduled time. Expect sync within tens of milliseconds on a quiet
+network, not sample-accurate playback; a large drift (for example after a
+network stall) can last until the next song. Pitch-preserving time-stretching is
+not used because it starves Bluetooth output on a Pi 2.
 Followers reach the leader at its saved manager addresses, then `<hostname>.local`.
 The device's **Background music** card shows its group role and offers **Leave
 group**; dissolve or edit groups in a manager. A group token protects follower

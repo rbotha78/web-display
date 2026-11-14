@@ -89,11 +89,12 @@ class ValidationTests(unittest.TestCase):
         offset.add(30.0, "bad", 30.1)
         self.assertAlmostEqual(offset.offset, 100.0)
 
-    def test_drift_correction_nudges_speed_then_seeks(self):
-        self.assertEqual(sync_correction(0.01), (1.0, False))
-        self.assertEqual(sync_correction(0.04), (0.98, False))
-        self.assertEqual(sync_correction(-0.2), (1.03, False))
-        self.assertEqual(sync_correction(0.3), (1.0, True))
+    def test_drift_correction_only_nudges_rate_within_inaudible_limit(self):
+        self.assertEqual(sync_correction(0.01), 1.0)
+        self.assertEqual(sync_correction(0.04), 0.996)
+        self.assertEqual(sync_correction(-0.2), 1.005)
+        self.assertEqual(sync_correction(-2.5), 1.005)
+        self.assertEqual(sync_correction(0.3), 0.995)
 
 
 class GroupTests(unittest.TestCase):

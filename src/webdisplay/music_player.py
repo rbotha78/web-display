@@ -19,17 +19,26 @@ from .sleep import SleepRuntime
 LOG = logging.getLogger(__name__)
 # Load/seek this far ahead of the group, then unpause exactly when the group arrives.
 SYNC_PRIME = 0.8
+# Before a track is audible, re-prime when the group is already this far ahead.
 SYNC_SEEK_THRESHOLD = 0.25
+# Sync speed changes resample (shifting pitch slightly) instead of time-stretching:
+# mpv's scaletempo2 starves Bluetooth output on a Pi 2, losing time instead of gaining it.
+# 0.5% is about 9 cents, below what listeners notice, and pulls in 250 ms per 50 seconds.
+SYNC_MAX_SPEED_CHANGE = 0.005
 
 
-def sync_correction(drift: float) -> tuple[float, bool]:
-    """Return (mpv speed, needs seek) for drift = local - group position, in seconds."""
-    if abs(drift) > SYNC_SEEK_THRESHOLD:
-        return 1.0, True
+def sync_correction(drift: float) -> float:
+    """Return the mpv speed for drift = local - group position, in seconds.
+
+    Audible tracks are never paused or re-seeked: drift is pulled in gently by
+    tiny playback-rate changes, and any remainder is realigned when the next
+    track starts at the group's scheduled time.
+    """
     if abs(drift) <= 0.03:
-        return 1.0, False
-    # Converge over roughly two seconds, never bending pitch by more than 3%.
-    return round(1.0 - max(-0.03, min(0.03, drift / 2)), 4), False
+        return 1.0
+    # Converge over roughly ten seconds within the inaudible rate limit.
+    change = max(-SYNC_MAX_SPEED_CHANGE, min(SYNC_MAX_SPEED_CHANGE, drift / 10))
+    return round(1.0 - change, 4)
 
 
 def control_url(value: object) -> str:
@@ -164,7 +173,7 @@ class MusicPlayer:
         self.ipc_path.unlink(missing_ok=True)
         self.process = subprocess.Popen([
             self.mpv, "--no-config", "--no-terminal", "--no-video", "--idle=yes",
-            "--ao=alsa", f"--audio-device={self.audio_output}",
+            "--ao=alsa", f"--audio-device={self.audio_output}", "--audio-pitch-correction=no",
             "--pause=yes", "--volume=0", f"--input-ipc-server={self.ipc_path}",
         ], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             start_new_session=True)
@@ -478,14 +487,7 @@ class MusicPlayer:
                 return
             if time.monotonic() < self.sync["settle_at"]:
                 return
-            speed, seek = sync_correction(position - expected)
-            if seek:
-                self.sync["armed"] = False
-                self._command(["set_property", "pause", True])
-                self._command(["set_property", "speed", 1.0])
-                self._command(["seek", f"{max(0.0, expected + SYNC_PRIME):.3f}", "absolute+exact"])
-                return
-            self._command(["set_property", "speed", speed])
+            self._command(["set_property", "speed", sync_correction(position - expected)])
             self.sync["settle_at"] = time.monotonic() + 2
 
     def close(self):
