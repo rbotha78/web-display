@@ -709,6 +709,10 @@ class MusicRelay:
         now = music_sync.now()
         state = self._leader_state(now) if self.sync["role"] == "leader" else self._remote_state(now)
         mapped = {"stopped": "disabled", "idle": "playing"}.get(state["state"], state["state"])
+        # A sleeping display whose group has nobody listening is asleep, not loading.
+        if (state["state"] in {"waiting", "idle"} and self.sleep_runtime is not None
+                and self.sleep_runtime.sleeping()):
+            mapped = "sleeping"
         status = {"state": mapped, "title": state.get("title", ""), "artist": state.get("artist", ""),
                   "error": state.get("error", ""),
                   "paused_by_user": state["state"] == "paused"}

@@ -6,7 +6,7 @@ import unittest
 import urllib.parse
 import urllib.request
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from test_plex import FakePlexHandler
 
@@ -161,8 +161,19 @@ class GroupTests(unittest.TestCase):
         self.clock.value += music_sync.LISTENER_TIMEOUT + 1
         frozen = relay.peer("Lounge", False)
         self.assertEqual((frozen["state"], frozen["rating_key"]), ("idle", "3"))
+        self.assertEqual(relay.get_status()["state"], "playing")
+        relay.sleep_runtime = Mock(sleeping=lambda: True)
+        self.assertEqual(relay.get_status()["state"], "sleeping")
         self.clock.value += 100
         self.assertEqual(relay.peer("Lounge", True)["rating_key"], "3")
+        self.assertEqual(relay.get_status()["state"], "playing")
+
+    def test_sleeping_leader_with_nobody_listening_reports_sleeping(self):
+        relay = self.leader()
+        relay.control({"action": "sync", "listening": False})
+        self.assertEqual(relay.get_status()["state"], "waiting")
+        relay.sleep_runtime = Mock(sleeping=lambda: True)
+        self.assertEqual(relay.get_status()["state"], "sleeping")
 
     def test_follower_follows_leader_track_in_local_time_and_rejects_other_plex(self):
         leader = self.leader()

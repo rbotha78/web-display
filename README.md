@@ -379,6 +379,8 @@ streams the song from its own Plex connection. Play, pause, resume, stop, skip a
 like on any member act on the whole group. Video audio and sleep silence only
 that display; it rejoins the live group position afterwards. When no member is
 listening for 15 seconds, the group freezes instead of advancing through Plex.
+A sleeping display's players (admin page and manager group player) then show
+"Music is sleeping" rather than loading.
 
 The leader schedules each song about 1.5 seconds ahead; followers poll it over
 pinned HTTPS every 2 seconds, estimate the clock offset, then correct drift by
