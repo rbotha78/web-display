@@ -70,6 +70,12 @@ is not production-ready until the later security and recovery gates pass.
    physical reset, power-loss recovery and reproducible release artifacts.
 4. Release acceptance: both Pi models, prolonged operation, network flapping,
    full storage, interrupted updates, rollback and factory-reset testing.
+5. iPhone/iPad manager: move the Android manager to Kotlin Multiplatform with
+   Compose Multiplatform, sharing models, settings rules, music sync, remote view
+   and screens. Platform code for iOS: Bonjour discovery (`NSBonjourServices`
+   `_web-display._tcp`, local-network permission), certificate-fingerprint pinning
+   via `URLSession` and Keychain key storage. Needs a Mac/Xcode, an Apple Developer
+   account, TestFlight distribution and macOS CI runners; keep Android/PC parity.
 
 ## Milestone 3: Signed Remote Updates (Approved Design)
 
