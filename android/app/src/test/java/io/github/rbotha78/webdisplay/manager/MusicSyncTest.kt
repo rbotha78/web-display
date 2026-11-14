@@ -20,6 +20,15 @@ class MusicSyncTest {
         .put("group_id", if (role == "off") "" else groupId).put("leader", JSONObject.NULL)
         .put("members", JSONArray()).put("connected", true).put("error", "")
 
+    @Test fun groupPlayerTargetsOnlyOnlineLeadersWithPlayerStatus() {
+        val leader = status("leader", SyncRole.LEADER)
+        val offline = status("offline", SyncRole.LEADER).copy(online = false)
+        val unhealthy = status("unhealthy", SyncRole.LEADER)
+        val follower = status("follower", SyncRole.FOLLOWER)
+        val players = listOf("leader", "offline", "follower").associateWith { PlayerState() }
+        assertEquals(listOf(leader), groupLeaders(listOf(follower, offline, unhealthy, leader), players))
+    }
+
     @Test fun oldFirmwareIsUnsupportedEvenWithEmptyOrInvalidBody() {
         assertEquals(SyncSupport.UNSUPPORTED, MusicSyncRules.parseResponse(404, JSONObject()).support)
         assertEquals(SyncSupport.UNSUPPORTED, MusicSyncRules.parseResponse(404, response()).support)

@@ -11,7 +11,7 @@ export interface RemoteView {
   scene: (Pick<Scene, "id" | "kind"> & Partial<Scene>) | null;
   train: TrainBoard | null;
   weather: WeatherData | null;
-  music?: { state: string; title?: string; artist?: string; album?: string } | null;
+  music?: { state: string; title?: string; artist?: string; album?: string; next_title?: string; next_artist?: string } | null;
   sleep: { sleeping: boolean; scheduled_sleep: boolean; wake_until: number | null };
   message: string;
 }

@@ -3,12 +3,12 @@
 A 32-bit Raspberry Pi OS appliance for Raspberry Pi 2 and Raspberry Pi 3,
 with Chromium on HDMI, authenticated HTTPS administration, Wi-Fi provisioning,
 signed application updates and PC and Android display managers.
-Release **[v0.5.20](https://github.com/rbotha78/web-display/releases/tag/v0.5.20)**
-adds Bluetooth speaker pairing, automatic wired fallback and adjustable
-music-group delay, with controls in both managers. Bluetooth requires the new
-base image; a signed application update alone cannot install its system packages
-and helpers. This release also stabilizes the Chromium and sleep tests used by
-CI and release builds.
+Release **[v0.5.21](https://github.com/rbotha78/web-display/releases/tag/v0.5.21)**
+adds a **Now playing** carousel scene (song, artist, album, Plex cover, next
+song and clock), floating music-group players in both managers, the saved Wi-Fi
+SSID on settings and device cards, and drift correction for music sync groups
+without mid-song pauses. Fresh images preset the Wi-Fi country. v0.5.20 added
+Bluetooth speakers, which require its newer base image.
 Saving settings retains the saved values when confirmation notifications appear,
 without reloading stale configuration into the editor.
 Administration opens on **Global settings** (display defaults, sleep, provider credentials,
@@ -325,7 +325,9 @@ most 2000 characters), plus optional `show_weather`. Train scenes require
 default `show_previous_departure` to true. Weather scenes use the device's
 configured weather location. Omitting timing uses the defaults above.
 **Now playing** (`music`) scenes show the current background-music song, artist,
-album and Plex album cover (a placeholder when none exists). The floating
+album and Plex album cover (a placeholder when none exists), the next queued
+song when known (it may change at a weekday source switch or queue rebuild),
+and the same current-time clock as train scenes. The floating
 now-playing card is hidden while this scene is visible. The carousel skips the
 scene while music is stopped, loading or disabled, unless no other scene can show.
 Covers are fetched through the device's local music relay and loopback scene
@@ -854,7 +856,7 @@ old playback state as live.
 
 **Remote view** opens a reconstructed preview of the current display scene,
 refreshing every five seconds only while the view is open. Dashboard clocks
-and notices, train boards, weather and now-playing text use the display's current
+and notices, train boards, weather and now-playing/up-next text use the display's current
 scene data; album covers are not included.
 Web pages show an address/details card; videos show a metadata card and are
 never streamed to the manager. This is not a screenshot or remote-control
@@ -897,9 +899,9 @@ leader's pinned fingerprint and saved addresses; failures are reported per displ
 and are not rolled back automatically. Displays on older firmware show sync as
 unsupported. The group token is sent only to the displays and never stored by a
 manager. Device cards show "Music sync: leading (N followers)" or "following <leader>".
-When an online display leads a sync group, the PC manager's devices screen shows a
-floating group player controlling that leader (and therefore the whole group); with
-several groups, choose one from its **Music group** selector.
+When an online display leads a sync group, the PC and Android managers' devices
+screens show a floating group player controlling that leader (and therefore the whole
+group); with several groups, choose one from its **Music group** selector.
 
 The manager shares the firmware version (`WEB_DISPLAY_VERSION`; `--version` prints it). When releasing, bump
 `WEB_DISPLAY_VERSION` and `version` in `pyproject.toml` together (a test enforces this). The manager refuses to

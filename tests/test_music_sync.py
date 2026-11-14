@@ -133,6 +133,7 @@ class GroupTests(unittest.TestCase):
         now = self.clock.value
         state = relay.control({"action": "sync", "listening": True})
         self.assertEqual((state["state"], state["rating_key"]), ("playing", "1"))
+        self.assertEqual(state["next_title"], "Track 2")
         self.assertEqual(state["started_at"], now + music_sync.START_LEAD)
         self.assertTrue(state["url"].startswith(relay.url + "/stream/"))
         with self.assertRaises(ValueError):
@@ -187,6 +188,7 @@ class GroupTests(unittest.TestCase):
         group = leader.peer("probe", True)
         state = follower.control({"action": "sync", "listening": True})
         self.assertEqual(state["rating_key"], group["rating_key"])
+        self.assertEqual(state["next_title"], group["next_title"])
         self.assertAlmostEqual(state["started_at"], group["started_at"])
         with urllib.request.urlopen(state["url"]) as response:
             self.assertEqual(response.read(), b"test music bytes")

@@ -340,10 +340,24 @@ class MusicRelay:
 
     def _track_details(self):
         """Album name and a capability URL for the current track's cover, when available."""
-        details = {"album": self.track.get("parentTitle", "")}
+        details = {"album": self.track.get("parentTitle", ""), **self._upcoming()}
         if track_art(self.track):
             details["art_url"] = self.url + "/art/" + self.stream_key
         return details
+
+    def _upcoming(self):
+        """The queued track after the current one, if the loaded queue window already knows it."""
+        if self.queue is None or self.track is None or self.sync["role"] == "follower":
+            return {}
+        if self.queue_source != active_source(self.settings, self.clock())[1]:
+            return {}
+        tracks = list(self.queue.iter("Track"))
+        track_id = self.track.get("playQueueItemID")
+        index = next((i for i, t in enumerate(tracks) if t.get("playQueueItemID") == track_id), -1)
+        if index < 0 or index + 1 >= len(tracks):
+            return {}
+        upcoming = tracks[index + 1]
+        return {"next_title": upcoming.get("title", "Music"), "next_artist": track_artist(upcoming)}
 
     def _stop(self):
         self._close_streams()
@@ -622,7 +636,7 @@ class MusicRelay:
                           artist=track_artist(track),
                           duration=self._duration(), started_at=group["started_at"],
                           position=self._position(now),
-                          liked=float(track.get("userRating", "0")) == 10)
+                          liked=float(track.get("userRating", "0")) == 10, **self._upcoming())
         return result
 
     def peer(self, name, listening):
@@ -759,6 +773,9 @@ class MusicRelay:
                           artist=str(payload.get("artist", ""))[:200], duration=float(payload["duration"]),
                           started_at=float(payload["started_at"]), position=float(payload["position"]),
                           liked=payload.get("liked") is True)
+            for key in ("next_title", "next_artist"):
+                if isinstance(payload.get(key), str) and payload[key]:
+                    remote[key] = payload[key][:200]
         return remote
 
     def _follow_track(self, rating_key, machine):

@@ -18,6 +18,7 @@ sealed interface RemoteScene {
     data class Weather(override val title: String) : RemoteScene
     data class Music(
         override val title: String, val state: String, val song: String, val artist: String, val album: String,
+        val nextSong: String = "", val nextArtist: String = "",
     ) : RemoteScene
     data class Video(
         override val title: String, val source: String, val audioEnabled: Boolean?,
@@ -209,6 +210,7 @@ object RemoteViewParser {
                         RemoteScene.Music(
                             title, music?.text("state") ?: "", music?.text("title") ?: "",
                             music?.text("artist") ?: "", music?.text("album") ?: "",
+                            music?.text("next_title") ?: "", music?.text("next_artist") ?: "",
                         )
                     }
                     "video" -> RemoteScene.Video(

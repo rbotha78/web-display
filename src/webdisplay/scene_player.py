@@ -219,7 +219,7 @@ class SceneServer:
             status = {}
         art_url = status.get("art_url", "")
         result: dict[str, object] = {
-            key: str(status.get(key, ""))[:200] for key in ("state", "title", "artist", "album")
+            key: str(status.get(key, ""))[:200] for key in ("state", "title", "artist", "album", "next_title", "next_artist")
         }
         result["state"] = result["state"] or "disabled"
         result["art"] = hashlib.sha256(art_url.encode()).hexdigest()[:16] if art_url else ""

@@ -5,6 +5,8 @@ export interface NowPlaying {
   title: string;
   artist: string;
   album: string;
+  next_title?: string;
+  next_artist?: string;
   art?: string;
 }
 
@@ -29,6 +31,10 @@ export function NowPlayingContent({ value, artUrl, onArtError }: {
         <h1>{value.title}</h1>
         {value.artist && <p className="now-playing-artist">{value.artist}</p>}
         {value.album && <p className="now-playing-album">{value.album}</p>}
+        {value.next_title && <p className="now-playing-next">
+          <span className="now-playing-next-label">Up next</span>
+          <span>{value.next_title}{value.next_artist && ` — ${value.next_artist}`}</span>
+        </p>}
       </> : <h1>{!value ? "Loading music..." : value.state === "waiting" ? "Loading the next song..." : "No music playing"}</h1>}
     </div>
   </section>;

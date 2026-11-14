@@ -541,6 +541,7 @@ class PlexTests(unittest.TestCase):
             status = relay.get_status()
             self.assertEqual((status["title"], status["artist"]), ("Track 1", "Artist 1"))
             self.assertEqual(current["album"], "Album 1")
+            self.assertEqual((current["next_title"], current["next_artist"]), ("Track 2", "Artist 2"))
             FakePlexHandler.art_queries = []
             with urllib.request.urlopen(current["art_url"]) as response:
                 self.assertEqual((response.headers.get_content_type(), response.read()),

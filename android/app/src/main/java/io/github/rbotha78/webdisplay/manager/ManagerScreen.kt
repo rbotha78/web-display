@@ -185,6 +185,7 @@ fun ManagerScreen(viewModel: ManagerViewModel) {
                         }
                     }
                 }
+                GroupPlayer(groupLeaders(statuses, players), players, viewModel::playerCommand)
             }
             remoteView?.let { RemoteViewDialog(it, viewModel::closeRemoteView) }
         }

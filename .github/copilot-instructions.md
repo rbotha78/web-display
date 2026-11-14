@@ -180,6 +180,12 @@ HTTPS service and upstream headers, never in scene data or player URLs.
   `ui/src/manager/api.ts`. Device session mutations require `X-CSRF-Token`;
   bearer API keys bypass CSRF but cannot create, list, or revoke keys. Keys are
   returned once and only their hashes are stored on-device.
+- Keep the PC and Android managers at feature parity. The PC manager reuses the
+  device's React editors, so new device settings appear there automatically;
+  the Android manager (`android/`) has native editors, models and parsers that
+  must be updated in the same change (e.g. settings sections, scene kinds,
+  remote-view data, players). Add Android tests and run
+  `cd android && ./gradlew testDebugUnitTest lintDebug assembleDebug`.
 - The manager uses a per-run `X-Manager-Token` plus Host/Origin checks and binds
   only to loopback. Enrollment confirms a TLS fingerprint, uses the password
   once to obtain an API key, then discards the password. Its store is mode 0600.

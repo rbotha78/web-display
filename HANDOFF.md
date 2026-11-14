@@ -34,7 +34,11 @@ vitals or deployment instructions.
   the guidance refresh followed in `c82595c`. The v0.5.18 release work includes
   the deployed animated equalizer icon, Plex smart-playlist builder, floating
   admin music controls and admin landing/guidance refinements.
-- Release/tag: **v0.5.20**, adding Bluetooth speaker controls to both managers,
+- Release/tag: **v0.5.21** adds the Now playing carousel scene (album cover,
+  up-next and clock), floating group players in the PC and Android managers,
+  saved Wi-Fi SSID display, pause-free sync drift correction, the empty-body
+  manager mutation fix and the fresh-image Wi-Fi country preset (image only).
+- Earlier release **v0.5.20**, adding Bluetooth speaker controls to both managers,
   live output switching, wired fallback and manual group-delay compensation.
   It also stabilizes the Chromium smoke test and isolates the music sleep mock
   from background threads. All 436 Python tests and 60 single-CPU browser runs

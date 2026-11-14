@@ -341,7 +341,8 @@ also tested on both devices. Phase B (A/B root images) remains deferred.
 Milestone 4 (central device management) is implemented and hardware-tested,
 including discovery/enrolment, multi-address reporting, management actions and
 device-side API-key revocation. The latest published application/manager release
-is **v0.5.20**; verify its asset-building workflows before assuming completion.
+is **v0.5.21** (Now playing scene, manager group players, pause-free sync drift
+correction); verify its asset-building workflows before assuming completion.
 It includes native manager configuration, Plex liking, weekday music sources and
 leader-coordinated music sync groups.
 Bluetooth speaker output (all audio, wired fallback, delay compensation) and

@@ -21,11 +21,12 @@ MAX_ART_BYTES = 2 * 1024 * 1024
 
 
 def track_details(track: dict, endpoint: str) -> dict[str, str]:
-    """Optional album name and relay cover URL; a cover must use this relay's capability."""
+    """Optional album, upcoming track and relay cover URL; a cover must use this relay's capability."""
     details = {}
-    album = track.get("album")
-    if isinstance(album, str) and album:
-        details["album"] = album[:200]
+    for key in ("album", "next_title", "next_artist"):
+        value = track.get(key)
+        if isinstance(value, str) and value:
+            details[key] = value[:200]
     art, prefix = track.get("art_url"), endpoint.removesuffix("control") + "art/"
     if isinstance(art, str) and art.startswith(prefix) and re.fullmatch(r"[A-Za-z0-9_-]{32}", art[len(prefix):]):
         details["art_url"] = art

@@ -44,11 +44,12 @@ class RemoteViewTests(unittest.TestCase):
             self.assertEqual(public_url(url), "")
 
     def test_music_scene_publishes_now_playing_text_without_cover_capability(self):
-        music = {"state": "playing", "title": "Song", "artist": "Band", "album": "Record",
+        music = {"state": "playing", "title": "Song", "artist": "Band", "album": "Record", "next_title": "Later",
                  "art_url": "http://127.0.0.1:9/music/capability/art/" + "a" * 32}
         publish(self.path, snapshot("carousel", {"id": "now", "kind": "music"}, SLEEP, "", music=music))
         reply = load(self.path)
-        self.assertEqual(reply["music"], {"state": "playing", "title": "Song", "artist": "Band", "album": "Record"})
+        self.assertEqual(reply["music"], {"state": "playing", "title": "Song", "artist": "Band", "album": "Record",
+                                          "next_title": "Later"})
         self.assertNotIn("capability", self.path.read_text())
 
     def test_single_recovery_sleep_and_notice_text(self):

@@ -401,8 +401,9 @@ class MusicPlayerTests(unittest.TestCase):
     def test_track_details_only_accept_covers_from_the_same_relay_capability(self):
         endpoint = "http://127.0.0.1:9/music/cap/control"
         good = "http://127.0.0.1:9/music/cap/art/" + "a" * 32
-        self.assertEqual(track_details({"album": "x" * 300, "art_url": good}, endpoint),
-                         {"album": "x" * 200, "art_url": good})
+        self.assertEqual(track_details({"album": "x" * 300, "art_url": good, "next_title": "Next",
+                                        "next_artist": 7}, endpoint),
+                         {"album": "x" * 200, "art_url": good, "next_title": "Next"})
         for art in ("http://127.0.0.1:9/music/other/art/" + "a" * 32, "https://example.com/a.jpg",
                     good + "?x=1", "http://127.0.0.1:9/music/cap/art/short", 42):
             with self.subTest(art=art):

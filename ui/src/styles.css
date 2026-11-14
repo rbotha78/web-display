@@ -861,10 +861,11 @@ textarea {
   width: 100%;
   text-align: left;
 }
+.scene-screen > .train-current-time { flex-shrink: 0; }
 .now-playing-cover {
   flex-shrink: 0;
-  width: min(38vw, 62vh);
-  height: min(38vw, 62vh);
+  width: min(38vw, 56vh);
+  height: min(38vw, 56vh);
   object-fit: cover;
   border-radius: 1.5vmin;
   box-shadow: 0 1vmin 4vmin rgb(0 0 0 / 60%);
@@ -888,5 +889,16 @@ textarea {
 .now-playing-label { color: #ffd447; font-size: min(2.2vw, 3.5vh); text-transform: uppercase; letter-spacing: .1em; }
 .now-playing-artist { font-size: min(3.6vw, 6vh); }
 .now-playing-album { color: #a9b6c6; font-size: min(2.6vw, 4.2vh); }
+.now-playing-text p.now-playing-next {
+  display: flex;
+  flex-direction: column;
+  gap: .5vh;
+  margin-top: 4vh;
+  padding-top: 2vh;
+  border-top: 1px solid #2f3b4c;
+  color: #c9d3df;
+  font-size: min(2.3vw, 3.8vh);
+}
+.now-playing-next-label { color: #ffd447; font-size: min(1.8vw, 2.9vh); text-transform: uppercase; letter-spacing: .1em; }
 .music-group-label { color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
 .music-group-select { max-width: 100%; padding: .1rem .3rem; font-size: .8rem; }

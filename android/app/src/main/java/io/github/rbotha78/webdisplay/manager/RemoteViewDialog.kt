@@ -148,6 +148,9 @@ private fun RemoteSceneContent(scene: RemoteScene, snapshot: RemoteSnapshot, ela
                     Text(scene.song, style = MaterialTheme.typography.titleLarge)
                     if (scene.artist.isNotBlank()) Text(scene.artist)
                     if (scene.album.isNotBlank()) Text(scene.album)
+                    if (scene.nextSong.isNotBlank()) {
+                        Text("Up next: ${scene.nextSong}" + if (scene.nextArtist.isNotBlank()) " — ${scene.nextArtist}" else "")
+                    }
                 } else {
                     Text("No music is playing.")
                 }

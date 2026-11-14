@@ -367,7 +367,14 @@ export function SceneScreen() {
             </time>
           </>
         ) : scene.kind === "music" ? (
-          <NowPlayingDisplay key={scene.revision} />
+          <>
+            <NowPlayingDisplay key={scene.revision} />
+            <time className="train-current-time" dateTime={now.toISOString()}>
+              {now.toLocaleTimeString([], {
+                hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
+              })}
+            </time>
+          </>
         ) : scene.kind === "recovery" ? (
           <div>
             <h1>No carousel scenes are currently available</h1>

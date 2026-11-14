@@ -99,7 +99,7 @@ def sanitize_weather(value: object) -> dict:
 
 def sanitize_music(value: object) -> dict:
     """Now-playing text only; the relay's album art capability is never published."""
-    result = {key: text[:200] for key, text in _fields(value, ("state", "title", "artist", "album")).items()}
+    result = {key: text[:200] for key, text in _fields(value, ("state", "title", "artist", "album", "next_title", "next_artist")).items()}
     result.setdefault("state", "disabled")
     return result
 

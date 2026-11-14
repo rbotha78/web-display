@@ -169,6 +169,8 @@ export function RemotePreview({ deviceId, deviceName, close }: {
                   <p>{value.music.state === "paused" ? "Paused" : "Now playing"}: <strong>{value.music.title}</strong></p>
                   {value.music.artist && <p>{value.music.artist}</p>}
                   {value.music.album && <p className="muted">{value.music.album}</p>}
+                  {value.music.next_title && <p className="muted">Up next: {value.music.next_title}
+                    {value.music.next_artist && ` — ${value.music.next_artist}`}</p>}
                   <p className="muted">Album covers are shown on the display only.</p>
                 </> : <p role="status">No music playing</p>}
               </section>

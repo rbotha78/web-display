@@ -17,9 +17,17 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -173,5 +181,76 @@ internal fun PlayerControls(
         player.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         player.commandError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         if (player.trustRequired) TextButton(onClick = onReenroll) { Text("Trust / enrol again") }
+    }
+}
+
+/** Online sync-group leaders whose player controls also drive their followers. */
+internal fun groupLeaders(statuses: List<DeviceStatus>, players: Map<String, PlayerState>): List<DeviceStatus> =
+    statuses.filter { it.online && it.musicSync.role == SyncRole.LEADER && it.id in players }
+
+@Composable
+internal fun GroupPlayer(
+    leaders: List<DeviceStatus>,
+    players: Map<String, PlayerState>,
+    onCommand: (String, PlayerCommand) -> Unit,
+) {
+    if (leaders.isEmpty()) return
+    var selectedId by remember { mutableStateOf("") }
+    var choosing by remember { mutableStateOf(false) }
+    val leader = leaders.firstOrNull { it.id == selectedId } ?: leaders.first()
+    val player = players[leader.id] ?: PlayerState()
+    val music = player.music.value
+    val ready = !player.working && !player.trustRequired && player.music.available
+    fun label(device: DeviceStatus) = device.name + " group" +
+        device.musicSync.members.size.let { if (it > 0) " (+$it)" else "" }
+    Surface(
+        tonalElevation = 3.dp, shadowElevation = 6.dp, shape = MaterialTheme.shapes.medium,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            if (leaders.size > 1) {
+                Box {
+                    TextButton(onClick = { choosing = true }) { Text("Music group: ${label(leader)} ▾") }
+                    DropdownMenu(expanded = choosing, onDismissRequest = { choosing = false }) {
+                        leaders.forEach { device ->
+                            DropdownMenuItem(text = { Text(label(device)) },
+                                onClick = { selectedId = device.id; choosing = false })
+                        }
+                    }
+                }
+            } else {
+                Text(label(leader), style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            when {
+                player.music.error != null -> Text(player.music.error, color = MaterialTheme.colorScheme.error)
+                music == null -> Text("Loading music status…")
+                !music.enabled -> Text("Music stopped")
+                else -> {
+                    val status = music.status
+                    Text(
+                        status.title.ifBlank { if (status.pausedByUser) "Paused" else status.state.replaceFirstChar { it.uppercase() } },
+                        style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    )
+                    val detail = listOfNotNull(
+                        status.artist.takeIf { status.title.isNotBlank() && it.isNotBlank() },
+                        "Paused".takeIf { status.pausedByUser && status.title.isNotBlank() },
+                    ).joinToString(" · ")
+                    if (detail.isNotBlank()) Text(detail, style = MaterialTheme.typography.bodySmall,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                val primary = music?.let(SettingsRules::primaryMusicAction) ?: "play"
+                OutlinedButton(onClick = { onCommand(leader.id, PlayerCommand.Music(primary)) },
+                    enabled = ready && !music?.stationKey.isNullOrBlank(),
+                ) { Text(primary.replaceFirstChar { it.uppercase() }) }
+                OutlinedButton(onClick = { onCommand(leader.id, PlayerCommand.Music("skip")) },
+                    enabled = ready && music?.enabled == true) { Text("Skip") }
+                OutlinedButton(onClick = { onCommand(leader.id, PlayerCommand.Music("stop")) },
+                    enabled = ready && music?.enabled == true) { Text("Stop") }
+            }
+            player.commandError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+        }
     }
 }
