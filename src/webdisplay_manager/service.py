@@ -152,6 +152,8 @@ class Manager:
                 d.get("type") == "wifi" and d.get("state") == "connected"
                 for d in devices if isinstance(d, dict)
             ) if isinstance(devices, list) else None
+            ssid = wifi.get("saved_ssid") if isinstance(wifi, dict) else None
+            result["wifi_ssid"] = ssid if isinstance(ssid, str) else None
             update = device.call("GET", "/api/update/status")
             result["installed_version"] = update.get("installed_version")
             result["restart_needed"] = update.get("installed_version") != update.get("running_version")

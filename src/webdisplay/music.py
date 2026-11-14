@@ -22,6 +22,11 @@ from .music_sync import ClockOffset, LeaderClient, LeaderError
 PART_KEY = re.compile(r"/library/parts/[0-9]+/[0-9]+/file\.[A-Za-z0-9]+\Z")
 
 
+
+def track_artist(track) -> str:
+    """Prefer a track's own artist (compilations) over its album artist."""
+    return track.get("originalTitle") or track.get("grandparentTitle", "")
+
 class EmptyMusicSourceError(ValueError):
     pass
 
@@ -74,7 +79,7 @@ class MusicRelay:
         self.clock = lambda: datetime.fromtimestamp(time.time()).astimezone()
         self.user_paused = False
         self.skip_request = None
-        self.status = {"state": "disabled", "title": "", "error": ""}
+        self.status = {"state": "disabled", "title": "", "artist": "", "error": ""}
         self.sleep_runtime = SleepRuntime(sleep_path) if sleep_path is not None else None
         self.shutdown = threading.Event()
         self.streams_lock = threading.Lock()
@@ -239,7 +244,8 @@ class MusicRelay:
                 self.stream_key = ""
                 self.user_paused = False
                 self.skip_request = None
-                self.status = {"state": "waiting" if settings["enabled"] else "disabled", "title": "", "error": ""}
+                self.status = {"state": "waiting" if settings["enabled"] else "disabled",
+                               "title": "", "artist": "", "error": ""}
             self.settings, self.identity = dict(settings), identity
             self.group = self._new_group(self.group)
             if self.sync["role"] != "off":
@@ -302,7 +308,7 @@ class MusicRelay:
         finally:
             self.queue = self.track = self.client = None
             self.stream_key = ""
-            self.status["title"] = ""
+            self.status.update(title="", artist="")
 
     def _select(self, track):
         part = track.find("./Media/Part")
@@ -312,7 +318,7 @@ class MusicRelay:
             raise ValueError("Unsupported music track")
         self.track = track
         self.stream_key = secrets.token_urlsafe(24)
-        self.status.update(title=track.get("title", "Music"), error="")
+        self.status.update(title=track.get("title", "Music"), artist=track_artist(track), error="")
 
     def _create_queue(self):
         self.client = self.client_factory()
@@ -407,14 +413,14 @@ class MusicRelay:
             return {"track_id": self.track.get("playQueueItemID"),
                     "url": self.url + "/stream/" + self.stream_key,
                     "title": self.track.get("title", "Music"),
-                    "artist": self.track.get("originalTitle") or self.track.get("grandparentTitle", "")}
+                    "artist": track_artist(self.track)}
 
     def get_status(self):
         with self.lock:
             if self.sync["role"] != "off":
                 return self._group_status()
             if self.sleeping():
-                return {"state": "sleeping", "title": "", "error": ""}
+                return {"state": "sleeping", "title": "", "artist": "", "error": ""}
             status = dict(self.status)
             status["paused_by_user"] = self.user_paused
             if self.track is not None:
@@ -567,7 +573,7 @@ class MusicRelay:
                   "error": self.status.get("error", "") if state == "error" else ""}
         if state in {"playing", "paused", "idle"}:
             result.update(rating_key=track.get("ratingKey"), title=track.get("title", "Music"),
-                          artist=track.get("originalTitle") or track.get("grandparentTitle", ""),
+                          artist=track_artist(track),
                           duration=self._duration(), started_at=group["started_at"],
                           position=self._position(now),
                           liked=float(track.get("userRating", "0")) == 10)
@@ -642,7 +648,8 @@ class MusicRelay:
         now = music_sync.now()
         state = self._leader_state(now) if self.sync["role"] == "leader" else self._remote_state(now)
         mapped = {"stopped": "disabled", "idle": "playing"}.get(state["state"], state["state"])
-        status = {"state": mapped, "title": state.get("title", ""), "error": state.get("error", ""),
+        status = {"state": mapped, "title": state.get("title", ""), "artist": state.get("artist", ""),
+                  "error": state.get("error", ""),
                   "paused_by_user": state["state"] == "paused"}
         if state.get("rating_key"):
             status["rating_key"] = state["rating_key"]
@@ -723,7 +730,7 @@ class MusicRelay:
         self._close_streams()
         self.track = track
         self.stream_key = secrets.token_urlsafe(24)
-        self.status.update(title=track.get("title", "Music"), error="")
+        self.status.update(title=track.get("title", "Music"), artist=track_artist(track), error="")
 
     def close(self):
         self.shutdown.set()

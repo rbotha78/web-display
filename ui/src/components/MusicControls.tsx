@@ -84,6 +84,8 @@ export function MusicControls({ fail, onEnabledChange, inline = false }: {
     <section className={`music-controls${inline ? " music-controls-inline" : ""}`} aria-label="Audio player">
       <div className="music-controls-track">
         <strong title={config?.status.title}>{config?.status.title || "Background music"}</strong>
+        {config?.status.title && config.status.artist &&
+          <span className="music-controls-artist" title={config.status.artist}>{config.status.artist}</span>}
         <span>{state}</span>
         {available && !config?.station_key && <small>Choose a music source in Global settings.</small>}
       </div>

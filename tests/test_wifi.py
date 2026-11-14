@@ -1,7 +1,7 @@
 import unittest
 import tempfile
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from webdisplay import wifi_helper
 from webdisplay.network import internet_status, website_status
@@ -67,6 +67,24 @@ class ValidationTests(unittest.TestCase):
             ],
         )
 
+
+    def test_status_reports_saved_ssid_with_escapes(self):
+        def run(command, timeout=60):
+            stdout = {"device": "wlan0:wifi:connected:web-display-wifi\n",
+                      "rfkill": "0: phy0: Wireless LAN\n\tSoft blocked: no\n",
+                      "iw": "country GB: DFS-ETSI\n"}.get(command[0] if command[0] != "nmcli" else command[-1])
+            if command[-2:] == ["show", wifi_helper.CONNECTION_ID]:
+                stdout = "Home\\:5G\n"
+            return Mock(returncode=0, stdout=stdout)
+
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(wifi_helper, "KEYFILE", Path(directory) / "wifi.nmconnection") as keyfile, \
+                patch.object(wifi_helper, "run", side_effect=run):
+            self.assertEqual(wifi_helper.status()["saved_ssid"], "")
+            keyfile.write_text("[wifi]\n")
+            status = wifi_helper.status()
+        self.assertTrue(status["saved_network"])
+        self.assertEqual(status["saved_ssid"], "Home:5G")
 
 class ProbeTests(unittest.TestCase):
     def test_internet_needs_any_endpoint(self):

@@ -196,6 +196,7 @@ class DeviceManager(private val store: SecureDeviceStore) {
                 url = config.optString("url").takeIf { it.isNotBlank() },
                 internet = internet, defaultRoute = network.optString("default_route").takeIf { it.isNotBlank() },
                 wifiConnected = wifiConnected, installedVersion = installed,
+                wifiSsid = network.optJSONObject("wifi")?.optString("saved_ssid")?.takeIf { it.isNotBlank() },
                 restartNeeded = installed != null && running != null && installed != running,
                 firmwareOutdated = ManagerRules.firmwareTooOld(version),
                 minFirmware = if (ManagerRules.firmwareTooOld(version)) ManagerRules.MIN_FIRMWARE else null,

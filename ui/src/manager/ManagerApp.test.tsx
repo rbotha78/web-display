@@ -25,12 +25,14 @@ function stub(devices: object[]) {
 test("lists devices and sends the token", async () => {
   window.location.hash = "#token=abc";
   const calls = stub([
-    { id: "aabbccddeeff", name: "Lobby", host: "10.0.0.5", port: 8443, online: true, version: "0.5.6", url: "https://x.example", internet: true, default_route: "eth0" },
+    { id: "aabbccddeeff", name: "Lobby", host: "10.0.0.5", port: 8443, online: true, version: "0.5.6", url: "https://x.example", internet: true, default_route: "eth0",
+      wifi_ssid: "Home", wifi_connected: false },
   ]);
   render(<ManagerApp />);
   expect(await screen.findByText("Lobby")).toBeTruthy();
   fireEvent.click(screen.getByText("More actions"));
   expect(screen.getByText("0.5.6")).toBeTruthy();
+  expect(screen.getByText("Home (not connected)")).toBeTruthy();
   const headers = calls[0].init.headers as Record<string, string>;
   expect(headers["X-Manager-Token"]).toBe("abc");
 });

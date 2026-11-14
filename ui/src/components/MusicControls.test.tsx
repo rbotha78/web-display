@@ -6,7 +6,7 @@ import { MusicControls } from "./MusicControls";
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); });
 
 const playing: MusicConfig = { enabled: true, station_key: "/playlists/11/items", volume: 30,
-  status: { state: "playing", title: "Song", error: "", paused_by_user: false, rating_key: "42", liked: false } };
+  status: { state: "playing", title: "Song", artist: "Singer", error: "", paused_by_user: false, rating_key: "42", liked: false } };
 
 test("likes the displayed song in Plex and shows only a confirmed five-star rating", async () => {
   let current = playing;
@@ -16,6 +16,7 @@ test("likes the displayed song in Plex and shows only a confirmed five-star rati
   const enabled = vi.fn();
   render(<MusicControls fail={vi.fn()} onEnabledChange={enabled} />);
   await screen.findByText("Song");
+  expect(screen.getByText("Singer")).toBeTruthy();
   const button = screen.getByRole("button", { name: "Like song in Plex" });
   expect(button.getAttribute("aria-pressed")).toBe("false");
   fireEvent.click(button);

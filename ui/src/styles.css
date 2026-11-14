@@ -152,7 +152,7 @@ body {
   box-shadow: 0 .4rem 1.5rem rgb(0 0 0 / 40%);
 }
 .music-controls-track { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-.music-controls-track strong { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.music-controls-track :is(strong, .music-controls-artist) { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .music-controls-track :is(span, small) { color: var(--muted); font-size: .85rem; }
 .music-controls-buttons { display: flex; gap: .5rem; flex-shrink: 0; }
 .music-controls.music-controls-inline {

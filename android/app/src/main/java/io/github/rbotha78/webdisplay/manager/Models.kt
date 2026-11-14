@@ -30,6 +30,7 @@ data class DeviceStatus(
     val internet: Boolean? = null,
     val defaultRoute: String? = null,
     val wifiConnected: Boolean? = null,
+    val wifiSsid: String? = null,
     val installedVersion: String? = null,
     val restartNeeded: Boolean = false,
     val error: String? = null,

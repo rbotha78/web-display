@@ -165,6 +165,15 @@ class SettingsTest {
         assertThrows(IllegalArgumentException::class.java) { SettingsRules.likePayload(status.copy(ratingKey = "")) }
     }
 
+    @Test
+    fun parsesNowPlayingArtistAndSavedWifiSsid() {
+        val music = musicJson().put("status", JSONObject().put("state", "playing").put("title", "Song").put("artist", "Singer"))
+        assertEquals("Singer", SettingsRules.parseMusic(music).status.artist)
+        val network = SettingsRules.parseNetwork(JSONObject().put("wifi",
+            JSONObject().put("saved_network", true).put("saved_ssid", "Home:5G")))
+        assertEquals("Home:5G", network.savedSsid)
+    }
+
     private fun musicJson(schedule: Map<String, String>? = null): JSONObject =
         JSONObject().put("enabled", true).put("station_key", "/playlists/1/items").put("volume", 50)
             .put("status", JSONObject().put("state", "playing"))

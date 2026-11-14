@@ -132,12 +132,21 @@ def status() -> dict[str, object]:
                 {"device": parts[0], "type": parts[1], "state": parts[2], "connection": parts[3]}
             )
     blocked = bool(re.search(r"(Soft|Hard) blocked: yes", run(["rfkill", "list", "wifi"]).stdout))
+    saved = KEYFILE.exists()
     return {
         "country": current_country(),
         "wifi_blocked": blocked,
         "devices": devices,
-        "saved_network": KEYFILE.exists(),
+        "saved_network": saved,
+        "saved_ssid": saved_ssid() if saved else "",
     }
+
+
+def saved_ssid() -> str:
+    result = run(["nmcli", "-t", "-g", "802-11-wireless.ssid", "connection", "show", CONNECTION_ID])
+    if result.returncode != 0:
+        return ""
+    return result.stdout.rstrip("\n").replace("\\:", ":").replace("\\\\", "\\")
 
 
 def connect(ssid: str, psk: str) -> None:

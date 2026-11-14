@@ -93,7 +93,7 @@ export interface MusicConfig {
   day_sources?: Record<Weekday, string>;
   active_day?: Weekday;
   active_station_key?: string;
-  status: { state: string; title: string; error: string; paused_by_user?: boolean;
+  status: { state: string; title: string; artist?: string; error: string; paused_by_user?: boolean;
     rating_key?: string; liked?: boolean };
 }
 
@@ -210,6 +210,7 @@ export interface NetworkStatus {
     country?: string;
     wifi_blocked?: boolean;
     saved_network?: boolean;
+    saved_ssid?: string;
     devices?: { device: string; type: string; state: string; connection: string }[];
   };
 }

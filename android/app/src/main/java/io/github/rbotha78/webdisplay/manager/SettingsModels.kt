@@ -43,6 +43,7 @@ data class MusicStatus(
     val pausedByUser: Boolean,
     val ratingKey: String,
     val liked: Boolean,
+    val artist: String = "",
 )
 data class MusicSettings(
     val enabled: Boolean, val stationKey: String, val volume: Int, val status: MusicStatus,
@@ -83,6 +84,7 @@ data class NetworkInfo(
     val wifiBlocked: Boolean,
     val error: String,
     val devices: List<WifiInterface>,
+    val savedSsid: String = "",
 )
 data class WifiNetwork(val ssid: String, val signal: Int, val secured: Boolean)
 /** [password] is write-only and is cleared after every connect attempt. */
@@ -218,7 +220,7 @@ object SettingsRules {
             json.bool("enabled"), json.str("station_key"), json.int("volume"),
             MusicStatus(
                 status.optString("state", "unknown"), status.optString("title"), status.optString("error"),
-                status.optBoolean("paused_by_user"), status.optString("rating_key"), status.optBoolean("liked"),
+                status.optBoolean("paused_by_user"), status.optString("rating_key"), status.optBoolean("liked"), status.optString("artist"),
             ),
             daySources = DAYS.associateWith { day -> days?.str(day) ?: "" },
             supportsDaySources = supportsDaySources,
@@ -276,6 +278,7 @@ object SettingsRules {
                 ?: emptyList()).map {
                 WifiInterface(it.optString("device"), it.optString("type"), it.optString("state"), it.optString("connection"))
             },
+            wifi.optString("saved_ssid"),
         )
     }
 

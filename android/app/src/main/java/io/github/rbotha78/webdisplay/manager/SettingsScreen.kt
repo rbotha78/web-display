@@ -462,7 +462,7 @@ private fun WifiSection(state: SettingsState, editor: SettingsSession, working: 
         draft ?: return@SectionCard
         Hint("Internet: ${server.internetOnline?.let { if (it) "online" else "offline" } ?: "unknown"}" +
             server.defaultRoute.takeIf { it.isNotBlank() }?.let { " via $it" }.orEmpty() +
-            " · Saved network: ${if (server.savedNetwork) "yes" else "no"}" + if (server.wifiBlocked) " · Wi-Fi radio blocked" else "")
+            " · Saved network: ${if (!server.savedNetwork) "none" else server.savedSsid.ifBlank { "yes" }}" + if (server.wifiBlocked) " · Wi-Fi radio blocked" else "")
         server.devices.forEach { Hint("${it.device} (${it.type}): ${it.state}" + it.connection.takeIf { c -> c.isNotBlank() }?.let { c -> " · $c" }.orEmpty()) }
         if (server.error.isNotBlank()) ErrorText(server.error)
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {

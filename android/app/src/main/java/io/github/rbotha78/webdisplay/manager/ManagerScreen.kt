@@ -356,6 +356,7 @@ private fun DeviceCard(
                     Text("Firmware: ${status.version ?: "unknown"}" +
                         if (status.restartNeeded) " · ${status.installedVersion} installed; restart to apply" else "")
                     Text("Connection: ${connection ?: "Unknown"}")
+                    status.wifiSsid?.let { Text("Wi-Fi: $it" + if (status.wifiConnected == true) "" else " (not connected)") }
                     Text("Internet: ${status.internet?.let { if (it) "Online" else "Offline" } ?: "Unknown"}")
                 }
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

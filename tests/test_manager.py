@@ -131,7 +131,8 @@ class OperationTests(ManagerCase):
         self.enroll()
         self.device.app.network_status = lambda: {
             "internet": {"online": True}, "default_route": "wlan0",
-            "wifi": {"devices": [{"device": "wlan0", "type": "wifi", "state": "connected", "connection": "x"}]},
+            "wifi": {"devices": [{"device": "wlan0", "type": "wifi", "state": "connected", "connection": "x"}],
+                     "saved_ssid": "Home:5G"},
         }
         self.device.app.update_status = lambda: {"installed_version": "0.5.6", "running_version": "0.5.6"}
         [summary] = self.manager.devices()
@@ -139,6 +140,7 @@ class OperationTests(ManagerCase):
         self.assertEqual(summary["name"], "Lobby")
         self.assertTrue(summary["internet"])
         self.assertTrue(summary["wifi_connected"])
+        self.assertEqual(summary["wifi_ssid"], "Home:5G")
         self.assertFalse(summary["restart_needed"])
         self.assertNotIn("key", summary)
 

@@ -35,6 +35,7 @@ export interface Device {
   internet?: boolean | null;
   default_route?: string;
   wifi_connected?: boolean | null;
+  wifi_ssid?: string | null;
   installed_version?: string;
   restart_needed?: boolean;
   error?: string;

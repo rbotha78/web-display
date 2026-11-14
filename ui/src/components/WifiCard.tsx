@@ -58,6 +58,7 @@ export function WifiCard({ network, notify, fail, refresh }: Props) {
     }, "Connected.");
   };
 
+  const wifiConnected = wifi?.devices?.some((device) => device.type === "wifi" && device.state === "connected");
   const needsCountry = !wifi?.country || wifi.country === "00";
 
   return (
@@ -93,7 +94,10 @@ export function WifiCard({ network, notify, fail, refresh }: Props) {
             Scan networks
           </button>
           <span className="muted">
-            {wifi?.saved_network ? "A network is saved." : "No saved network."}
+            {!wifi?.saved_network ? "No saved network."
+              : wifi.saved_ssid ? <>Saved network: <strong>{wifi.saved_ssid}</strong>
+                {wifiConnected ? " (connected)" : " (not connected)"}</>
+                : "A network is saved."}
           </span>
         </div>
         <label>

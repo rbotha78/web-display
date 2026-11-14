@@ -115,6 +115,7 @@ internal fun PlayerControls(
                     else -> status.state.replaceFirstChar { it.uppercase() }
                 })
                 if (status.title.isNotBlank()) Text(status.title, style = MaterialTheme.typography.bodyMedium)
+                if (status.title.isNotBlank() && status.artist.isNotBlank()) Text(status.artist, style = MaterialTheme.typography.bodySmall)
                 if (status.error.isNotBlank()) Text(status.error, color = MaterialTheme.colorScheme.error)
             }
         }

@@ -167,6 +167,10 @@ export function DeviceCard({ device, notify, refresh, readd, configure }: Props)
           </dd>
           <dt>Connection</dt>
           <dd>{connection}</dd>
+          {device.wifi_ssid && <>
+            <dt>Wi-Fi</dt>
+            <dd>{device.wifi_ssid}{device.wifi_connected ? "" : " (not connected)"}</dd>
+          </>}
           <dt>Internet</dt>
           <dd>
             <span className={"pill " + (device.internet ? "ok" : "bad")}>

@@ -18,6 +18,7 @@ The obsolete experimental/browser-relaunch warning has been removed; normal
 carousel transitions retain Chromium rather than relaunching it.
 Both administration screens have a floating audio player pinned to the bottom
 with **Play/Pause/Resume**, **Stop** and **Skip** controls for background music.
+It shows the current track title with its artist underneath.
 
 The original Pi Zero and Zero W (ARMv6) are not supported: current Chromium on
 Raspberry Pi OS Trixie cannot run on them. This is separate from Wi-Fi setup.
@@ -223,7 +224,8 @@ open network, or forget it. Credentials are stored as a root-only NetworkManager
 profile written by a narrowly privileged helper. Ethernet keeps priority through
 NetworkManager's default route metrics. The Network panel shows internet
 reachability (three endpoints) separately from reachability of the configured
-website. A failed connect restores the previous saved network.
+website. The Wi-Fi card names the saved network's SSID and whether Wi-Fi is
+currently connected. A failed connect restores the previous saved network.
 
 ### Offline indicator and screen behaviour
 
@@ -821,11 +823,12 @@ display is not offered as new merely because it is offline or discovered through
 another known interface. This does not change certificate pinning or require
 creating another API key.
 
-Home cards show display identity/online status, the current music state and song,
+Home cards show display identity/online status, the current music state, song and artist,
 and inline player controls. Music has Play/Pause/Resume, Stop, Skip and Like;
 carousel has Pause/Resume and Next scene. Configuration stays under **Configure
 device**. Network/version details, SSH keys, updates, restart, browser links and
-local removal are tucked under **More actions**; fleet updates are under
+local removal are tucked under **More actions** (including the saved Wi-Fi SSID,
+marked when not connected); fleet updates are under
 **Manager actions**. The Android home follows the same compact layout, with
 maintenance in its secondary menu.
 Android playback refreshes and pending commands use an animated sync icon in a

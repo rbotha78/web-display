@@ -533,6 +533,8 @@ class PlexTests(unittest.TestCase):
             control = lambda value: relay.control(value)
             current = control({"action": "current"})
             self.assertEqual((current["title"], current["artist"]), ("Track 1", "Artist 1"))
+            status = relay.get_status()
+            self.assertEqual((status["title"], status["artist"]), ("Track 1", "Artist 1"))
             self.assertEqual(FakePlexHandler.queues_created, 1)
             request = urllib.request.Request(current["url"], headers={"Range": "bytes=5-"})
             with urllib.request.urlopen(request) as response:
