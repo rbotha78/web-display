@@ -262,6 +262,14 @@ class RemoteViewTest {
     }
 
     @Test
+    fun musicSceneReadsNowPlayingText() {
+        val body = remoteBody("""{"kind":"music","title":"Song info"}""")
+        body.put("music", JSONObject("""{"state":"paused","title":"Song","artist":"Band","album":"Record"}"""))
+        val scene = RemoteViewParser.parse(body, 0).scene as RemoteScene.Music
+        assertEquals(RemoteScene.Music("Song info", "paused", "Song", "Band", "Record"), scene)
+    }
+
+    @Test
     fun weatherPreservesMissingMeasurementsForecastAndStaleErrors() {
         val body = remoteBody("""{"kind":"weather","title":"Weather"}""")
         body.put("weather", JSONObject(

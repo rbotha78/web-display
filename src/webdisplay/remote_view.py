@@ -17,7 +17,7 @@ from .storage import atomic_write
 RUNTIME_PATH = Path("/run/web-display-kiosk/remote-view.json")
 MAX_BYTES = 1024 * 1024
 MAX_AGE = 15
-KINDS = {"web", "dashboard", "train", "weather", "video"}
+KINDS = {"web", "dashboard", "train", "weather", "video", "music"}
 
 
 def read_json(path: Path) -> object:
@@ -97,6 +97,13 @@ def sanitize_weather(value: object) -> dict:
     return result
 
 
+def sanitize_music(value: object) -> dict:
+    """Now-playing text only; the relay's album art capability is never published."""
+    result = {key: text[:200] for key, text in _fields(value, ("state", "title", "artist", "album")).items()}
+    result.setdefault("state", "disabled")
+    return result
+
+
 def sanitize_train(value: object) -> dict:
     result = _fields(value, ("crs", "destination_crs", "filter_station_crs", "station", "generated_at", "error", "details_error", "recent_error"),
                      ("updated_at",), ("services_available", "platform_available", "details_available", "stale"))
@@ -173,13 +180,14 @@ def process_identity(pid: int) -> str:
 
 def snapshot(mode: str, scene: object, sleep: dict, message: str = "", *,
              train_path: Path = Path("/run/web-display/train-board.json"),
-             weather_path: Path = Path("/run/web-display/weather.json")) -> dict:
+             weather_path: Path = Path("/run/web-display/weather.json"),
+             music: dict | None = None) -> dict:
     active = sanitize_scene(scene)
     now = datetime.now().astimezone()
     result = {
         "available": True, "mode": mode, "updated": time.time(),
         "device_time": now.isoformat(timespec="seconds"), "timezone": now.tzname() or "",
-        "scene": active, "train": None, "weather": None, "message": message,
+        "scene": active, "train": None, "weather": None, "music": None, "message": message,
         "sleep": {key: sleep.get(key) for key in ("sleeping", "scheduled_sleep", "wake_until")},
     }
     if active and active["kind"] == "train":
@@ -191,6 +199,8 @@ def snapshot(mode: str, scene: object, sleep: dict, message: str = "", *,
                 result["train"] = sanitize_train(board)
         except (OSError, ValueError):
             pass
+    if active and active["kind"] == "music":
+        result["music"] = sanitize_music(music or {})
     if active and (active["kind"] in ("weather", "train") or active.get("show_weather")):
         try:
             result["weather"] = sanitize_weather(read_json(weather_path))
@@ -240,7 +250,10 @@ def load(path: Path | None = None) -> dict:
     ):
         raise ValueError("Invalid remote view wake deadline")
     result = _fields(value, ("device_time", "timezone", "message"))
-    result.update(available=True, mode=mode, updated=updated, scene=active, sleep=sleep, train=None, weather=None)
+    result.update(available=True, mode=mode, updated=updated, scene=active, sleep=sleep, train=None, weather=None,
+                  music=None)
+    if active and active["kind"] == "music" and isinstance(value.get("music"), dict):
+        result["music"] = sanitize_music(value["music"])
     if active and active["kind"] == "train" and value.get("train") is not None:
         board = sanitize_train(value["train"])
         if board_matches(board, active.get("station_crs"), active.get("destination_crs", ""),

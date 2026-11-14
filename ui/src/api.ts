@@ -11,6 +11,7 @@ export interface RemoteView {
   scene: (Pick<Scene, "id" | "kind"> & Partial<Scene>) | null;
   train: TrainBoard | null;
   weather: WeatherData | null;
+  music?: { state: string; title?: string; artist?: string; album?: string } | null;
   sleep: { sleeping: boolean; scheduled_sleep: boolean; wake_until: number | null };
   message: string;
 }
@@ -46,7 +47,7 @@ export interface SleepConfig extends SleepSchedule {
 
 export interface Scene {
   id: string;
-  kind: "web" | "dashboard" | "video" | "train" | "weather";
+  kind: "web" | "dashboard" | "video" | "train" | "weather" | "music";
   title: string;
   enabled: boolean;
   duration: number | null;

@@ -431,3 +431,34 @@ test("renders cached train departures and next-service delay", async () => {
   expect(screen.queryByText("rain tomorrow")).toBeNull();
   expect(fetch).toHaveBeenCalledWith("/api/train?scene_id=pad", expect.anything());
 });
+
+test("now playing scene shows the song details and proxied album cover", async () => {
+  vi.stubGlobal("fetch", vi.fn(async (path: string) => ({
+    ok: true,
+    json: async () => path === "/api/scene"
+      ? { kind: "music", revision: "music", scene_id: "", title: "", text: "" }
+      : path === "/api/music"
+        ? { state: "playing", title: "Ride on Time", artist: "Black Box", album: "Dreamland", art: "0123456789abcdef" }
+        : {},
+  })));
+  render(<SceneScreen />);
+  expect(await screen.findByRole("heading", { name: "Ride on Time" })).toBeTruthy();
+  expect(screen.getByText("Black Box")).toBeTruthy();
+  expect(screen.getByText("Dreamland")).toBeTruthy();
+  const cover = screen.getByRole("img", { name: "Cover of Dreamland" }) as HTMLImageElement;
+  expect(cover.getAttribute("src")).toBe("/api/music/art?v=0123456789abcdef");
+});
+
+test("now playing scene falls back without a cover or music", async () => {
+  let music = { state: "playing", title: "Song", artist: "", album: "", art: "" };
+  vi.stubGlobal("fetch", vi.fn(async (path: string) => ({
+    ok: true,
+    json: async () => path === "/api/scene"
+      ? { kind: "music", revision: "music", scene_id: "", title: "", text: "" } : music,
+  })));
+  render(<SceneScreen />);
+  expect(await screen.findByRole("heading", { name: "Song" })).toBeTruthy();
+  expect(screen.queryByRole("img")).toBeNull();
+  music = { state: "disabled", title: "", artist: "", album: "", art: "" };
+  expect(await screen.findByRole("heading", { name: "No music playing" }, { timeout: 4000 })).toBeTruthy();
+});

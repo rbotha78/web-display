@@ -10,12 +10,16 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+const musicConfig = { enabled: false, station_key: "", volume: 30,
+  status: { state: "disabled", title: "", error: "", paused_by_user: false } };
+
 function stub(devices: object[]) {
   const calls: { path: string; init: RequestInit }[] = [];
   vi.stubGlobal(
     "fetch",
     vi.fn(async (path: string, init: RequestInit = {}) => {
       calls.push({ path, init });
+      if (path.endsWith("/settings")) return { ok: true, status: 200, json: async () => musicConfig } as Response;
       return { ok: true, status: 200, json: async () => ({ devices }) } as Response;
     }),
   );
@@ -216,6 +220,7 @@ function syncStub(devices: object[]) {
   vi.stubGlobal("fetch", vi.fn(async (path: string, init: RequestInit = {}) => {
     calls.push({ path, init });
     const body = path === "/api/devices" ? { devices } : path === "/api/discover" ? { found: [] }
+      : path.endsWith("/settings") ? musicConfig
       : { results: [{ id: "leader", name: "Kitchen", ok: true }, { id: "follower", name: "Lounge", ok: true }] };
     return { ok: true, status: 200, json: async () => body } as Response;
   }));
@@ -298,4 +303,41 @@ test("reserves the compact sync line across refresh states and lists offline las
   fireEvent.click(screen.getByRole("button", { name: "Music sync groups" }));
   expect(screen.getByText("Leader: Study")).toBeTruthy();
   expect(screen.getByText("Lounge — offline (last known)")).toBeTruthy();
+});
+
+test("shows a floating player for a music sync group that controls its leader", async () => {
+  window.location.hash = "#token=abc";
+  const settings: { id: string; body: { method: string; path: string; body?: unknown } }[] = [];
+  const devices = [
+    { id: "aabbccddeeff", name: "Lobby", host: "10.0.0.5", port: 8443, online: true,
+      music_sync: { supported: true, role: "leader", members: [{ name: "Kitchen", listening: true, last_seen: 1 }] } },
+    { id: "112233445566", name: "Kitchen", host: "10.0.0.6", port: 8443, online: true,
+      music_sync: { supported: true, role: "follower" } },
+  ];
+  vi.stubGlobal("fetch", vi.fn(async (path: string, init: RequestInit = {}) => {
+    const match = /\/api\/devices\/([0-9a-f]+)\/settings$/.exec(path);
+    if (match) {
+      const body = JSON.parse(String(init.body));
+      settings.push({ id: match[1], body });
+      return { ok: true, status: 200, json: async () => ({ enabled: true, station_key: "/playlists/1/items", volume: 30,
+        status: { state: "playing", title: "Group song", artist: "Band", error: "", paused_by_user: false } }) } as Response;
+    }
+    return { ok: true, status: 200, json: async () => ({ devices }) } as Response;
+  }));
+  render(<ManagerApp />);
+  const player = await screen.findByRole("region", { name: "Audio player" });
+  expect(await screen.findByText("Group song")).toBeTruthy();
+  expect(player.textContent).toContain("Lobby group (+1)");
+  fireEvent.click(screen.getByRole("button", { name: "Pause" }));
+  await waitFor(() => expect(settings.some(({ body }) => body.path === "/api/plex/music/control")).toBe(true));
+  expect(settings.every(({ id }) => id === "aabbccddeeff")).toBe(true);
+});
+
+test("hides the floating player without a music sync group", async () => {
+  window.location.hash = "#token=abc";
+  stub([{ id: "aabbccddeeff", name: "Lobby", host: "10.0.0.5", port: 8443, online: true,
+    music_sync: { supported: true, role: "off" } }]);
+  render(<ManagerApp />);
+  expect(await screen.findByText("Lobby")).toBeTruthy();
+  expect(screen.queryByRole("region", { name: "Audio player" })).toBeNull();
 });

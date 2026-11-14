@@ -26,7 +26,7 @@ Raspberry Pi OS Trixie cannot run on them. This is separate from Wi-Fi setup.
 ## Display features
 
 The carousel supports websites, streamed/Plex video, clock/date/notice dashboards,
-live National Rail departure boards and OpenWeather scenes. Plex radio stations,
+live National Rail departure boards, OpenWeather and now-playing music scenes. Plex radio stations,
 audio playlists and artist/album shuffle mixes can play in the background across
 scene changes, pausing for videos with audio.
 Display scenes and their outer safe-area border use a black background.
@@ -245,7 +245,7 @@ scene). No reboot is required; normal connected playback is left untouched.
 ### Experimental carousel
 
 The device administration page has a **Carousel** editor for up to 30 ordered
-web-page, widget-dashboard, streamed-video, train and weather scenes. Add scenes, move them up
+web-page, widget-dashboard, streamed-video, train, weather and now-playing scenes. Add scenes, move them up
 or down, choose which to include, enable the carousel, then select **Save and
 apply**. Draft edits are not published. Each apply or kiosk restart starts at
 the first enabled scene. Disabling the carousel restores the existing single
@@ -262,7 +262,7 @@ iframes. The current renderer retains Chromium and prepares the next scene
 before handover; see **Carousel transitions and retained websites** below.
 Transitions are hard cuts, not animated or guaranteed gapless.
 
-Page/dashboard/weather scenes default to 60 seconds; train scenes default to
+Page/dashboard/weather/now-playing scenes default to 60 seconds; train scenes default to
 300 seconds. Video scenes finish at end of
 stream or their cutoff (default 300 seconds), whichever comes first; disabling
 the cutoff allows full-length playback, including endless live streams.
@@ -324,6 +324,12 @@ most 2000 characters), plus optional `show_weather`. Train scenes require
 `station_crs`, accept optional `destination_crs` and `filter_station_crs`, and
 default `show_previous_departure` to true. Weather scenes use the device's
 configured weather location. Omitting timing uses the defaults above.
+**Now playing** (`music`) scenes show the current background-music song, artist,
+album and Plex album cover (a placeholder when none exists). The floating
+now-playing card is hidden while this scene is visible. The carousel skips the
+scene while music is stopped, loading or disabled, unless no other scene can show.
+Covers are fetched through the device's local music relay and loopback scene
+server; the Plex token and relay capability never reach the browser or managers.
 Private configuration is atomically saved; the administrator playlist API
 contains no Plex token or playback capability URLs.
 The authenticated Plex endpoints are `GET /api/plex/config`,
@@ -848,7 +854,8 @@ old playback state as live.
 
 **Remote view** opens a reconstructed preview of the current display scene,
 refreshing every five seconds only while the view is open. Dashboard clocks
-and notices, train boards and weather use the display's current scene data.
+and notices, train boards, weather and now-playing text use the display's current
+scene data; album covers are not included.
 Web pages show an address/details card; videos show a metadata card and are
 never streamed to the manager. This is not a screenshot or remote-control
 session: browser page contents, playback pixels and exact TV layout are not
@@ -890,6 +897,9 @@ leader's pinned fingerprint and saved addresses; failures are reported per displ
 and are not rolled back automatically. Displays on older firmware show sync as
 unsupported. The group token is sent only to the displays and never stored by a
 manager. Device cards show "Music sync: leading (N followers)" or "following <leader>".
+When an online display leads a sync group, the PC manager's devices screen shows a
+floating group player controlling that leader (and therefore the whole group); with
+several groups, choose one from its **Music group** selector.
 
 The manager shares the firmware version (`WEB_DISPLAY_VERSION`; `--version` prints it). When releasing, bump
 `WEB_DISPLAY_VERSION` and `version` in `pyproject.toml` together (a test enforces this). The manager refuses to

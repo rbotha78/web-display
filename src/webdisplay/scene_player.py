@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import logging
 import os
@@ -36,6 +37,7 @@ from .raildata import board_matches
 
 LOG = logging.getLogger(__name__)
 STALL_TIMEOUT = 30
+PAGE_KINDS = ("dashboard", "train", "weather", "music")
 
 
 class RendererStopError(OSError):
@@ -82,12 +84,16 @@ class SceneServer:
     def __init__(
         self, train_data_path: Path = Path("/run/web-display/train-board.json"),
         weather_data_path: Path = Path("/run/web-display/weather.json"),
+        music_status: Callable[[], dict] | None = None,
+        music_art: Callable[[], tuple[bytes, str] | None] | None = None,
     ) -> None:
         self._lock = threading.Lock()
         self._payload: dict[str, object] = {"kind": "recovery"}
         self.safe_area_percent = DEFAULT_SAFE_AREA_PERCENT
         self.train_data_path = train_data_path
         self.weather_data_path = weather_data_path
+        self.music_status = music_status or (lambda: {})
+        self.music_art = music_art or (lambda: None)
         self.ready = threading.Event()
         owner = self
 
@@ -118,6 +124,27 @@ class SceneServer:
                         return
                     body = json.dumps(weather).encode()
                     content_type = "application/json"
+                elif path.path == "/api/music" and not path.query:
+                    body = json.dumps(owner.now_playing()).encode()
+                    content_type = "application/json"
+                elif path.path == "/api/music/art" and re.fullmatch(r"(v=[0-9a-f]{16})?", path.query):
+                    try:
+                        art = owner.music_art()
+                    except (OSError, ValueError):
+                        LOG.exception("Could not load album art")
+                        art = None
+                    if art is None:
+                        self.send_error(HTTPStatus.NOT_FOUND)
+                        return
+                    body, content_type = art
+                    self.send_response(HTTPStatus.OK)
+                    self.send_header("Content-Type", content_type)
+                    self.send_header("Content-Length", str(len(body)))
+                    self.send_header("Cache-Control", "no-store")
+                    self.send_header("X-Content-Type-Options", "nosniff")
+                    self.end_headers()
+                    self.wfile.write(body)
+                    return
                 elif path.path == "/api/train":
                     query = parse_qs(path.query, keep_blank_values=True)
                     scene_ids = query.get("scene_id", [])
@@ -183,6 +210,21 @@ class SceneServer:
     def url(self) -> str:
         return f"http://127.0.0.1:{self.server.server_port}/scene"
 
+    def now_playing(self) -> dict[str, object]:
+        """Display-safe track details; the relay's capability URL never reaches the page."""
+        try:
+            status = self.music_status()
+        except (OSError, ValueError):
+            LOG.exception("Could not read music status")
+            status = {}
+        art_url = status.get("art_url", "")
+        result: dict[str, object] = {
+            key: str(status.get(key, ""))[:200] for key in ("state", "title", "artist", "album")
+        }
+        result["state"] = result["state"] or "disabled"
+        result["art"] = hashlib.sha256(art_url.encode()).hexdigest()[:16] if art_url else ""
+        return result
+
     def show(self, scene: Scene | None) -> None:
         with self._lock:
             self.ready.clear()
@@ -214,12 +256,14 @@ class SceneRenderer:
         runtime: Path,
         mpv: str = "/usr/bin/mpv",
         music_pause: Callable[[bool], None] | None = None,
+        music_status: Callable[[], dict] | None = None,
+        music_art: Callable[[], tuple[bytes, str] | None] | None = None,
     ):
         self.runtime = runtime
         self.mpv = mpv
         self.audio_output = DEFAULT_AUDIO_OUTPUT
         self.music_pause = music_pause or (lambda _: None)
-        self.server = SceneServer()
+        self.server = SceneServer(music_status=music_status, music_art=music_art)
         self.browser = PersistentBrowser(launch_browser, self.server.url)
         self.windows = SceneWindows()
         self.pending_tab: Tab | None = None
@@ -370,7 +414,7 @@ class SceneRenderer:
         try:
             if scene["kind"] == "web":
                 self.pending_tab = self.browser.prepare(scene["id"], scene["url"])
-            elif scene["kind"] in ("dashboard", "train", "weather"):
+            elif scene["kind"] in PAGE_KINDS:
                 self.server.show(scene)
                 self.pending_tab = self.browser.prepare(None, self.server.url)
             else:
@@ -630,10 +674,10 @@ class SceneRenderer:
                 if self.activated and time.monotonic() < self.browser_check_at:
                     return "playing"
                 if not self.browser.ready(self.pending_tab):
-                    if self.scene["kind"] in ("dashboard", "train", "weather"):
+                    if self.scene["kind"] in PAGE_KINDS:
                         self.error = "Dashboard browser document is not ready."
                     return "starting"
-                if self.scene["kind"] in ("dashboard", "train", "weather") and not self.server.ready.is_set():
+                if self.scene["kind"] in PAGE_KINDS and not self.server.ready.is_set():
                     self.error = "Dashboard did not acknowledge its rendered revision."
                     return "starting"
                 self._activate()

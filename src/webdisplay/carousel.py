@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Literal, Protocol, TypedDict
+from typing import Callable, Literal, Protocol, TypedDict
 from urllib.parse import urlparse
 
 from .raildata import validate_crs, validate_optional_crs
@@ -95,8 +95,8 @@ def validate_playlist(value: object, *, allow_runtime: bool = False) -> Playlist
             raise ValueError("Scene IDs must be unique")
         ids.add(scene_id)
         kind = item.get("kind")
-        if kind not in ("web", "dashboard", "video", "train", "weather"):
-            raise ValueError("Supported scene types are web, dashboard, video, train and weather")
+        if kind not in ("web", "dashboard", "video", "train", "weather", "music"):
+            raise ValueError("Supported scene types are web, dashboard, video, train, weather and music")
         title = item.get("title", "")
         if not isinstance(title, str) or len(title) > 80:
             raise ValueError("Scene titles must be at most 80 characters")
@@ -193,9 +193,12 @@ class CarouselUnavailable(ValueError):
 class Carousel:
     """Monotonic scheduler; start hands over without tearing down shared renderers."""
 
-    def __init__(self, playlist: Playlist, renderer: Renderer, generation: str = ""):
+    def __init__(self, playlist: Playlist, renderer: Renderer, generation: str = "",
+                 available: Callable[[Scene], bool] | None = None):
         self.scenes = [scene for scene in playlist["scenes"] if scene["enabled"]]
         self.renderer = renderer
+        # Unavailable scenes (now playing without music) are skipped while anything else can show.
+        self.available = available or (lambda _: True)
         self.current: Scene | None = None
         self.cursor = -1
         self.attempted_at = 0.0
@@ -256,11 +259,12 @@ class Carousel:
                 LOG.warning("Scene %s failed; retrying after cooldown", self.current["id"])
                 self.cooldowns[self.current["id"]] = now + RETRY_COOLDOWN
             self.current = None
-        for offset in range(1, len(self.scenes) + 1):
-            index = (self.cursor + offset) % len(self.scenes)
+        candidates = [(self.cursor + offset) % len(self.scenes) for offset in range(1, len(self.scenes) + 1)]
+        candidates = [index for index in candidates if self.cooldowns.get(self.scenes[index]["id"], 0) <= now]
+        index = next((index for index in candidates if self.available(self.scenes[index])),
+                     candidates[0] if candidates else None)
+        if index is not None:
             scene = self.scenes[index]
-            if self.cooldowns.get(scene["id"], 0) > now:
-                continue
             self.cursor = index
             self.current = scene
             self.attempted_at = now

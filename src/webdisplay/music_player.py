@@ -17,6 +17,21 @@ from .audio import DEFAULT_AUDIO_OUTPUT, audio_outputs, validate_audio_output
 from .sleep import SleepRuntime
 
 LOG = logging.getLogger(__name__)
+MAX_ART_BYTES = 2 * 1024 * 1024
+
+
+def track_details(track: dict, endpoint: str) -> dict[str, str]:
+    """Optional album name and relay cover URL; a cover must use this relay's capability."""
+    details = {}
+    album = track.get("album")
+    if isinstance(album, str) and album:
+        details["album"] = album[:200]
+    art, prefix = track.get("art_url"), endpoint.removesuffix("control") + "art/"
+    if isinstance(art, str) and art.startswith(prefix) and re.fullmatch(r"[A-Za-z0-9_-]{32}", art[len(prefix):]):
+        details["art_url"] = art
+    return details
+
+
 # Load/seek this far ahead of the group, then unpause exactly when the group arrives.
 SYNC_PRIME = 0.8
 # Before a track is audible, re-prime when the group is already this far ahead.
@@ -107,6 +122,27 @@ class MusicPlayer:
             if (self.paused or self.user_paused) and status["state"] != "disabled":
                 status["state"] = "paused"
             return status
+
+    def album_art(self) -> tuple[bytes, str] | None:
+        """Current cover from the loopback relay, cached for the track."""
+        with self.lock:
+            url = self._now_playing.get("art_url", "")
+            cached = getattr(self, "_art_cache", None)
+        if not url:
+            return None
+        if cached and cached[0] == url:
+            return cached[1]
+        try:
+            with urllib.request.urlopen(url, timeout=15) as response:
+                content_type = response.headers.get_content_type()
+                body = response.read(MAX_ART_BYTES + 1)
+        except (OSError, ValueError):
+            return None
+        if content_type not in {"image/jpeg", "image/png", "image/webp"} or not body or len(body) > MAX_ART_BYTES:
+            return None
+        with self.lock:
+            self._art_cache = (url, (body, content_type))
+        return body, content_type
 
     def _pause(self):
         if self.paused or self.user_paused:
@@ -327,6 +363,7 @@ class MusicPlayer:
                                 "state": "playing",
                                 "title": track.get("title", ""),
                                 "artist": track.get("artist", ""),
+                                **track_details(track, endpoint),
                             }
                         elif ended is not None:
                             self._now_playing = {"state": "waiting", "title": "", "artist": ""}
@@ -437,7 +474,8 @@ class MusicPlayer:
         duration = float(state["duration"])
         with self.lock:
             self._now_playing = {"state": "playing" if state["state"] == "playing" and not muted else "paused",
-                                 "title": str(state.get("title", "")), "artist": str(state.get("artist", ""))}
+                                 "title": str(state.get("title", "")), "artist": str(state.get("artist", "")),
+                                 **track_details(state, endpoint)}
             if sleeping:
                 # The sleep watcher owns stopping mpv; never relaunch while asleep.
                 self.sync["track"] = None

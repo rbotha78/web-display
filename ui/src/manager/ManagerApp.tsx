@@ -4,6 +4,7 @@ import { AddDevice } from "./AddDevice";
 import { DeviceCard } from "./DeviceCard";
 import { MusicSyncGroups } from "./MusicSyncGroups";
 import { DeviceSettings } from "./DeviceSettings";
+import { GroupPlayer } from "./GroupPlayer";
 import { api, setToken, type Device, type Found } from "./api";
 
 function readToken(): string {
@@ -87,6 +88,8 @@ export function ManagerApp() {
     }
   };
 
+  const leaders = devices?.filter((device) => device.online && device.music_sync?.role === "leader") ?? [];
+
   const unpaired = found.filter(item => !item.enrolled && !devices?.some(device =>
     device.port === item.port && [device.host, ...(device.addresses ?? []), device.hostname]
       .some(host => host && [item.host, item.name].some(value =>
@@ -164,6 +167,7 @@ export function ManagerApp() {
           <p className="muted">No devices yet. Choose Add device to find or add one.</p>
         )}
       </div>}
+      {!configuring && leaders.length > 0 && <GroupPlayer leaders={leaders} notify={notify} />}
       {managerVersion && <footer className="muted">Web Display Manager {managerVersion}</footer>}
       <Toast notice={notice} />
     </div>

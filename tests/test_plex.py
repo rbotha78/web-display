@@ -33,6 +33,7 @@ class FakePlexHandler(http.server.BaseHTTPRequestHandler):
     music_browse_queries = []
     created_playlist_queries = []
     rating_queries = []
+    art_queries = []
     slow_music = None
     token = "private-test-token"
 
@@ -135,6 +136,9 @@ class FakePlexHandler(http.server.BaseHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(body)
                 return
+        elif parsed.path == "/photo/:/transcode":
+            self.art_queries.append(urllib.parse.parse_qs(parsed.query))
+            body, content_type = b"\xff\xd8album cover", "image/jpeg"
         elif parsed.path == "/library/sections/1/all":
             body = b'<MediaContainer><Video ratingKey="42" title="Example" type="movie" /></MediaContainer>'
             content_type = "application/xml"
@@ -172,7 +176,8 @@ class FakePlexHandler(http.server.BaseHTTPRequestHandler):
     def queue_xml(queue_id, center=1):
         tracks = "".join(
             f'<Track ratingKey="{i}" key="/library/metadata/{i}" playQueueItemID="{i}" title="Track {i}" '
-            f'grandparentTitle="Album artist" originalTitle="Artist {i}" duration="5000">'
+            f'grandparentTitle="Album artist" originalTitle="Artist {i}" duration="5000" parentTitle="Album {i}"'
+            + (f' parentThumb="/library/metadata/{1000 + i}/thumb/123"' if i % 2 else "") + '>'
             f'<Media><Part key="/library/parts/{i}/1/file.mp3" /></Media></Track>'
             for i in range(max(1, center - 5), min(32, center + 5) + 1)
         )
@@ -535,6 +540,13 @@ class PlexTests(unittest.TestCase):
             self.assertEqual((current["title"], current["artist"]), ("Track 1", "Artist 1"))
             status = relay.get_status()
             self.assertEqual((status["title"], status["artist"]), ("Track 1", "Artist 1"))
+            self.assertEqual(current["album"], "Album 1")
+            FakePlexHandler.art_queries = []
+            with urllib.request.urlopen(current["art_url"]) as response:
+                self.assertEqual((response.headers.get_content_type(), response.read()),
+                                 ("image/jpeg", b"\xff\xd8album cover"))
+            self.assertEqual(FakePlexHandler.art_queries[0]["url"], ["/library/metadata/1001/thumb/123"])
+            self.assertTrue(current["art_url"].startswith(relay.url + "/art/"))
             self.assertEqual(FakePlexHandler.queues_created, 1)
             request = urllib.request.Request(current["url"], headers={"Range": "bytes=5-"})
             with urllib.request.urlopen(request) as response:

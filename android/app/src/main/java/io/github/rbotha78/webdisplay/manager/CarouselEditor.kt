@@ -24,7 +24,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 
 private val KIND_LABELS = mapOf(
-    "web" to "Web page", "dashboard" to "Dashboard", "video" to "Video", "train" to "Train departures", "weather" to "Weather",
+    "web" to "Web page", "dashboard" to "Dashboard", "video" to "Video", "train" to "Train departures", "weather" to "Weather", "music" to "Now playing",
 )
 private val LAYOUT_LABELS = listOf("clock-notice" to "Clock and notice", "clock" to "Clock only", "notice" to "Notice only")
 
@@ -100,6 +100,7 @@ private fun SceneCard(index: Int, scene: Scene, count: Int, state: SettingsState
                     Hint("Requires a National Rail departure board key in Global settings.")
                 }
                 "weather" -> Hint("Shows the forecast for the city configured in Global settings.")
+                "music" -> Hint("Shows the current song, artist, album and cover. Skipped while no music is playing.")
             }
             problem?.let { ErrorText(it) }
             FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {

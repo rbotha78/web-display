@@ -18,7 +18,7 @@ import time
 from pathlib import Path
 
 from .app import local_addresses
-from .carousel import Carousel, Playlist, validate_playlist
+from .carousel import Carousel, Playlist, Scene, validate_playlist
 from .sleep import SleepRuntime
 from .scene_player import SceneRenderer, reachable, stop_process
 from .display import DEFAULT_SAFE_AREA_PERCENT, validate_safe_area
@@ -411,10 +411,14 @@ def main() -> None:
                 mode, scene, sleep_runtime.status, message,
                 train_path=target_path.with_name("train-board.json"),
                 weather_path=target_path.with_name("weather.json"),
+                music=music.now_playing(),
             ))
         except (OSError, ValueError):
             LOG.exception("Could not publish remote view")
             remote_path.unlink(missing_ok=True)
+
+    def music_scene_available(scene: Scene) -> bool:
+        return scene["kind"] != "music" or music.now_playing().get("state") in ("playing", "paused")
 
     def update_notification() -> None:
         nonlocal notification, notification_retry_at
@@ -422,7 +426,8 @@ def main() -> None:
             return
         try:
             notification.safe_area_percent = safe_area
-            status = {} if ap_active or sleeping else music.now_playing()
+            showing_music = renderer is not None and (renderer.active_scene or {}).get("kind") == "music"
+            status = {} if ap_active or sleeping or showing_music else music.now_playing()
             notification.show_now_playing(status)
         except (OSError, ValueError):
             LOG.exception("Could not display now-playing information; retrying in five seconds")
@@ -491,7 +496,7 @@ def main() -> None:
                     destination = ""
                     renderer = SceneRenderer(
                         lambda url, pipes: launch(args.browser, url, pipes), fallback_path.parent, args.mpv,
-                        music.pause_for_video,
+                        music.pause_for_video, music.now_playing, music.album_art,
                     )
                 # Video audio follows a connected Bluetooth speaker, otherwise the wired output.
                 renderer.set_audio_output(bluetooth.active_output(
@@ -502,7 +507,7 @@ def main() -> None:
                     if carousel:
                         carousel.stop()
                     renderer.set_safe_area(safe_area)
-                    carousel = Carousel(playlist, renderer, control_generation)
+                    carousel = Carousel(playlist, renderer, control_generation, music_scene_available)
                     new_carousel = True
                     previous_playlist = playlist
                     previous_revision = revision

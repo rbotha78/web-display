@@ -163,6 +163,16 @@ export function RemotePreview({ deviceId, deviceName, close }: {
                 )}
               </section>
             )}
+            {scene?.kind === "music" && (
+              <section aria-label="Now playing">
+                {value.music?.title && ["playing", "paused"].includes(value.music.state) ? <>
+                  <p>{value.music.state === "paused" ? "Paused" : "Now playing"}: <strong>{value.music.title}</strong></p>
+                  {value.music.artist && <p>{value.music.artist}</p>}
+                  {value.music.album && <p className="muted">{value.music.album}</p>}
+                  <p className="muted">Album covers are shown on the display only.</p>
+                </> : <p role="status">No music playing</p>}
+              </section>
+            )}
             {scene && (scene.kind === "weather" || scene.kind === "train" || scene.show_weather) &&
               <WeatherContent weather={value.weather} compact={scene.kind !== "weather"} currentOnly={scene.kind === "train"}
                 timeZone={clock?.timeZone} timeOffsetMinutes={clock?.offsetMinutes} />}

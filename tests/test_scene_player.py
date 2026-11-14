@@ -53,6 +53,38 @@ class SceneServerTests(unittest.TestCase):
             response = connection.getresponse()
             self.assertTrue(json.loads(response.read())["show_weather"])
 
+    def test_music_scene_hides_the_relay_capability_and_proxies_album_art(self):
+        relay_url = "http://127.0.0.1:1/music/secret-capability/art/" + "a" * 32
+        status = {"state": "playing", "title": "Song", "artist": "Band", "album": "Record", "art_url": relay_url}
+        art = Mock(return_value=(b"\xff\xd8cover", "image/jpeg"))
+        server = SceneServer(music_status=lambda: status, music_art=art)
+        self.addCleanup(server.close)
+        connection = http.client.HTTPConnection("127.0.0.1", server.server.server_port)
+        self.addCleanup(connection.close)
+        connection.request("GET", "/api/music")
+        body = connection.getresponse().read()
+        self.assertNotIn(b"secret-capability", body)
+        value = json.loads(body)
+        self.assertEqual((value["title"], value["artist"], value["album"]), ("Song", "Band", "Record"))
+        self.assertRegex(value["art"], r"\A[0-9a-f]{16}\Z")
+        connection.request("GET", "/api/music/art?v=" + value["art"])
+        response = connection.getresponse()
+        self.assertEqual((response.status, response.getheader("Content-Type"), response.read()),
+                         (200, "image/jpeg", b"\xff\xd8cover"))
+        connection.request("GET", "/api/music/art?url=http://example.com/")
+        response = connection.getresponse()
+        response.read()
+        self.assertEqual(response.status, 404)
+        art.return_value = None
+        connection.request("GET", "/api/music/art")
+        response = connection.getresponse()
+        response.read()
+        self.assertEqual(response.status, 404)
+        status.clear()
+        connection.request("GET", "/api/music")
+        self.assertEqual(json.loads(connection.getresponse().read()),
+                         {"state": "disabled", "title": "", "artist": "", "album": "", "art": ""})
+
     def test_only_display_data_is_exposed_and_ready_is_revision_bound(self):
         server = SceneServer()
         self.addCleanup(server.close)

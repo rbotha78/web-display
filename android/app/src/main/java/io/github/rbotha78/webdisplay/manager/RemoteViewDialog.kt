@@ -141,6 +141,18 @@ private fun RemoteSceneContent(scene: RemoteScene, snapshot: RemoteSnapshot, ela
                 WeatherContent(snapshot.weather, snapshot.clock, currentOnly = true)
             }
             is RemoteScene.Weather -> WeatherContent(snapshot.weather, snapshot.clock)
+            is RemoteScene.Music -> {
+                Text(if (scene.state == "paused") "Now playing · paused" else "Now playing",
+                    fontWeight = FontWeight.Bold)
+                if (scene.state in setOf("playing", "paused") && scene.song.isNotBlank()) {
+                    Text(scene.song, style = MaterialTheme.typography.titleLarge)
+                    if (scene.artist.isNotBlank()) Text(scene.artist)
+                    if (scene.album.isNotBlank()) Text(scene.album)
+                } else {
+                    Text("No music is playing.")
+                }
+                Text("Album covers and audio are not shown in this preview.")
+            }
         }
     }
 }

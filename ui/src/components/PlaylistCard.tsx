@@ -250,6 +250,8 @@ export function PlaylistCard({ notify, fail, active = true }: Props) {
               </>
             ) : scene.kind === "weather" ? (
               <p className="muted">Uses the city, country and API key in OpenWeather settings.</p>
+            ) : scene.kind === "music" ? (
+              <p className="muted">Shows the current song, artist, album and cover. Skipped while no music is playing.</p>
             ) : (
               <>
                 <label className="check">
@@ -331,6 +333,7 @@ export function PlaylistCard({ notify, fail, active = true }: Props) {
               <option value="video">Streamed video</option>
               <option value="train">Train departure board</option>
               <option value="weather">Weather</option>
+              <option value="music">Now playing</option>
             </select>
           </label>
           <button type="button" disabled={(playlist?.scenes.length ?? 0) >= 30} onClick={add}>Add scene</button>

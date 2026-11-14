@@ -1,11 +1,12 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { MusicConfig } from "../api";
 import { useDeviceApi } from "../DeviceApiContext";
 
-export function MusicControls({ fail, onEnabledChange, inline = false }: {
+export function MusicControls({ fail, onEnabledChange, inline = false, label }: {
   fail: (error: unknown) => void;
   onEnabledChange: (config: MusicConfig) => void;
   inline?: boolean;
+  label?: ReactNode;
 }) {
   const api = useDeviceApi();
   const [config, setConfig] = useState<MusicConfig | null>(null);
@@ -83,6 +84,7 @@ export function MusicControls({ fail, onEnabledChange, inline = false }: {
     {!inline && <div className="music-controls-space" aria-hidden="true" />}
     <section className={`music-controls${inline ? " music-controls-inline" : ""}`} aria-label="Audio player">
       <div className="music-controls-track">
+        {label}
         <strong title={config?.status.title}>{config?.status.title || "Background music"}</strong>
         {config?.status.title && config.status.artist &&
           <span className="music-controls-artist" title={config.status.artist}>{config.status.artist}</span>}

@@ -2,11 +2,12 @@ import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import type { Scene } from "./api";
 import { WeatherDisplay } from "./components/WeatherDisplay";
+import { NowPlayingDisplay } from "./components/NowPlayingDisplay";
 import { RecentServiceContent } from "./components/RecentServiceContent";
 import { ServiceStationTimes, nextServiceStops } from "./components/ServiceStationTimes";
 
 interface DisplayScene {
-  kind: "dashboard" | "train" | "weather" | "recovery";
+  kind: "dashboard" | "train" | "weather" | "music" | "recovery";
   revision: string;
   layout: Scene["layout"];
   text: string;
@@ -365,6 +366,8 @@ export function SceneScreen() {
               })}
             </time>
           </>
+        ) : scene.kind === "music" ? (
+          <NowPlayingDisplay key={scene.revision} />
         ) : scene.kind === "recovery" ? (
           <div>
             <h1>No carousel scenes are currently available</h1>

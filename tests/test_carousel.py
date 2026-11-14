@@ -227,6 +227,24 @@ class CarouselTests(unittest.TestCase):
         restarted.tick(100)
         self.assertEqual(restarted.current["id"], "a")
 
+    def test_unavailable_music_scene_is_skipped_unless_nothing_else_can_show(self):
+        playing = False
+        carousel = Carousel(playlist(scene("a", duration=5), scene("music", kind="music", duration=5)),
+                            self.renderer, available=lambda item: item["kind"] != "music" or playing)
+        self.assertEqual(carousel.scenes[1]["kind"], "music")
+        self.renderer.state.return_value = "playing"
+        carousel.tick(0)
+        carousel.tick(1)
+        carousel.tick(6)
+        self.assertEqual(carousel.current["id"], "a")
+        playing = True
+        carousel.tick(7)
+        carousel.tick(12)
+        self.assertEqual(carousel.current["id"], "music")
+        only_music = Carousel(playlist(scene("music", kind="music")), self.renderer, available=lambda _: False)
+        only_music.tick(0)
+        self.assertEqual(only_music.current["id"], "music")
+
     def test_failed_scenes_cool_down_and_recover_without_rapid_loops(self):
         carousel = Carousel(playlist(scene("a"), scene("b")), self.renderer)
         carousel.tick(0)

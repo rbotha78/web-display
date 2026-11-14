@@ -20,12 +20,22 @@ from . import music_sync
 from .music_sync import ClockOffset, LeaderClient, LeaderError
 
 PART_KEY = re.compile(r"/library/parts/[0-9]+/[0-9]+/file\.[A-Za-z0-9]+\Z")
+ART_KEY = re.compile(r"/library/metadata/[0-9]+/(?:thumb|art)/[0-9]+\Z")
+ART_SIZE = 600
+MAX_ART_BYTES = 2 * 1024 * 1024
+ART_TYPES = {"image/jpeg", "image/png", "image/webp"}
 
 
 
 def track_artist(track) -> str:
     """Prefer a track's own artist (compilations) over its album artist."""
     return track.get("originalTitle") or track.get("grandparentTitle", "")
+
+
+def track_art(track) -> str:
+    """Album cover first, then the track's own or its artist's image."""
+    return next((value for name in ("parentThumb", "thumb", "grandparentThumb")
+                 if ART_KEY.fullmatch(value := track.get(name, ""))), "")
 
 class EmptyMusicSourceError(ValueError):
     pass
@@ -141,6 +151,9 @@ class MusicRelay:
                 if not self.authorized():
                     self.reply(404, {})
                     return
+                if self.path.startswith(f"/music/{owner.capability}/art/"):
+                    self.send_art()
+                    return
                 with owner.lock:
                     client, track = owner.client, owner.track
                     valid = (not owner.sleeping() and owner.stream_enabled() and track is not None and
@@ -179,6 +192,32 @@ class MusicRelay:
                                 owner.streams.discard(response)
                 except (OSError, urllib.error.URLError, http.client.HTTPException, ValueError):
                     self.close_connection = True
+
+            def send_art(self):
+                with owner.lock:
+                    client, track = owner.client, owner.track
+                    thumb = track_art(track) if track is not None and owner.stream_key and (
+                        self.path == f"/music/{owner.capability}/art/{owner.stream_key}") else ""
+                if client is None or not thumb:
+                    self.reply(404, {})
+                    return
+                try:
+                    with client.open("/photo/:/transcode", {
+                        "url": thumb, "width": ART_SIZE, "height": ART_SIZE, "minSize": 1, "upscale": 1,
+                    }, timeout=15) as response:
+                        content_type = response.headers.get_content_type()
+                        body = response.read(MAX_ART_BYTES + 1)
+                    if content_type not in ART_TYPES or not body or len(body) > MAX_ART_BYTES:
+                        raise ValueError("Unsupported album art")
+                except (OSError, urllib.error.URLError, http.client.HTTPException, ValueError):
+                    self.reply(404, {})
+                    return
+                self.send_response(200)
+                self.send_header("Content-Type", content_type)
+                self.send_header("Content-Length", str(len(body)))
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                self.wfile.write(body)
 
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         self.server.daemon_threads = True
@@ -299,6 +338,13 @@ class MusicRelay:
                 "playQueueVersion": self.queue.get("playQueueVersion"),
             })
 
+    def _track_details(self):
+        """Album name and a capability URL for the current track's cover, when available."""
+        details = {"album": self.track.get("parentTitle", "")}
+        if track_art(self.track):
+            details["art_url"] = self.url + "/art/" + self.stream_key
+        return details
+
     def _stop(self):
         self._close_streams()
         try:
@@ -413,7 +459,7 @@ class MusicRelay:
             return {"track_id": self.track.get("playQueueItemID"),
                     "url": self.url + "/stream/" + self.stream_key,
                     "title": self.track.get("title", "Music"),
-                    "artist": track_artist(self.track)}
+                    "artist": track_artist(self.track), **self._track_details()}
 
     def get_status(self):
         with self.lock:
@@ -642,6 +688,7 @@ class MusicRelay:
             if state.get("rating_key") and self.track is not None:
                 state["track_id"] = self.stream_key
                 state["url"] = self.url + "/stream/" + self.stream_key
+                state.update(self._track_details())
             return state
 
     def _group_status(self):

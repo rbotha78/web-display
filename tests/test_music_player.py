@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-from webdisplay.music_player import MusicPlayer, control_url
+from webdisplay.music_player import MusicPlayer, control_url, track_details
 
 
 class MusicPlayerTests(unittest.TestCase):
@@ -397,3 +397,14 @@ class MusicPlayerTests(unittest.TestCase):
                       self.endpoint.replace("http:", "https:")):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 control_url(value)
+
+    def test_track_details_only_accept_covers_from_the_same_relay_capability(self):
+        endpoint = "http://127.0.0.1:9/music/cap/control"
+        good = "http://127.0.0.1:9/music/cap/art/" + "a" * 32
+        self.assertEqual(track_details({"album": "x" * 300, "art_url": good}, endpoint),
+                         {"album": "x" * 200, "art_url": good})
+        for art in ("http://127.0.0.1:9/music/other/art/" + "a" * 32, "https://example.com/a.jpg",
+                    good + "?x=1", "http://127.0.0.1:9/music/cap/art/short", 42):
+            with self.subTest(art=art):
+                self.assertEqual(track_details({"art_url": art}, endpoint), {})
+

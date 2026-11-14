@@ -16,6 +16,9 @@ sealed interface RemoteScene {
     ) : RemoteScene
     data class Train(override val title: String, val stationCrs: String) : RemoteScene
     data class Weather(override val title: String) : RemoteScene
+    data class Music(
+        override val title: String, val state: String, val song: String, val artist: String, val album: String,
+    ) : RemoteScene
     data class Video(
         override val title: String, val source: String, val audioEnabled: Boolean?,
         val duration: Double?, val ratingKey: String,
@@ -202,6 +205,12 @@ object RemoteViewParser {
                     )
                     "train" -> RemoteScene.Train(title, value.text("station_crs"))
                     "weather" -> RemoteScene.Weather(title)
+                    "music" -> body.optJSONObject("music").let { music ->
+                        RemoteScene.Music(
+                            title, music?.text("state") ?: "", music?.text("title") ?: "",
+                            music?.text("artist") ?: "", music?.text("album") ?: "",
+                        )
+                    }
                     "video" -> RemoteScene.Video(
                         title, value.text("source"), value.boolean("audio_enabled"),
                         value.number("duration"), value.text("plex_rating_key"),

@@ -136,7 +136,7 @@ private fun redact(value: String) = if (value.isEmpty()) "<blank>" else "<redact
 object SettingsRules {
     val DAYS = listOf("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
     val WAKE_MINUTES = listOf(15, 30, 60, 120, 240)
-    val SCENE_KINDS = listOf("web", "dashboard", "video", "train", "weather")
+    val SCENE_KINDS = listOf("web", "dashboard", "video", "train", "weather", "music")
     val LAYOUTS = listOf("clock", "notice", "clock-notice")
     const val MAX_SCENES = 30
     const val MAX_MIX_ITEMS = 20
