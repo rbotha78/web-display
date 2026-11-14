@@ -13,6 +13,18 @@ vitals or deployment instructions.
 
 ## Current Repository And Release
 
+- Unreleased image-build change: `WPA_COUNTRY` defaults to `GB`, is validated
+  before build side effects, is passed through pi-gen and participates in the
+  development-base cache identity. Manual image workflows expose `wifi_country`;
+  release images default to GB. The custom stage keeps the country in
+  `/etc/modprobe.d/web-display-regdom.conf` and removes pi-gen's country boot
+  option so later administration changes remain persistent. All 19 build-config
+  tests and shell syntax checks pass. No fresh image has been built or
+  boot-tested for this change; signed updates/development pushes cannot apply
+  this build-time setting, so the existing development displays are unchanged.
+  Wi-Fi credentials and automatic-AP opt-in are unchanged.
+  Original Pi Zero W support was investigated and explicitly excluded: Trixie's
+  Chromium does not support ARMv6; setting the Wi-Fi country cannot fix that.
 - Branch `main`; use `git status` and `git log` for the actual checkout/commit.
   v0.5.19 adds five-star Plex liking, the Global SSH-card phone overflow fix,
   integrated manager configuration/compact home playback controls, stable sync

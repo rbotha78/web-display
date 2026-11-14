@@ -63,11 +63,19 @@ and a native Linux filesystem:
 
 ```sh
 ./build-image.sh                           # cached development build, key-only SSH
+WPA_COUNTRY=US ./build-image.sh             # default GB; use the actual operating country
 FRESH=1 ./build-image.sh                   # rebuild the development base
 VARIANT=release ./build-image.sh           # clean hardened build, SSH masked
 tools/push-to-device.sh webdebug@DEVICE_IP  # deploy without reflashing
 tools/push-to-device.sh --restart-kiosk webdebug@DEVICE_IP
 ```
+
+`WPA_COUNTRY` is part of the development-base cache identity. The image stage
+stores it in the same modprobe file used by `wifi_helper.set_country` and removes
+pi-gen's country boot option, which would otherwise override later admin edits.
+Country provisioning is image-only; do not overwrite existing device countries
+on development pushes or signed updates. Original Pi Zero/Zero W (ARMv6) is not
+supported by the Trixie Chromium renderer.
 
 The development build reads `DEBUG_SSH_PUBLIC_KEY` (default `~/.ssh/id_rsa.pub`).
 Image artifacts go to `deploy/`. A development push replaces the factory Python

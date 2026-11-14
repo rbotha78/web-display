@@ -348,6 +348,11 @@ Bluetooth speaker output (all audio, wired fallback, delay compensation) and
 CI/release test stability fixes are included in v0.5.20. Bluetooth needs a new
 base image. Pi 3 music, wired fallback, reconnection and delay were validated
 with a JBL Flip 4; video audio and a Pi 2 USB Bluetooth adapter remain untested.
+The next image build presets Wi-Fi country GB (overridable with `WPA_COUNTRY`
+or the manual workflow's `wifi_country` input), avoiding the fresh-image country
+block. This does not enable automatic AP mode or supply network credentials.
+Original Pi Zero W support is excluded because the current Chromium renderer
+does not support ARMv6; a separate reduced-feature platform is not approved.
 
 Production hardening, full release acceptance and the two Wi-Fi reliability
 investigations remain outstanding. Persistent-renderer/dashboard acknowledgment,

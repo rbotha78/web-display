@@ -1,3 +1,7 @@
+import os
+import shutil
+import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -18,7 +22,7 @@ class BuildConfigTests(unittest.TestCase):
         self.assertIn("https://mirrorservice.org/sites/archive.raspbian.org/raspbian", build_script)
         self.assertIn("stage0/prerun.sh", build_script)
         self.assertIn("stage0/00-configure-apt/files/raspbian.sources", build_script)
-        self.assertIn('BASE_ID="${PI_GEN_COMMIT}:${RASPBIAN_MIRROR}"', build_script)
+        self.assertIn('BASE_ID="${PI_GEN_COMMIT}:${RASPBIAN_MIRROR}:${WPA_COUNTRY}"', build_script)
 
     def test_install_manifest_is_complete_and_shared(self):
         files = Path("image/stage-web-display/01-install/files")
@@ -164,6 +168,118 @@ class BuildConfigTests(unittest.TestCase):
         self.assertTrue(list(Path("src/webdisplay/static/assets").glob("*.js")))
         project = Path("pyproject.toml").read_text(encoding="utf-8")
         self.assertIn("static/**/*", project)
+
+
+class BuildCountryTests(unittest.TestCase):
+    def build(self, country=None, cached_country=None):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        root = Path(directory.name)
+        shutil.copyfile("build-image.sh", root / "build-image.sh")
+        pi_gen = root / ".build/pi-gen"
+        for path in (
+            pi_gen / ".git", pi_gen / "stage1", pi_gen / "stage2",
+            root / "image/stage-web-display/01-install/files",
+            root / "src/webdisplay", root / "bin",
+        ):
+            path.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(
+            "image/stage-web-display/01-install/files/web-display-release",
+            root / "image/stage-web-display/01-install/files/web-display-release",
+        )
+        for path in (
+            pi_gen / "stage0/prerun.sh",
+            pi_gen / "stage0/00-configure-apt/files/raspbian.sources",
+        ):
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("http://raspbian.raspberrypi.com/raspbian/\n", encoding="ascii")
+        for path, content in (
+            (root / "bin/git", "#!/bin/sh\nexit 0\n"),
+            (root / "bin/docker", "#!/bin/sh\nexit 0\n"),
+            (pi_gen / "build-docker.sh", "#!/bin/sh\nmkdir -p deploy\n"),
+        ):
+            path.write_text(content, encoding="ascii")
+            path.chmod(0o755)
+        key = root / "debug.pub"
+        key.write_text("fixture public key\n", encoding="ascii")
+        mirror = "https://mirror.example.test/raspbian"
+        if cached_country is not None:
+            pinned_commit = Path(
+                "image/stage-web-display/01-install/files/web-display-release"
+            ).read_text().split("PI_GEN_COMMIT=", 1)[1].splitlines()[0]
+            (root / ".build/base-development.stamp").write_text(
+                f"{pinned_commit}:{mirror}:{cached_country}\n", encoding="ascii",
+            )
+        env = {
+            **os.environ,
+            "PATH": str(root / "bin") + os.pathsep + os.environ["PATH"],
+            "VARIANT": "development", "DEBUG_SSH_PUBLIC_KEY": str(key),
+            "RASPBIAN_MIRROR": mirror, "FRESH": "0", "BASE_MAX_AGE_DAYS": "14",
+        }
+        env.pop("WPA_COUNTRY", None)
+        if country is not None:
+            env["WPA_COUNTRY"] = country
+        result = subprocess.run(
+            ["bash", str(root / "build-image.sh")], cwd=root, env=env,
+            capture_output=True, text=True, timeout=15,
+        )
+        return root, result
+
+    def test_default_country_is_passed_to_pi_gen_on_a_fresh_build(self):
+        root, result = self.build()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        config = (root / ".build/pi-gen/config").read_text()
+        self.assertIn('WPA_COUNTRY="GB"\n', config)
+        self.assertNotIn("Fast build:", result.stdout)
+
+    def test_country_change_rebuilds_base_but_matching_country_reuses_it(self):
+        for country, reuse in (("US", False), ("GB", True)):
+            with self.subTest(country=country):
+                root, result = self.build(country, cached_country="GB")
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn(
+                    f'WPA_COUNTRY="{country}"\n', (root / ".build/pi-gen/config").read_text(),
+                )
+                self.assertEqual("Fast build:" in result.stdout, reuse)
+                for stage in ("stage0", "stage1", "stage2"):
+                    self.assertEqual((root / ".build/pi-gen" / stage / "SKIP").exists(), reuse)
+                self.assertTrue(
+                    (root / ".build/base-development.stamp").read_text().strip().endswith(":" + country),
+                )
+
+    def test_invalid_country_fails_before_building(self):
+        for country in ("", "gb", "GBR", "G1", 'GB"\nENABLE_SSH=1'):
+            with self.subTest(country=country):
+                root, result = self.build(country)
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertIn("WPA_COUNTRY must be", result.stderr)
+                self.assertFalse((root / ".build/pi-gen/config").exists())
+
+    def test_image_country_remains_editable_by_existing_wifi_helper(self):
+        stage_script = Path("image/stage-web-display/01-install/00-run.sh").resolve()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            rootfs = root / "rootfs"
+            (rootfs / "boot/firmware").mkdir(parents=True)
+            cmdline = rootfs / "boot/firmware/cmdline.txt"
+            cmdline.write_text(
+                "console=tty1 cfg80211.ieee80211_regdom=GB root=PARTUUID=test quiet\n",
+                encoding="ascii",
+            )
+            (root / "files/webdisplay").mkdir(parents=True)
+            (root / "files/install-manifest").write_text("", encoding="ascii")
+            result = subprocess.run(
+                ["bash", "-c",
+                 'on_chroot() { cat >/dev/null; }; export -f on_chroot; exec bash "$1"',
+                 "stage-test", str(stage_script)],
+                cwd=root, env={**os.environ, "ROOTFS_DIR": str(rootfs), "WPA_COUNTRY": "US"},
+                capture_output=True, text=True, timeout=15,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(cmdline.read_text(), "console=tty1 root=PARTUUID=test quiet\n")
+            config = rootfs / "etc/modprobe.d/web-display-regdom.conf"
+            self.assertEqual(config.read_text(), "options cfg80211 ieee80211_regdom=US\n")
+            self.assertEqual(config.stat().st_mode & 0o777, 0o644)
 
 
 if __name__ == "__main__":

@@ -8,6 +8,14 @@ while read -r mode source destination; do
 	install -D -m "${mode}" "files/${source}" "${ROOTFS_DIR}${destination}"
 done < files/install-manifest
 
+# Keep the country in the file managed by wifi-action, not a higher-priority boot option.
+install -d -m 0755 "${ROOTFS_DIR}/etc/modprobe.d"
+printf 'options cfg80211 ieee80211_regdom=%s\n' "${WPA_COUNTRY}" \
+	> "${ROOTFS_DIR}/etc/modprobe.d/web-display-regdom.conf"
+chmod 0644 "${ROOTFS_DIR}/etc/modprobe.d/web-display-regdom.conf"
+sed -i -E 's/(^|[[:space:]])cfg80211\.ieee80211_regdom=[^[:space:]]+//g' \
+	"${ROOTFS_DIR}/boot/firmware/cmdline.txt"
+
 if [ -f files/debug-authorized_keys ]; then
 	install -d -m 0755 "${ROOTFS_DIR}/usr/local/sbin"
 	install -m 0755 files/disable-web-display-debug \

@@ -19,6 +19,9 @@ carousel transitions retain Chromium rather than relaunching it.
 Both administration screens have a floating audio player pinned to the bottom
 with **Play/Pause/Resume**, **Stop** and **Skip** controls for background music.
 
+The original Pi Zero and Zero W (ARMv6) are not supported: current Chromium on
+Raspberry Pi OS Trixie cannot run on them. This is separate from Wi-Fi setup.
+
 ## Display features
 
 The carousel supports websites, streamed/Plex video, clock/date/notice dashboards,
@@ -154,6 +157,13 @@ rather than the geographically redirected Oxford backend that has failed during
 builds. Override it with `RASPBIAN_MIRROR=https://... ./build-image.sh` if needed.
 Changing the mirror invalidates the cached development base and triggers a full
 base rebuild.
+Newly built images set the Wi-Fi regulatory country to **GB** during image
+creation, so first-boot Wi-Fi is not blocked waiting for an administrator to
+choose a country over Ethernet. Set `WPA_COUNTRY=US ./build-image.sh`, for example,
+to build for another country. Use the actual country where the display will
+operate; the value must be two uppercase letters. Changing it also invalidates
+the cached development base. The initial setting uses the same modprobe file as
+the administration Wi-Fi country control, so later changes remain persistent.
 The temporary account required by `pi-gen` is deleted during the custom stage,
 and first-boot user renaming is explicitly disabled.
 
@@ -192,7 +202,8 @@ tests, a shell syntax check, the UI typecheck and tests, and a check that the co
   release, and creates a build provenance attestation (`gh attestation verify <image> --repo
   rbotha78/web-display`). Release images are boot-tested on a Pi before publication.
 - **Run workflow** (manual) builds `development` or `release`. Development builds need your
-  SSH public key in the `ssh_public_key` input. The result is a workflow artifact kept for 14 days.
+  SSH public key in the `ssh_public_key` input. The `wifi_country` input defaults
+  to `GB`; published-release images also default to `GB`. The result is a workflow artifact kept for 14 days.
 
 Hosted builds are always full builds (about 30 minutes).
 
@@ -205,8 +216,9 @@ kiosk (blanks the screen briefly) when kiosk code, its unit or the Xorg config c
 
 ## Wi-Fi (milestone 2, staged)
 
-After logging in to the administration page you can set the Wi-Fi regulatory
-country (required before Wi-Fi is unblocked), scan, connect to one WPA2-PSK or
+Newly built images already have their build-time Wi-Fi country set (GB by
+default). After logging in to the administration page you can change the
+regulatory country, scan, connect to one WPA2-PSK or
 open network, or forget it. Credentials are stored as a root-only NetworkManager
 profile written by a narrowly privileged helper. Ethernet keeps priority through
 NetworkManager's default route metrics. The Network panel shows internet
@@ -611,8 +623,12 @@ The saved Wi-Fi profile retries indefinitely, and the supervisor reactivates it 
 automatic AP is disabled. On supervisor restart, any stale setup AP is removed and the
 saved client profile is explicitly reactivated. Wi-Fi routes use metric 600; the standard
 Ethernet route metric is 100, so Ethernet remains preferred when both links are active.
-Limitation: the country must first be set while an administration route (Ethernet)
-exists. Test manually with `sudo python3 -m webdisplay.netmonitor start-ap` and `stop-ap`
+On older images without a preset country, it must first be set while an
+administration route (such as Ethernet) exists. New images remove that country
+prerequisite, but do not preconfigure home Wi-Fi credentials or enable automatic
+AP mode: a usable provisioning route is still required. This is an image-build
+change; signed updates and development pushes do not configure an existing
+device's Wi-Fi country. Test manually with `sudo python3 -m webdisplay.netmonitor start-ap` and `stop-ap`
 (stop `web-display-network` first, or it will remove the AP while Ethernet is online).
 On Raspberry Pi OS Trixie, Pi 3 Model B AP startup previously failed with
 `nl80211: kernel reports: key setting validation failed` /

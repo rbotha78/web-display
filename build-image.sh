@@ -6,6 +6,12 @@ PI_GEN_COMMIT="c4f875735c109c658cd5ee99eaaaf70886a853b5"
 PI_GEN_DIR="${ROOT}/.build/pi-gen"
 RASPBIAN_MIRROR="${RASPBIAN_MIRROR:-https://mirrorservice.org/sites/archive.raspbian.org/raspbian}"
 RASPBIAN_MIRROR="${RASPBIAN_MIRROR%/}"
+WPA_COUNTRY="${WPA_COUNTRY-GB}"
+
+if [[ ! "${WPA_COUNTRY}" =~ ^[A-Z]{2}$ ]]; then
+	echo "WPA_COUNTRY must be a two-letter uppercase country code such as GB." >&2
+	exit 2
+fi
 
 case "${RASPBIAN_MIRROR}" in
 http://* | https://*) ;;
@@ -74,7 +80,7 @@ echo "VARIANT=${VARIANT}" >>"${STAGE_FILES}/web-display-release"
 CONTAINER_NAME="web_display_pigen_${VARIANT}"
 STAMP="${ROOT}/.build/base-${VARIANT}.stamp"
 BASE_MAX_AGE_DAYS="${BASE_MAX_AGE_DAYS:-14}"
-BASE_ID="${PI_GEN_COMMIT}:${RASPBIAN_MIRROR}"
+BASE_ID="${PI_GEN_COMMIT}:${RASPBIAN_MIRROR}:${WPA_COUNTRY}"
 FAST=0
 if [[ "${VARIANT}" == development ]]; then
 	DEPLOY_COMPRESSION="${DEPLOY_COMPRESSION:-gz}"
@@ -111,6 +117,7 @@ LOCALE_DEFAULT="en_GB.UTF-8"
 KEYBOARD_KEYMAP="gb"
 KEYBOARD_LAYOUT="English (UK)"
 TIMEZONE_DEFAULT="Europe/London"
+WPA_COUNTRY="${WPA_COUNTRY}"
 FIRST_USER_NAME="image-build"
 FIRST_USER_PASS="build-only-account-is-deleted-before-export"
 DISABLE_FIRST_BOOT_USER_RENAME=1
