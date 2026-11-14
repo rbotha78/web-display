@@ -111,7 +111,8 @@ export function settingsApi(id: string, lifetime: AbortSignal) {
       source?.addEventListener("abort", abort, { once: true });
     }
     try {
-      return await request<T>("/api/devices/" + id + "/settings", "POST", { method, path, body }, controller.signal);
+      const payload = body === undefined && method !== "GET" ? {} : body;
+      return await request<T>("/api/devices/" + id + "/settings", "POST", { method, path, body: payload }, controller.signal);
     } catch (error) {
       if (error instanceof ManagerError) throw new ApiError(error.message, error.status);
       throw error;

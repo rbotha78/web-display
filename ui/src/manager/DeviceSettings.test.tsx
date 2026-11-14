@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import { sleepDays } from "../api";
+import { settingsApi } from "./api";
 import { ManagerApp } from "./ManagerApp";
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
@@ -93,4 +94,14 @@ test("closing configuration cancels in-flight device requests", async () => {
   expect(pending.init.signal?.aborted).toBe(true);
   expect(screen.queryByRole("region", { name: "Configuration for Lobby" })).toBeNull();
   await screen.findAllByText("Configure device");
+});
+
+test("bodyless device mutations are proxied with an empty JSON body", async () => {
+  const calls = routes();
+  const api = settingsApi("aabbccddeeff", new AbortController().signal);
+  await api.scanBluetooth();
+  await api.status();
+  const scan = calls.find(c => c.request?.path === "/api/bluetooth/scan")!;
+  expect(scan.request).toEqual({ method: "POST", path: "/api/bluetooth/scan", body: {} });
+  expect(calls.find(c => c.request?.path === "/api/status")!.request).not.toHaveProperty("body");
 });
