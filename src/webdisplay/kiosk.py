@@ -418,7 +418,7 @@ def main() -> None:
             remote_path.unlink(missing_ok=True)
 
     def music_scene_available(scene: Scene) -> bool:
-        return scene["kind"] != "music" or music.now_playing().get("state") in ("playing", "paused")
+        return scene["kind"] != "music" or music.now_playing().get("state") == "playing"
 
     def update_notification() -> None:
         nonlocal notification, notification_retry_at

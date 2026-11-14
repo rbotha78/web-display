@@ -11,6 +11,8 @@ LOG = logging.getLogger(__name__)
 MAX_SCENES = 30
 STARTUP_TIMEOUT = 30
 RETRY_COOLDOWN = 60
+# A showing scene that stays unavailable this long (music stopped) yields to the next one.
+UNAVAILABLE_GRACE = 10
 DEFAULT_PLEX_BITRATE_KBPS = 4000
 MIN_PLEX_BITRATE_KBPS = 500
 MAX_PLEX_BITRATE_KBPS = 20000
@@ -203,6 +205,7 @@ class Carousel:
         self.cursor = -1
         self.attempted_at = 0.0
         self.started_at: float | None = None
+        self.unavailable_since: float | None = None
         self.cooldowns: dict[str, float] = {}
         self.generation = generation
         self.paused_at: float | None = None
@@ -248,7 +251,16 @@ class Carousel:
                 self.started_at is not None and duration is not None
                 and clock - self.started_at >= duration
             )
-            if not failed and (self.paused_at is not None or (state != "finished" and not expired)):
+            if self.paused_at is not None or self.available(self.current):
+                self.unavailable_since = None
+            elif self.unavailable_since is None:
+                self.unavailable_since = clock
+            withdrawn = (
+                self.unavailable_since is not None and clock - self.unavailable_since >= UNAVAILABLE_GRACE
+                and any(scene is not self.current and self.available(scene)
+                        and self.cooldowns.get(scene["id"], 0) <= now for scene in self.scenes)
+            )
+            if not failed and not withdrawn and (self.paused_at is not None or (state != "finished" and not expired)):
                 self.renderer.countdown(
                     min(1.0, (clock - self.started_at) / duration)
                     if duration is not None and self.started_at is not None else None,
@@ -259,6 +271,7 @@ class Carousel:
                 LOG.warning("Scene %s failed; retrying after cooldown", self.current["id"])
                 self.cooldowns[self.current["id"]] = now + RETRY_COOLDOWN
             self.current = None
+            self.unavailable_since = None
         candidates = [(self.cursor + offset) % len(self.scenes) for offset in range(1, len(self.scenes) + 1)]
         candidates = [index for index in candidates if self.cooldowns.get(self.scenes[index]["id"], 0) <= now]
         index = next((index for index in candidates if self.available(self.scenes[index])),

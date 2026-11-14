@@ -21,8 +21,10 @@
   `.github/copilot-instructions.md`; avoid duplicating transient status there.
 - Validate the change and rebuild both UI bundles when changing UI code.
 - Deploy completed iterations automatically to both development displays:
-  Pi 2 `webdebug@192.168.0.249` and Pi 3 `webdebug@192.168.0.251`.
-  Do not require a separate deployment request. Use pinned SSH host verification:
+  Pi 2 (`web-display-pi2`) and Pi 3 (`web-display-pi3`), user `webdebug`.
+  Their addresses change (Ethernet versus Wi-Fi, DHCP), so locate them with mDNS
+  before each deployment (`avahi-browse -rpt _web-display._tcp`, IPv4 entries)
+  rather than reusing remembered addresses. Do not require a separate deployment request. Use pinned SSH host verification:
   `StrictHostKeyChecking=yes` and `BatchMode=yes` for both SSH and SCP, including
   child commands in the push script. Never silently replace a changed host key.
 - Use `tools/push-to-device.sh --restart-kiosk` for kiosk/UI changes and verify

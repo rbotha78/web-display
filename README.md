@@ -330,8 +330,10 @@ configured weather location. Omitting timing uses the defaults above.
 album and Plex album cover (a placeholder when none exists), the next queued
 song when known (it may change at a weekday source switch or queue rebuild),
 and the same current-time clock as train scenes. The floating
-now-playing card is hidden while this scene is visible. The carousel skips the
-scene while music is stopped, loading or disabled, unless no other scene can show.
+now-playing card is hidden while this scene is visible. The carousel shows the
+scene only while music is playing (not paused, stopped, loading or disabled), unless
+no other scene can show; if music stops or pauses for 10 seconds while it is on
+screen, the carousel moves to the next available scene.
 Covers are fetched through the device's local music relay and loopback scene
 server; the Plex token and relay capability never reach the browser or managers.
 Private configuration is atomically saved; the administrator playlist API
