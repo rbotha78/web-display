@@ -151,6 +151,12 @@ private fun DisplaySection(state: SettingsState, editor: SettingsSession, workin
         Hint("Shown when the carousel is disabled. Leave blank to show the setup screen.")
         DraftField(draft.safeArea, { v -> editor.editDisplay { it.copy(safeArea = v) } }, "TV safe area (0–10 %)", number = true, maxLength = 2)
         CheckRow("Start setup Wi-Fi automatically when offline", draft.autoAp, { v -> editor.editDisplay { it.copy(autoAp = v) } }, switch = true)
+        ChoiceField(
+            "Offline means",
+            listOf("gateway" to "Default gateway unreachable (local network)", "internet" to "Internet unreachable"),
+            draft.apCheck,
+            { v -> editor.editDisplay { it.copy(apCheck = v) } },
+        )
         val audio = state.audio
         val outputs = audio.server
         when {

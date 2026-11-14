@@ -158,6 +158,9 @@ test("dashboard loads settings and saves them with the CSRF token", async () => 
   const audio = screen.getByLabelText("Audio output") as HTMLSelectElement;
   await waitFor(() => expect(audio.disabled).toBe(false));
   fireEvent.change(audio, { target: { value: "alsa/plughw:CARD=Headphones,DEV=0" } });
+  const check = screen.getByLabelText("Offline means") as HTMLSelectElement;
+  expect(check.value).toBe("gateway");
+  fireEvent.change(check, { target: { value: "internet" } });
   fireEvent.click(checkbox);
   fireEvent.click(screen.getByText("Save settings"));
   expect(await screen.findByText(/Settings saved/)).toBeTruthy();
@@ -168,6 +171,7 @@ test("dashboard loads settings and saves them with the CSRF token", async () => 
   expect(JSON.parse(save.init.body as string)).toEqual({
     url: "https://example.com",
     auto_ap: true,
+    ap_check: "internet",
     safe_area_percent: 8,
     audio_output: "alsa/plughw:CARD=Headphones,DEV=0",
   });

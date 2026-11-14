@@ -37,7 +37,9 @@ from .display import DEFAULT_SAFE_AREA_PERCENT, validate_safe_area
 from .audio import DEFAULT_AUDIO_OUTPUT, audio_outputs, validate_audio_output
 from . import bluetooth
 from .hostname_helper import validate_hostname
-from .network import default_route_interface, internet_status, website_status
+from .network import (
+    AP_CHECKS, DEFAULT_AP_CHECK, default_route_interface, internet_status, validate_ap_check, website_status,
+)
 from .plex import RATING_KEY, PlexClient, PlexPlaybackProxy, validate_server_url, validate_token
 from .music import MusicRelay, active_source, validate_music
 from . import music_sync
@@ -95,7 +97,7 @@ class ConfigStore:
     def load(self) -> dict[str, object]:
         with self._lock:
             if not self.path.exists():
-                return {"url": "", "password": None, "auto_ap": False,
+                return {"url": "", "password": None, "auto_ap": False, "ap_check": DEFAULT_AP_CHECK,
                         "safe_area_percent": DEFAULT_SAFE_AREA_PERCENT,
                         "audio_output": DEFAULT_AUDIO_OUTPUT,
                         "bluetooth": bluetooth.validate_bluetooth_config({}),
@@ -113,6 +115,7 @@ class ConfigStore:
                 "url": validate_url(data.get("url", "")),
                 "password": data.get("password"),
                 "auto_ap": data.get("auto_ap") is True,
+                "ap_check": data.get("ap_check") if data.get("ap_check") in AP_CHECKS else DEFAULT_AP_CHECK,
                 "audio_output": validate_audio_output(data.get("audio_output", DEFAULT_AUDIO_OUTPUT)),
                 "bluetooth": bluetooth.validate_bluetooth_config(data.get("bluetooth", {})),
                 "safe_area_percent": validate_safe_area(
@@ -155,6 +158,7 @@ class ConfigStore:
             data.update(changes)
             data["url"] = validate_url(data.get("url", ""))
             data["auto_ap"] = validate_flag(data.get("auto_ap", False))
+            data["ap_check"] = validate_ap_check(data.get("ap_check", DEFAULT_AP_CHECK))
             data["audio_output"] = validate_audio_output(data.get("audio_output", DEFAULT_AUDIO_OUTPUT))
             data["bluetooth"] = bluetooth.validate_bluetooth_config(data.get("bluetooth", {}))
             data["safe_area_percent"] = validate_safe_area(
@@ -1194,7 +1198,7 @@ def make_handler(app: Application) -> type[BaseHTTPRequestHandler]:
                 config = app.config.load()
                 self._json(
                     HTTPStatus.OK,
-                    {"url": config["url"], "auto_ap": config["auto_ap"],
+                    {"url": config["url"], "auto_ap": config["auto_ap"], "ap_check": config["ap_check"],
                      "safe_area_percent": config["safe_area_percent"],
                      "audio_output": config["audio_output"]},
                 )
@@ -1588,6 +1592,8 @@ def make_handler(app: Application) -> type[BaseHTTPRequestHandler]:
                     changes["url"] = validate_url(body["url"])
                 if "auto_ap" in body:
                     changes["auto_ap"] = validate_flag(body["auto_ap"])
+                if "ap_check" in body:
+                    changes["ap_check"] = validate_ap_check(body["ap_check"])
                 if "safe_area_percent" in body:
                     changes["safe_area_percent"] = validate_safe_area(body["safe_area_percent"])
                 if "audio_output" in body:
@@ -1603,7 +1609,7 @@ def make_handler(app: Application) -> type[BaseHTTPRequestHandler]:
                 app.publish_target()
                 self._json(
                     HTTPStatus.OK,
-                    {"url": config["url"], "auto_ap": config["auto_ap"],
+                    {"url": config["url"], "auto_ap": config["auto_ap"], "ap_check": config["ap_check"],
                      "safe_area_percent": config["safe_area_percent"],
                      "audio_output": config["audio_output"]},
                 )

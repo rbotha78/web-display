@@ -355,6 +355,11 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.status, 200)
         self.assertTrue(payload["auto_ap"])
         self.assertEqual(payload["url"], "https://example.com")
+        self.assertEqual(payload["ap_check"], "gateway")
+        response, payload = self.request("PUT", "/api/config", {"ap_check": "internet"}, headers)
+        self.assertEqual((response.status, payload["ap_check"]), (200, "internet"))
+        response, _ = self.request("PUT", "/api/config", {"ap_check": "ping"}, headers)
+        self.assertEqual(response.status, 400)
         response, _ = self.request(
             "PUT",
             "/api/config",

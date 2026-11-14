@@ -11,6 +11,7 @@ export function DisplayCard({ notify, fail }: Props) {
   const api = useDeviceApi();
   const [url, setUrl] = useState("");
   const [autoAp, setAutoAp] = useState(false);
+  const [apCheck, setApCheck] = useState<"gateway" | "internet">("gateway");
   const [safeArea, setSafeArea] = useState(5);
   const [audioOutput, setAudioOutput] = useState("alsa/hdmi:CARD=vc4hdmi,DEV=0");
   const [outputs, setOutputs] = useState<{ id: string; label: string }[]>([]);
@@ -24,6 +25,7 @@ export function DisplayCard({ notify, fail }: Props) {
       .then((config) => {
         setUrl(config.url);
         setAutoAp(config.auto_ap);
+        setApCheck(config.ap_check ?? "gateway");
         setSafeArea(config.safe_area_percent ?? 5);
         setAudioOutput(config.audio_output ?? "alsa/hdmi:CARD=vc4hdmi,DEV=0");
         setLoaded(true);
@@ -39,10 +41,11 @@ export function DisplayCard({ notify, fail }: Props) {
     event.preventDefault();
     setBusy(true);
     try {
-      const config = await api.saveConfig({ url, auto_ap: autoAp, safe_area_percent: safeArea,
+      const config = await api.saveConfig({ url, auto_ap: autoAp, ap_check: apCheck, safe_area_percent: safeArea,
         audio_output: audioOutput });
       setUrl(config.url);
       setAutoAp(config.auto_ap);
+      setApCheck(config.ap_check ?? "gateway");
       setSafeArea(config.safe_area_percent ?? 5);
       setAudioOutput(config.audio_output ?? "alsa/hdmi:CARD=vc4hdmi,DEV=0");
       notify("Settings saved. The display will update shortly.", "success");
@@ -105,8 +108,16 @@ export function DisplayCard({ notify, fail }: Props) {
           disabled={!loaded}
         />
         <span>
-          Start the setup access point automatically after about two minutes without internet
+          Start the setup access point automatically after about two minutes offline
         </span>
+      </label>
+      <label>
+        Offline means
+        <select value={apCheck} disabled={!loaded}
+          onChange={(event) => setApCheck(event.target.value as "gateway" | "internet")}>
+          <option value="gateway">Default gateway unreachable (local network)</option>
+          <option value="internet">Internet unreachable</option>
+        </select>
       </label>
       <div className="actions">
         <button className="primary" disabled={!loaded || busy}>

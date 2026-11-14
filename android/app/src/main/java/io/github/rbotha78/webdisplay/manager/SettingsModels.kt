@@ -4,8 +4,8 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
 
-data class DisplayConfig(val url: String, val autoAp: Boolean, val safeAreaPercent: Int, val audioOutput: String)
-data class DisplayDraft(val url: String, val autoAp: Boolean, val safeArea: String, val audioOutput: String)
+data class DisplayConfig(val url: String, val autoAp: Boolean, val safeAreaPercent: Int, val audioOutput: String, val apCheck: String = "gateway")
+data class DisplayDraft(val url: String, val autoAp: Boolean, val safeArea: String, val audioOutput: String, val apCheck: String = "gateway")
 data class AudioOutput(val id: String, val label: String)
 data class BluetoothStatus(
     val supported: Boolean,
@@ -157,7 +157,8 @@ object SettingsRules {
     // ---------- Parsing: invalid responses throw instead of producing empty drafts ----------
 
     fun parseDisplay(json: JSONObject): DisplayConfig = parsing("display settings") {
-        DisplayConfig(json.str("url"), json.bool("auto_ap"), json.int("safe_area_percent"), json.str("audio_output"))
+        DisplayConfig(json.str("url"), json.bool("auto_ap"), json.int("safe_area_percent"), json.str("audio_output"),
+            json.opt("ap_check") as? String ?: "gateway")
     }
 
     fun parseAudioOutputs(json: JSONObject): List<AudioOutput> = parsing("audio output") {
@@ -347,7 +348,7 @@ object SettingsRules {
     // ---------- Drafts ----------
 
     fun displayDraft(config: DisplayConfig) =
-        DisplayDraft(config.url, config.autoAp, config.safeAreaPercent.toString(), config.audioOutput)
+        DisplayDraft(config.url, config.autoAp, config.safeAreaPercent.toString(), config.audioOutput, config.apCheck)
     fun plexDraft(settings: PlexSettings) = PlexDraft(settings.serverUrl, settings.defaultBitrate.toString())
     fun musicDraft(settings: MusicSettings) = MusicDraft(
         settings.enabled, settings.stationKey, settings.volume, settings.daySources, settings.supportsDaySources,
@@ -385,6 +386,7 @@ object SettingsRules {
         val body = JSONObject()
         if (url != server.url) body.put("url", url)
         if (draft.autoAp != server.autoAp) body.put("auto_ap", draft.autoAp)
+        if (draft.apCheck != server.apCheck) body.put("ap_check", draft.apCheck)
         if (safeArea != server.safeAreaPercent) body.put("safe_area_percent", safeArea)
         if (draft.audioOutput != server.audioOutput) body.put("audio_output", draft.audioOutput)
         require(body.length() > 0) { "No display settings changed" }

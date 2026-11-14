@@ -1,13 +1,15 @@
-"""Root network supervisor: raises a setup access point when there is no usable internet.
+"""Root network supervisor: raises a setup access point when the display is offline.
 
 Policy:
-- Internet is judged by TCP probes to several endpoints, never by link or association alone.
+- "Offline" follows the "ap_check" setting: "gateway" (default) pings each default
+  gateway (accepting a fresh ARP reply when ICMP is blocked); "internet" uses TCP probes
+  to several public endpoints. Neither relies on link or association alone.
 - Automatic AP start is opt-in (the "auto_ap" setting, disabled by default).
 - The AP starts only after OUTAGE_GRACE seconds of continuous outage.
 - Every AP session gets a new random password (credential rotation).
 - While the AP is up, the saved Wi-Fi network is retried every RETRY_INTERVAL seconds;
   if the retry fails the AP is restored with a new password.
-- The AP stops as soon as internet is reachable again.
+- The AP stops as soon as the display is connected again.
 """
 
 from __future__ import annotations
@@ -25,7 +27,7 @@ import tempfile
 import time
 from pathlib import Path
 
-from .network import internet_status
+from .network import AP_CHECKS, DEFAULT_AP_CHECK, gateway_status, internet_status
 from .wifi_helper import KEYFILE as CLIENT_KEYFILE
 from .wifi_helper import current_country, run, wifi_device
 
@@ -175,10 +177,25 @@ def auto_ap_enabled() -> bool:
         return False
 
 
+def ap_check_mode() -> str:
+    try:
+        with CONFIG_PATH.open(encoding="utf-8") as stream:
+            mode = json.load(stream).get("ap_check", DEFAULT_AP_CHECK)
+    except (OSError, ValueError, AttributeError):
+        return DEFAULT_AP_CHECK
+    return mode if mode in AP_CHECKS else DEFAULT_AP_CHECK
+
+
+def connected(mode: str) -> bool:
+    status = internet_status() if mode == "internet" else gateway_status()
+    return bool(status["online"])
+
+
 class Supervisor:
-    def __init__(self, clock=time.monotonic, auto_ap=auto_ap_enabled):
+    def __init__(self, clock=time.monotonic, auto_ap=auto_ap_enabled, ap_check=ap_check_mode):
         self.clock = clock
         self.auto_ap = auto_ap
+        self.ap_check = ap_check
         self.offline_since: float | None = None
         self.ap_active = False
         self.last_retry = 0.0
@@ -285,7 +302,7 @@ class Supervisor:
         self.stop_ap()
         device = wifi_device()
         run(["nmcli", "--wait", "30", "connection", "up", "web-display-wifi", "ifname", device or ""], 45)
-        return bool(internet_status()["online"])
+        return connected(self.ap_check())
 
     def ap_is_up(self) -> bool:
         result = run(["nmcli", "-t", "-f", "NAME", "connection", "show", "--active"])
@@ -306,7 +323,7 @@ class Supervisor:
             if not self.ap_is_up():
                 self.restore_client()
         if online is None:
-            online = bool(internet_status()["online"])
+            online = connected(self.ap_check())
         if online:
             self.offline_since = None
             if self.ap_active:

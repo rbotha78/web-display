@@ -83,6 +83,28 @@ class SupervisorTests(unittest.TestCase):
                 path.write_text("not json")
                 self.assertFalse(netmonitor.auto_ap_enabled())
 
+    def test_connectivity_check_defaults_to_gateway_and_selects_the_probe(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "config.json"
+            with patch.object(netmonitor, "CONFIG_PATH", path):
+                self.assertEqual(netmonitor.ap_check_mode(), "gateway")
+                for stored, expected in (({"auto_ap": True}, "gateway"), ({"ap_check": "internet"}, "internet"),
+                                         ({"ap_check": "bogus"}, "gateway")):
+                    path.write_text(json.dumps(stored))
+                    self.assertEqual(netmonitor.ap_check_mode(), expected)
+        with (patch.object(netmonitor, "gateway_status", return_value={"online": True}) as gateway,
+              patch.object(netmonitor, "internet_status", return_value={"online": False}) as internet):
+            self.supervisor.ap_check = lambda: "gateway"
+            self.supervisor.tick()
+            self.assertEqual(self.events, [])
+            self.supervisor.ap_check = lambda: "internet"
+            self.supervisor.tick()
+            self.clock.now += OUTAGE_GRACE
+            self.supervisor.tick()
+        self.assertEqual(self.events, ["start"])
+        gateway.assert_called_once_with()
+        self.assertEqual(internet.call_count, 2)
+
     def test_no_ap_during_grace_period(self):
         self.supervisor.tick(online=False)
         self.clock.now += OUTAGE_GRACE - 1

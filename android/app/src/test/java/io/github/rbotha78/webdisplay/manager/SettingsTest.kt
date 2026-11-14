@@ -146,6 +146,8 @@ class SettingsTest {
         val server = DisplayConfig("https://a.example", false, 2, "hdmi")
         val body = SettingsRules.displayPayload(SettingsRules.displayDraft(server).copy(safeArea = "5"), server)
         assertEquals(setOf("safe_area_percent"), body.keys().asSequence().toSet())
+        val check = SettingsRules.displayPayload(SettingsRules.displayDraft(server).copy(apCheck = "internet"), server)
+        assertEquals("internet", check.getString("ap_check"))
         assertThrows(IllegalArgumentException::class.java) { SettingsRules.displayPayload(SettingsRules.displayDraft(server), server) }
         assertThrows(IllegalArgumentException::class.java) {
             SettingsRules.displayPayload(SettingsRules.displayDraft(server).copy(safeArea = "11"), server)

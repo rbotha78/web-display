@@ -4,7 +4,8 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 from webdisplay import wifi_helper
-from webdisplay.network import internet_status, website_status
+from webdisplay import network
+from webdisplay.network import gateway_status, internet_status, website_status
 
 
 class ValidationTests(unittest.TestCase):
@@ -92,6 +93,28 @@ class ProbeTests(unittest.TestCase):
             internet_status((("a", 1), ("b", 1)), lambda h, p: h == "b")["online"]
         )
         self.assertFalse(internet_status((("a", 1),), lambda h, p: False)["online"])
+
+    def test_gateway_needs_any_default_route_answering(self):
+        routes = [("192.168.0.1", "eth0"), ("192.168.0.1", "wlan0")]
+        self.assertTrue(gateway_status(routes, lambda gw, dev: dev == "wlan0")["online"])
+        self.assertFalse(gateway_status(routes, lambda gw, dev: False)["online"])
+        self.assertFalse(gateway_status([], lambda gw, dev: True)["online"])
+
+    def test_gateway_routes_and_arp_fallback(self):
+        routes = Mock(stdout="default via 192.168.0.254 dev eth0 proto dhcp metric 100\n"
+                             "default via 192.168.0.254 dev wlan0 proto dhcp metric 600\n")
+        with patch.object(network.subprocess, "run", return_value=routes):
+            self.assertEqual(network.default_gateways(),
+                             [("192.168.0.254", "eth0"), ("192.168.0.254", "wlan0")])
+        for neighbour, expected in (("192.168.0.254 lladdr aa:bb REACHABLE", True),
+                                    ("192.168.0.254 lladdr aa:bb STALE", False)):
+            with patch.object(network.subprocess, "run",
+                              side_effect=[Mock(returncode=1), Mock(stdout=neighbour)]) as run:
+                self.assertEqual(network.gateway_probe("192.168.0.254", "eth0"), expected)
+            self.assertIn("-I", run.call_args_list[0].args[0])
+        with patch.object(network.subprocess, "run", return_value=Mock(returncode=0)) as run:
+            self.assertTrue(network.gateway_probe("192.168.0.254", "eth0"))
+        run.assert_called_once()
 
     def test_website_failure_is_separate(self):
         result = website_status("https://example.test/path", lambda h, p: (h, p) == ("example.test", 443))

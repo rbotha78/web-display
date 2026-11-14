@@ -202,7 +202,8 @@ HTTPS service and upstream headers, never in scene data or player URLs.
 - NetworkManager owns client and AP profiles. Preserve Ethernet priority
   (metric 100 versus Wi-Fi 600), failed-connect restoration of the previous
   profile/AP, and credential rotation when starting the AP. Automatic AP is
-  opt-in (`auto_ap`, default false); client reconnection continues even when
+  opt-in (`auto_ap`, default false); its offline test (`ap_check`) defaults to
+  default-gateway reachability, with an internet probe option; client reconnection continues even when
   automatic AP is disabled or Ethernet is online.
 - A previously loaded target page stays visible during an outage, with an
   offline overlay after two failed checks. Full-screen setup replaces it when

@@ -617,8 +617,15 @@ certificate for the new name and restarts the management service. Reconnect at
 
 ### Setup access point and recovery
 
-`web-display-network.service` (root, sandboxed) probes internet reachability every
-10 seconds. Automatic AP start is **disabled by default**; enable it with the
+`web-display-network.service` (root, sandboxed) checks connectivity every 10 seconds.
+The "Offline means" setting (`ap_check`, also in both managers) selects the check:
+**Default gateway unreachable** (`gateway`, the default) pings each IPv4 default
+gateway on its interface, accepting a fresh `REACHABLE` ARP entry when the router
+blocks ping, so a working local network keeps the display connected even without
+internet; **Internet unreachable** (`internet`) instead requires a TCP connection to
+1.1.1.1, 8.8.8.8 or 9.9.9.9 on port 443. No default route always counts as offline.
+The status pages and offline overlay still report internet and site reachability
+separately. Automatic AP start is **disabled by default**; enable it with the
 "Start the setup access point automatically" checkbox in the administration page
 (the `auto_ap` setting, also available via `PUT /api/config`). Disabling it stops a
 running automatic AP. When enabled, after 120 seconds of continuous outage, and only
@@ -630,7 +637,7 @@ This does not disable WPA2 data encryption. The SSID, password and administratio
 address (`https://10.42.0.1:8443/`)
 are shown on the display's fallback page. While the AP is up the saved Wi-Fi network is
 retried every 10 minutes; if that fails the AP returns with new credentials. The AP stops
-as soon as internet is reachable again and the saved client network is restored.
+as soon as the selected check passes again and the saved client network is restored.
 If a client connection attempt fails while the setup AP is active, the saved client
 profile is rolled back and the setup AP is immediately restored with rotated credentials.
 The saved Wi-Fi profile retries indefinitely, and the supervisor reactivates it every

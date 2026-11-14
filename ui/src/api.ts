@@ -24,6 +24,7 @@ export interface Session {
 export interface Config {
   url: string;
   auto_ap: boolean;
+  ap_check?: "gateway" | "internet";
   safe_area_percent: number;
   audio_output: string;
 }
