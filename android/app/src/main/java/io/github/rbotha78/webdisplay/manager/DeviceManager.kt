@@ -23,15 +23,16 @@ class DeviceManager(private val store: SecureDeviceStore) {
 
     suspend fun forget(id: String) = io { store.remove(id) }
 
-    suspend fun saveDiscovered(found: List<FoundDevice>) {
+    suspend fun saveDiscovered(found: List<FoundDevice>): List<FoundDevice> {
         discovered = found
         val saved = devices()
-        found.forEach { item ->
-            saved.firstOrNull { it.hostname.equals(item.name, ignoreCase = true) }?.let { device ->
-                val updated = (device.addresses + HostAddress(item.host, item.port)).distinct().take(8)
-                if (updated != device.addresses) io { store.update(device.copy(addresses = updated)) }
-            }
+        saved.forEach { device ->
+            val candidates = found.filter { ManagerRules.matchesDiscovered(device, it) }
+                .map { HostAddress(it.host, it.port) }
+            val updated = (device.addresses + candidates).distinct().take(8)
+            if (updated != device.addresses) io { store.update(device.copy(addresses = updated)) }
         }
+        return ManagerRules.markEnrolled(found, saved)
     }
 
     suspend fun fingerprint(host: String, port: String): Pair<HostAddress, String> = io {
@@ -155,6 +156,16 @@ class DeviceManager(private val store: SecureDeviceStore) {
         var current = device.copy(host = host.host, port = host.port,
             addresses = (listOf(host) + device.addresses.filterNot { it == host }).take(8))
         val version = health.optString("version").takeIf { it.isNotBlank() }
+        requestJob?.ensureActive()
+        val musicSync = try {
+            val reply = PinnedHttp.request(current.host, current.port, current.fingerprint, "GET", MusicSyncRules.PATH,
+                headers = bearer(current.key), timeoutMs = 5_000)
+            MusicSyncRules.parseResponse(reply.status, reply.json)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Exception) {
+            MusicSyncState()
+        }
         try {
             val status = call(current, "GET", "/api/status", requestJob)
             val hostname = status.optString("hostname").takeIf { it.isNotBlank() }
@@ -188,6 +199,7 @@ class DeviceManager(private val store: SecureDeviceStore) {
                 restartNeeded = installed != null && running != null && installed != running,
                 firmwareOutdated = ManagerRules.firmwareTooOld(version),
                 minFirmware = if (ManagerRules.firmwareTooOld(version)) ManagerRules.MIN_FIRMWARE else null,
+                musicSync = musicSync,
             )
         } catch (error: DeviceRequestException) {
             DeviceStatus(
@@ -196,10 +208,29 @@ class DeviceManager(private val store: SecureDeviceStore) {
                 certificateChanged = error is CertificateChangedException,
                 firmwareOutdated = ManagerRules.firmwareTooOld(version),
                 minFirmware = if (ManagerRules.firmwareTooOld(version)) ManagerRules.MIN_FIRMWARE else null,
+                musicSync = musicSync,
             )
         }
         }
     }
+
+    private val syncOperations = MusicSyncOperations { id, body ->
+        deviceAction(id) { device ->
+            val reply = PinnedHttp.request(device.host, device.port, device.fingerprint,
+                "PUT", MusicSyncRules.PATH, body, bearer(device.key))
+            if (reply.status !in 200..299) throw DeviceRequestException("Music sync request failed", reply.status)
+        }
+    }
+
+    suspend fun createMusicSync(
+        leader: DeviceStatus, followers: List<DeviceStatus>, dissolveFirst: List<MusicSyncGroup>,
+    ): List<MusicSyncOutcome> {
+        val saved = devices().firstOrNull { it.id == leader.id } ?: throw DeviceRequestException("Unknown leader")
+        return syncOperations.createReplacing(leader, followers, saved, dissolveFirst)
+    }
+
+    suspend fun dissolveMusicSync(group: MusicSyncGroup) = syncOperations.dissolve(group)
+    suspend fun removeMusicSyncFollower(follower: DeviceStatus) = syncOperations.remove(follower)
 
     suspend fun setUrl(id: String, url: String) = deviceAction(id) { device ->
         PinnedHttp.requireSuccess(PinnedHttp.request(device.host, device.port, device.fingerprint,
@@ -271,6 +302,68 @@ class DeviceManager(private val store: SecureDeviceStore) {
         require(keyId.matches(Regex("[A-Za-z0-9_-]+"))) { "Invalid SSH key identifier" }
         parseKeys(PinnedHttp.requireSuccess(PinnedHttp.request(device.host, device.port, device.fingerprint,
             "DELETE", "/api/debug-keys/$keyId", headers = bearer(device.key), timeoutMs = 60_000)))
+    }
+
+    suspend fun settingsIdentity(id: String): Pair<String, String?> = io {
+        val device = store.load().firstOrNull { it.id == id } ?: throw DeviceRequestException("Unknown device")
+        device.fingerprint to device.hostname
+    }
+
+    /**
+     * Reads several settings endpoints over one verified connection. Per-endpoint HTTP errors are
+     * returned so older firmware can report unsupported sections; transport, certificate and key
+     * failures abort the whole read.
+     */
+    suspend fun fetchSettings(
+        id: String, paths: List<String>, requests: PinnedHttp.RequestScope,
+    ): Map<String, Result<JSONObject>> {
+        val requestJob = currentCoroutineContext()[Job]
+        return deviceAction(id, requests) { device ->
+            paths.associateWith { path ->
+                requestJob?.ensureActive()
+                val reply = PinnedHttp.request(device.host, device.port, device.fingerprint, "GET", path,
+                    headers = bearer(device.key), timeoutMs = 30_000, requestScope = requests)
+                if (reply.status == 401) throw DeviceRequestException(
+                    "The device rejected this manager's key. Enrol the device again.", 401,
+                )
+                try {
+                    Result.success(PinnedHttp.requireSuccess(reply))
+                } catch (error: DeviceRequestException) {
+                    Result.failure(error)
+                }
+            }
+        }
+    }
+
+    suspend fun sendSettings(
+        id: String, method: String, path: String, body: JSONObject?, timeoutMs: Int,
+    ): JSONObject = deviceAction(id) { device ->
+        PinnedHttp.requireSuccess(PinnedHttp.request(device.host, device.port, device.fingerprint,
+            method, path, body, bearer(device.key), timeoutMs))
+    }
+
+    suspend fun playerStatus(id: String, requests: PinnedHttp.RequestScope): Map<String, Result<JSONObject>> {
+        val requestJob = currentCoroutineContext()[Job]
+        return deviceAction(id, requests) { device ->
+            listOf(PlayerProtocol.MUSIC, PlayerProtocol.CAROUSEL).associateWith { path ->
+                requestJob?.ensureActive()
+                val reply = PinnedHttp.request(device.host, device.port, device.fingerprint, "GET", path,
+                    headers = bearer(device.key), timeoutMs = 5_000, requestScope = requests)
+                if (reply.status == 401) throw DeviceRequestException(
+                    "The device rejected this manager's key. Enrol the device again.", 401,
+                )
+                try { Result.success(PinnedHttp.requireSuccess(reply)) }
+                catch (error: DeviceRequestException) { Result.failure(error) }
+            }
+        }
+    }
+
+    suspend fun playerControl(id: String, command: PlayerCommand, requests: PinnedHttp.RequestScope) {
+        val (path, body) = PlayerProtocol.request(command)
+        deviceAction(id, requests) { device ->
+            PinnedHttp.requireSuccess(PinnedHttp.request(device.host, device.port, device.fingerprint,
+                "POST", path, body, bearer(device.key), timeoutMs = 10_000, requestScope = requests))
+        }
     }
 
     suspend fun updateAll(): List<UpdateOutcome> {

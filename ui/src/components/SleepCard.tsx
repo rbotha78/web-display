@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { api, sleepDays, type SleepConfig, type SleepSchedule, type SleepWindow } from "../api";
+import { sleepDays, type SleepConfig, type SleepSchedule, type SleepWindow } from "../api";
+import { useDeviceApi } from "../DeviceApiContext";
 import type { Notice } from "./Toast";
 
 export function SleepCard({ notify, fail }: {
   notify: (text: string, kind?: Notice["kind"]) => void;
   fail: (error: unknown) => void;
 }) {
+  const api = useDeviceApi();
   const [status, setStatus] = useState<SleepConfig | null>(null);
   const [draft, setDraft] = useState<SleepSchedule | null>(null);
   const [minutes, setMinutes] = useState(30);

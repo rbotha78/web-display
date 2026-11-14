@@ -20,13 +20,13 @@ class CertificateChangedException : DeviceRequestException("The device certifica
 data class HttpReply(val status: Int, val json: JSONObject, val headers: Map<String, List<String>>)
 
 object PinnedHttp {
-    class RequestScope {
+    class RequestScope(private val closedMessage: String = "Remote view closed") {
         private val connections = mutableSetOf<HttpsURLConnection>()
         private var cancelled = false
 
         @Synchronized
         internal fun track(connection: HttpsURLConnection) {
-            if (cancelled) throw DeviceRequestException("Remote view closed")
+            if (cancelled) throw DeviceRequestException(closedMessage)
             connections += connection
         }
 

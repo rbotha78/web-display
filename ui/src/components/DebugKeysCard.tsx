@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
-import { api, type SshKey } from "../api";
+import type { SshKey } from "../api";
+import { useDeviceApi } from "../DeviceApiContext";
 import type { Notice } from "./Toast";
 
 interface Props {
@@ -8,6 +9,7 @@ interface Props {
 }
 
 export function DebugKeysCard({ notify, fail }: Props) {
+  const api = useDeviceApi();
   const [keys, setKeys] = useState<SshKey[] | null>(null);
   const [key, setKey] = useState("");
   const [name, setName] = useState("");
@@ -67,7 +69,7 @@ export function DebugKeysCard({ notify, fail }: Props) {
         <p className="hint">No SSH keys are authorised.</p>
       ) : (
         keys.map((item) => (
-          <p key={item.id}>
+          <p key={item.id} className="ssh-key-entry">
             {item.comment || "(no name)"} <span className="hint">{item.type} {item.fingerprint}</span>{" "}
             <button type="button" disabled={busy} onClick={() => void remove(item)}>
               Remove

@@ -2,11 +2,17 @@ import { useCallback, useEffect, useState } from "react";
 import { Toast, type Notice } from "../components/Toast";
 import { AddDevice } from "./AddDevice";
 import { DeviceCard } from "./DeviceCard";
+import { MusicSyncGroups } from "./MusicSyncGroups";
+import { DeviceSettings } from "./DeviceSettings";
 import { api, setToken, type Device, type Found } from "./api";
 
 function readToken(): string {
   const match = /token=([^&]+)/.exec(window.location.hash);
   return match ? decodeURIComponent(match[1]) : "";
+}
+
+function normalizedHostname(value: string) {
+  return value.trim().replace(/\.$/, "").toLowerCase().replace(/\.local$/, "");
 }
 
 export function ManagerApp() {
@@ -17,6 +23,8 @@ export function ManagerApp() {
   const [found, setFound] = useState<Found[]>([]);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [busy, setBusy] = useState(false);
+  const [syncGroups, setSyncGroups] = useState(false);
+  const [configuring, setConfiguring] = useState<Device | null>(null);
 
   const notify = useCallback((text: string, kind: Notice["kind"] = "info") => {
     setNotice({ text, kind, id: Date.now() });
@@ -36,6 +44,11 @@ export function ManagerApp() {
       notify(error instanceof Error ? error.message : "Could not load devices", "error");
     }
   }, [notify]);
+
+  const closeSettings = useCallback(() => {
+    setConfiguring(null);
+    void refresh();
+  }, [refresh]);
 
   useEffect(() => {
     if (!ready) return;
@@ -74,17 +87,27 @@ export function ManagerApp() {
     }
   };
 
+  const unpaired = found.filter(item => !item.enrolled && !devices?.some(device =>
+    device.port === item.port && [device.host, ...(device.addresses ?? []), device.hostname]
+      .some(host => host && [item.host, item.name].some(value =>
+        normalizedHostname(host) === normalizedHostname(value))),
+  ));
+
   return (
-    <div className="shell">
+    <div className={`shell manager-shell${configuring ? " admin-shell" : ""}`}>
       <header className="topbar">
         <h1>Web Display Manager</h1>
-        <div className="actions">
+        {!configuring && <div className="actions">
           <button type="button" onClick={() => void refresh()}>
             Refresh
           </button>
-          <button type="button" disabled={busy || !devices?.length} onClick={updateAll}>
-            Update all
-          </button>
+          <details>
+            <summary>Manager actions</summary>
+            <button type="button" onClick={() => setSyncGroups(true)}>Music sync groups</button>
+            <button type="button" disabled={busy || !devices?.length} onClick={updateAll}>
+              Update all
+            </button>
+          </details>
           <button
             type="button"
             className="primary"
@@ -92,9 +115,12 @@ export function ManagerApp() {
           >
             Add device
           </button>
-        </div>
+        </div>}
       </header>
-      <div className="grid">
+      {syncGroups && !configuring && <MusicSyncGroups devices={devices ?? []} refresh={refresh}
+        close={() => setSyncGroups(false)} notify={notify} />}
+      {configuring ? <DeviceSettings key={configuring.id} device={configuring} notify={notify}
+        close={closeSettings} /> : <div className="grid">
         {adding && (
           <AddDevice
             notify={notify}
@@ -107,11 +133,10 @@ export function ManagerApp() {
             }}
           />
         )}
-        {!adding && found.some((f) => !f.enrolled) && (
+        {!adding && unpaired.length > 0 && (
           <section className="card" aria-label="Found on your network">
             <h2>Found on your network</h2>
-            {found
-              .filter((f) => !f.enrolled)
+            {unpaired
               .map((f) => (
                 <p key={f.host + ":" + f.port}>
                   {f.name} ({f.host}){" "}
@@ -132,12 +157,13 @@ export function ManagerApp() {
             notify={notify}
             refresh={() => void refresh()}
             readd={(d) => setAdding({ host: d.host, port: d.port })}
+            configure={() => setConfiguring(device)}
           />
         ))}
         {devices && devices.length === 0 && !adding && (
           <p className="muted">No devices yet. Choose Add device to find or add one.</p>
         )}
-      </div>
+      </div>}
       {managerVersion && <footer className="muted">Web Display Manager {managerVersion}</footer>}
       <Toast notice={notice} />
     </div>

@@ -118,6 +118,66 @@ class CarouselTests(unittest.TestCase):
         self.renderer = Mock()
         self.renderer.state.return_value = "playing"
 
+    def test_pause_freezes_duration_and_resume_preserves_remaining_time(self):
+        carousel = Carousel(playlist(scene("a", duration=5), scene("b")), self.renderer, "run")
+        carousel.tick(0)
+        carousel.tick(1)
+        carousel.apply_control({"generation": "run", "paused": True, "next": 0}, 2)
+        carousel.tick(100)
+        self.assertEqual(carousel.current["id"], "a")
+        self.renderer.countdown.assert_called_with(0.2)
+        self.renderer.set_paused.assert_called_with(True)
+        carousel.apply_control({"generation": "run", "paused": False, "next": 0}, 100)
+        self.renderer.set_paused.assert_called_with(False)
+        carousel.tick(103)
+        self.assertEqual(carousel.current["id"], "a")
+        carousel.tick(104)
+        self.assertEqual(carousel.current["id"], "b")
+
+    def test_next_while_paused_keeps_new_scene_paused_and_does_not_replay_commands(self):
+        carousel = Carousel(playlist(scene("a"), scene("b", duration=5)), self.renderer, "run")
+        carousel.tick(0)
+        carousel.apply_control({"generation": "run", "paused": True, "next": 0}, 2)
+        carousel.apply_control({"generation": "run", "paused": True, "next": 1}, 100)
+        carousel.tick(100)
+        carousel.tick(101)
+        self.assertEqual(carousel.current["id"], "b")
+        carousel.apply_control({"generation": "run", "paused": True, "next": 1}, 110)
+        carousel.tick(110)
+        self.assertEqual(self.renderer.start.call_count, 2)
+        carousel.apply_control({"generation": "run", "paused": False, "next": 1}, 110)
+        carousel.tick(114)
+        self.assertEqual(carousel.current["id"], "b")
+        carousel.tick(115)
+        self.assertEqual(carousel.current["id"], "a")
+
+    def test_paused_startup_is_not_timed_out_and_old_generation_is_ignored(self):
+        carousel = Carousel(playlist(scene("a")), self.renderer, "new")
+        carousel.apply_control({"generation": "old", "paused": True, "next": 1}, 0)
+        self.assertIsNone(carousel.paused_at)
+        self.assertEqual(carousel.next_sequence, 0)
+        carousel.tick(0)
+        self.renderer.state.return_value = "starting"
+        carousel.apply_control({"generation": "new", "paused": True, "next": 0}, 2)
+        carousel.tick(100)
+        self.assertEqual(carousel.current["id"], "a")
+        carousel.apply_control({"generation": "new", "paused": False, "next": 0}, 100)
+        carousel.tick(127)
+        self.assertIsNotNone(carousel.current)
+        carousel.tick(128)
+        self.assertIsNone(carousel.current)
+
+    def test_new_kiosk_does_not_replay_already_queued_next_requests(self):
+        carousel = Carousel(playlist(scene("a"), scene("b")), self.renderer, "run")
+        carousel.apply_control({"generation": "run", "paused": True, "next": 5}, 0, initial=True)
+        carousel.tick(0)
+        self.assertEqual(carousel.current["id"], "a")
+        self.assertEqual(carousel.next_sequence, 5)
+        self.assertIsNotNone(carousel.paused_at)
+        carousel.apply_control({"generation": "run", "paused": True, "next": 6}, 1)
+        carousel.tick(1)
+        self.assertEqual(carousel.current["id"], "b")
+
     def test_countdown_uses_playback_start_and_resets_at_scene_change(self):
         carousel = Carousel(playlist(scene("a", duration=5), scene("b", duration=10)), self.renderer)
         carousel.tick(0)

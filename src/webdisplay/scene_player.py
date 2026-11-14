@@ -245,7 +245,20 @@ class SceneRenderer:
         self.renderer_retry_at = 0.0
         self.browser_check_at = 0.0
         self.countdown_failed = False
-        self._publish_status()
+        self.paused = False
+        self.publish_status()
+
+    def set_paused(self, paused: bool) -> None:
+        self.paused = paused
+        self.last_progress = time.monotonic()
+        if self.active_scene and self.active_scene["kind"] == "video" and self.ipc is not None:
+            try:
+                self._command(["set_property", "pause", paused])
+            except (OSError, ValueError):
+                LOG.exception("Could not change video pause state")
+                self.error = "Could not change video pause state."
+                self.video_end = "failed"
+        self.publish_status()
 
     def failure(self, reason: str | None = None) -> None:
         if self.scene is None:
@@ -257,7 +270,7 @@ class SceneRenderer:
         while len(self.failures) > 30:
             del self.failures[next(iter(self.failures))]
         LOG.warning("Scene %s: %s", self.scene["id"], message)
-        self._publish_status()
+        self.publish_status()
 
     def countdown(self, progress: float | None) -> None:
         if self.countdown_failed:
@@ -275,13 +288,14 @@ class SceneRenderer:
         self.server.safe_area_percent = percent
         self.windows.safe_area_percent = percent
 
-    def _publish_status(self) -> None:
+    def publish_status(self) -> None:
         atomic_write(
             self.runtime / "carousel-status.json",
             json.dumps({
                 "failures": self.failures, "updated": int(time.time()),
                 "active_scene": self.active_scene["id"] if self.active_scene else None,
                 "preparing_scene": self.scene["id"] if self.scene and not self.activated else None,
+                "paused": self.paused,
             }) + "\n",
             mode=0o640,
         )
@@ -297,7 +311,7 @@ class SceneRenderer:
             self.preparation_failed = True
             self.error = "Renderer recovery is still in progress."
             LOG.error("Scene %s could not recover its renderer: %s", scene["id"], error)
-            self._publish_status()
+            self.publish_status()
 
     def _start(self, scene: Scene) -> None:
         self._cancel_pending()
@@ -374,7 +388,7 @@ class SceneRenderer:
                       type(error).__name__, f": {error}" if isinstance(error, BrowserError) else "")
             self.browser_failed = isinstance(error, BrowserError)
             self.preparation_failed = True
-        self._publish_status()
+        self.publish_status()
 
     def _video_bitrate(self) -> int:
         if self.scene and self.scene["source"] == "plex":
@@ -476,7 +490,7 @@ class SceneRenderer:
         if self.scene["kind"] == "video":
             self.windows.show_video()
             self._command(["set_property", "mute", not self.scene["audio_enabled"]])
-            self._command(["set_property", "pause", False])
+            self._command(["set_property", "pause", self.paused])
             if not self.scene["audio_enabled"]:
                 self.music_pause(False)
             self.loading_video = False
@@ -494,7 +508,7 @@ class SceneRenderer:
             self._stop_plex(self.active_scene)
         self.active_scene = self.scene
         self.activated = True
-        self._publish_status()
+        self.publish_status()
 
     def _video_status(self) -> PlaybackState:
         if self.video_end is not None:
@@ -545,7 +559,8 @@ class SceneRenderer:
                     return "finished"
                 if self.video_end is not None:
                     return self.video_end
-            if self.video_state == "playing" and time.monotonic() - self.last_progress >= STALL_TIMEOUT:
+            if (not self.paused and self.video_state == "playing"
+                    and time.monotonic() - self.last_progress >= STALL_TIMEOUT):
                 LOG.warning("Video stalled")
                 self.error = "Video made no playback progress for 30 seconds."
                 return "failed"
@@ -647,7 +662,7 @@ class SceneRenderer:
     def _clear_failure(self) -> None:
         if self.scene is not None and self.scene["id"] in self.failures:
             del self.failures[self.scene["id"]]
-            self._publish_status()
+            self.publish_status()
 
     def _stop_plex(self, scene: Scene) -> None:
         if scene["source"] == "plex" and scene.get("plex_stop_url"):

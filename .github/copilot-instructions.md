@@ -115,6 +115,38 @@ identity is certificate-based, not tied to one DHCP address; successful fallback
 addresses are promoted. Both React apps share `ui/` dependencies and styles but
 have separate entry points and API clients.
 
+Discovery must classify already-added devices from persisted enrollment, not
+online/status snapshots. Match all saved endpoints and normalized hostname
+aliases (case, trailing dot, `.local`); do not use user-assigned display labels.
+Keep different service ports distinct, and never let discovery association bypass
+TLS pinning. Reclassify scans after enrollment/removal and guard stale scan/UI
+responses so known devices do not reappear as new.
+
+The PC manager's native configuration view reuses device React editors through
+`DeviceApiContext` and `createApi`; shared editors must use the context rather
+than hard-code the default device API singleton. Manager configuration requests
+use a token-protected, explicitly allowlisted JSON gateway in
+`webdisplay_manager.service.Manager.settings`, with the enrolled device's TLS
+pin and bearer key. Add newly exposed operations deliberately; never turn this
+into an arbitrary URL/header proxy or expose device keys to browser code.
+Password-only API-key management and raw bundle uploads are not proxied.
+
+Android native configuration uses `SettingsSession` and typed settings models
+with the existing pinned-address transport and mutation admission. Keep secrets
+in memory only, retain drafts across settings tabs/status refreshes, and cancel
+requests when leaving/backgrounding. Preserve unknown scene fields when editing
+newer firmware. Sleep/music/carousel overwrite checks are client-side and must
+not be described as atomic server concurrency control.
+
+Manager home cards show display identity and inline music/carousel controls;
+keep maintenance in secondary actions and full editors in Configure device.
+Carousel transport is separate from saved playlist configuration: the service
+publishes group-readable `/run/web-display/carousel-control.json` with generation,
+desired pause and a monotonic Next sequence. The kiosk ignores old generations,
+baselines already-seen Next commands on reconstruction, pauses both scene timing
+and mpv, and publishes `carousel-status.json` every tick. Managers must gate new
+controls on advertised support and a fresh heartbeat, not version guesses.
+
 Carousel scene kinds are `web`, `dashboard`, `video`, `train` and `weather`.
 `scene_player.py` coordinates Chromium/mpv and the read-only local scene server;
 `ui/src/SceneScreen.tsx` renders local scenes and acknowledges their revision.
@@ -174,8 +206,22 @@ HTTPS service and upstream headers, never in scene data or player URLs.
   previously captured observations for departed services. Never infer actual
   departures/last-seen stations from estimates or a service disappearing.
   `show_previous_departure` defaults true; hiding it must reclaim the space.
+- Music sync groups (`webdisplay.music_sync`, `MusicRelay` leader/follower modes):
+  config `music_sync` is `{"role":"off"}`, leader `{group_id, token_hash}` or
+  follower `{group_id, token, leader{name,hostname,port,addresses,fingerprint}}`.
+  `GET`/`PUT /api/music/sync` (managers; 404 = unsupported firmware) and
+  `POST /api/music/sync/peer` (header `X-Music-Sync-Token`, throttled, leader only).
+  The leader owns the group clock (`started_at`, pause/idle freeze) in epoch time;
+  followers pin the leader certificate, fetch the same rating key from their own
+  Plex (machine identifier must match) and the kiosk player uses relay action
+  `sync` with prime-then-unpause plus speed/seek drift correction. In sync mode
+  legacy player actions are rejected; video/sleep mute locally only. The device
+  package must not import `webdisplay_manager`.
 - Keep background-music settings backwards compatible as
-  `{enabled, station_key, volume}`. `station_key` identifies stations, audio
+  `{enabled, station_key, volume, day_sources}`; a PUT omitting `day_sources`
+  preserves the saved weekday schedule. Blank days use `station_key`. The relay
+  resolves today's source by device-local date and switches only at a song
+  boundary (next/skip/queue end), never mid-song. `station_key` identifies stations, audio
   playlists or `mix:artist:<IDs>` / `mix:album:<IDs>` selections. Validate against
   Plex, limit custom mixes to 20 unique correctly typed selections, and reject
   arbitrary URLs. Browse with both Plex container start and size (100/page) to

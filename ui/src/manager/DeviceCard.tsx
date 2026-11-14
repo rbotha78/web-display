@@ -1,26 +1,23 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { api, type Device } from "./api";
 import { DeviceKeys } from "./DeviceKeys";
 import { RemotePreview } from "./RemotePreview";
+import { DevicePlayers } from "./DevicePlayers";
 
 interface Props {
   device: Device;
   notify: (text: string, kind?: "info" | "success" | "error") => void;
   refresh: () => void;
   readd: (device: Device) => void;
+  configure: () => void;
 }
 
-export function DeviceCard({ device, notify, refresh, readd }: Props) {
-  const [url, setUrl] = useState(device.url ?? "");
-  const [editing, setEditing] = useState(false);
+export function DeviceCard({ device, notify, refresh, readd, configure }: Props) {
   const [available, setAvailable] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [preview, setPreview] = useState(false);
+  const [more, setMore] = useState(false);
   const closePreview = useCallback(() => setPreview(false), []);
-
-  useEffect(() => {
-    if (!editing) setUrl(device.url ?? "");
-  }, [device.url, editing]);
 
   const run = async (work: () => Promise<void>) => {
     setBusy(true);
@@ -32,14 +29,6 @@ export function DeviceCard({ device, notify, refresh, readd }: Props) {
       setBusy(false);
     }
   };
-
-  const saveUrl = () =>
-    run(async () => {
-      await api.setUrl(device.id, url.trim());
-      setEditing(false);
-      notify("Display address saved on " + device.name, "success");
-      refresh();
-    });
 
   const check = () =>
     run(async () => {
@@ -109,8 +98,18 @@ export function DeviceCard({ device, notify, refresh, readd }: Props) {
   const healthy = device.online && !device.error;
   const adminUrl = "https://" + (device.host.includes(":") ? "[" + device.host + "]" : device.host) + ":" + device.port + "/";
 
+  const sync = device.music_sync;
+  const following = "Music sync: following " + (sync?.leader?.name || "leader");
+  const syncLine = !device.online ? "Music sync: unavailable (offline)"
+    : !sync ? "Music sync: unavailable"
+    : !sync.supported ? "Music sync: unsupported (update firmware)"
+    : sync.role === "leader" ? "Music sync: leading (" + (sync.members?.length ?? 0) + " followers)"
+    : sync.role === "follower" ? following + (sync.error || sync.connected === false
+      ? " — " + (sync.error || "leader disconnected") : "")
+    : "Music sync: off";
+
   return (
-    <section className="card" aria-label={device.name}>
+    <section className="card manager-device-card" aria-label={device.name}>
       <h2>
         {device.name}{" "}
         <span className={"pill " + (device.online ? "ok" : "bad")}>
@@ -124,6 +123,7 @@ export function DeviceCard({ device, notify, refresh, readd }: Props) {
         :{device.port}
         {device.hostname ? " · " + device.hostname : ""}
       </p>
+      <p className="muted manager-sync-line" title={syncLine}>{syncLine}</p>
       {device.certificate_changed && (
         <p className="error">
           The certificate changed (for example after a rename or reflash).{" "}
@@ -149,6 +149,13 @@ export function DeviceCard({ device, notify, refresh, readd }: Props) {
       {device.error && !device.certificate_changed && !device.key_rejected && (
         <p className="error">{device.error}</p>
       )}
+      {healthy && <DevicePlayers deviceId={device.id} notify={notify} />}
+      <div className="actions">
+        {healthy && <button type="button" disabled={busy} onClick={configure}>Configure device</button>}
+        <button type="button" onClick={() => setPreview(true)}>Preview display</button>
+        <button type="button" aria-expanded={more} onClick={() => setMore(!more)}>More actions</button>
+      </div>
+      {more && <>
       {healthy && (
         <dl>
           <dt>Version</dt>
@@ -170,21 +177,7 @@ export function DeviceCard({ device, notify, refresh, readd }: Props) {
       )}
       {healthy && (
         <>
-          <label>
-            Display address
-            <input
-              value={url}
-              onChange={(event) => {
-                setUrl(event.target.value);
-                setEditing(true);
-              }}
-              placeholder="https://example.com"
-            />
-          </label>
           <div className="actions">
-            <button type="button" disabled={busy || !editing} onClick={saveUrl}>
-              Save address
-            </button>
             <button type="button" disabled={busy} onClick={check}>
               Check for updates
             </button>
@@ -201,7 +194,6 @@ export function DeviceCard({ device, notify, refresh, readd }: Props) {
       )}
       {healthy && <DeviceKeys deviceId={device.id} deviceName={device.name} notify={notify} />}
       <div className="actions">
-        <button type="button" onClick={() => setPreview(true)}>Preview display</button>
         {healthy && (
           <button type="button" disabled={busy} onClick={openAdmin}>Open admin page</button>
         )}
@@ -212,6 +204,7 @@ export function DeviceCard({ device, notify, refresh, readd }: Props) {
           Remove
         </button>
       </div>
+      </>}
       {preview && <RemotePreview deviceId={device.id} deviceName={device.name} close={closePreview} />}
     </section>
   );

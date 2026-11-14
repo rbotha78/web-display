@@ -230,3 +230,49 @@ test("updates enabled state from player controls without discarding music source
   expect(screen.getByLabelText("Music source")).toHaveProperty("value", "/playlists/12/items");
   expect(screen.getByLabelText("Music volume")).toHaveProperty("value", "45");
 });
+
+test("saves weekday sources while preserving saved mixes and marking today", async () => {
+  const days = { monday: "", tuesday: "", wednesday: "", thursday: "", friday: "", saturday: "",
+    sunday: "mix:artist:501,502" };
+  const config = { enabled: true, station_key: "/playlists/11/items", volume: 30, day_sources: days,
+    active_day: "saturday" as const, active_station_key: "/playlists/11/items",
+    status: { state: "playing", title: "Song", error: "" } };
+  vi.spyOn(api, "musicConfig").mockResolvedValue(config);
+  vi.spyOn(api, "musicStations").mockResolvedValue({ items: [
+    { key: "/playlists/11/items", title: "Favourites", library: "Playlists" },
+    { key: "/playlists/12/items", title: "Friday Mix", library: "Playlists" },
+  ] });
+  const save = vi.spyOn(api, "saveMusicConfig").mockImplementation(async (settings) => ({ ...config, ...settings }));
+  render(<MusicCard configured notify={vi.fn()} fail={vi.fn()} />);
+  expect(await screen.findByLabelText("Saturday (today)")).toBeTruthy();
+  expect(screen.getByText("Today (Saturday) uses the saved source: Playlists: Favourites")).toBeTruthy();
+  const sunday = screen.getByLabelText("Sunday") as HTMLSelectElement;
+  expect(sunday.selectedOptions[0].textContent).toBe("Custom artist mix (2 selections)");
+  await screen.findAllByText("Playlists: Friday Mix");
+  fireEvent.change(screen.getByLabelText("Friday"), { target: { value: "/playlists/12/items" } });
+  fireEvent.click(screen.getByText("Save music settings"));
+  await waitFor(() => expect(save).toHaveBeenCalledWith({
+    enabled: true, station_key: "/playlists/11/items", volume: 30,
+    day_sources: { ...days, friday: "/playlists/12/items" },
+  }));
+});
+
+test("shows the follower's music group and leaves it", async () => {
+  const config = { enabled: false, station_key: "", volume: 30,
+    status: { state: "playing", title: "Song", error: "" } };
+  vi.spyOn(api, "musicConfig").mockResolvedValue(config);
+  vi.spyOn(api, "musicStations").mockResolvedValue({ items: [] });
+  vi.spyOn(api, "musicSync").mockResolvedValue({ supported: true, role: "follower", group_id: "g".repeat(16),
+    leader: { name: "Kitchen", hostname: "kitchen-pi", port: 8443, addresses: ["192.168.0.249"] },
+    members: [], connected: false, error: "Cannot reach the leader display" });
+  const leave = vi.spyOn(api, "leaveMusicSync").mockResolvedValue({ supported: true, role: "off", group_id: "",
+    leader: null, members: [], connected: true, error: "" });
+  const notify = vi.fn();
+  render(<MusicCard configured notify={notify} fail={vi.fn()} />);
+  await screen.findByText("Music sync: following Kitchen");
+  expect(screen.getByText("Cannot reach the leader display")).toBeTruthy();
+  fireEvent.click(screen.getByText("Leave group"));
+  await waitFor(() => expect(notify).toHaveBeenCalledWith("This display left its music group"));
+  expect(leave).toHaveBeenCalled();
+  expect(screen.queryByText("Music sync: following Kitchen")).toBeNull();
+});

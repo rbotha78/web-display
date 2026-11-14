@@ -20,17 +20,51 @@ class ManagerViewModel(application: Application) : AndroidViewModel(application)
     private val _statuses = MutableStateFlow<List<DeviceStatus>>(emptyList())
     val statuses: StateFlow<List<DeviceStatus>> = _statuses
     private val _found = MutableStateFlow<List<FoundDevice>>(emptyList())
+    private var latestDiscovered = emptyList<FoundDevice>()
+    private var discoveryGeneration = 0
     val found: StateFlow<List<FoundDevice>> = _found
     private val _busy = MutableStateFlow<Set<String>>(emptySet())
     val busy: StateFlow<Set<String>> = _busy
     private val _notice = MutableStateFlow<String?>(null)
     val notice: StateFlow<String?> = _notice
+    private val _musicSyncResults = MutableStateFlow<List<MusicSyncOutcome>>(emptyList())
+    val musicSyncResults: StateFlow<List<MusicSyncOutcome>> = _musicSyncResults
     private val _storeError = MutableStateFlow<String?>(null)
     val storeError: StateFlow<String?> = _storeError
     private val _managerVersion = MutableStateFlow("1.0.0")
     val managerVersion: StateFlow<String> = _managerVersion
     private val remoteSession = RemoteViewSession(viewModelScope, manager::remoteView)
     val remoteView: StateFlow<RemoteViewState?> = remoteSession.state
+    private val playerSession = PlayerSession(viewModelScope, object : PlayerBackend {
+        override suspend fun fetch(id: String, requests: PinnedHttp.RequestScope) = manager.playerStatus(id, requests)
+        override suspend fun send(id: String, command: PlayerCommand, requests: PinnedHttp.RequestScope) =
+            manager.playerControl(id, command, requests)
+    }, admission)
+    val players = playerSession.state
+    fun homeVisible(visible: Boolean) = playerSession.visible(visible)
+    fun resumePlayers() = playerSession.resume()
+    fun playerCommand(id: String, command: PlayerCommand) = playerSession.command(id, command)
+
+    val settingsEditor = SettingsSession(viewModelScope, object : SettingsBackend {
+        override suspend fun identity(id: String) = manager.settingsIdentity(id)
+        override suspend fun fetch(id: String, paths: List<String>, requests: PinnedHttp.RequestScope) =
+            manager.fetchSettings(id, paths, requests)
+        override suspend fun send(id: String, method: String, path: String, body: org.json.JSONObject?, timeoutMs: Int) =
+            manager.sendSettings(id, method, path, body, timeoutMs)
+        override suspend fun installUpdate(id: String) = manager.installUpdate(id)
+    }) { _notice.value = it }
+    val settings: StateFlow<SettingsState?> = settingsEditor.state
+
+    fun openSettings(status: DeviceStatus) = settingsEditor.open(
+        DeviceIdentity(status.id, status.name, status.host, status.port, status.hostname, status.version),
+    )
+
+    fun closeSettings() {
+        settingsEditor.close()
+        refresh()
+    }
+
+    fun resumeSettings() = settingsEditor.resume()
 
     fun openRemoteView(id: String, name: String) = remoteSession.open(id, name)
     fun closeRemoteView() = remoteSession.close()
@@ -38,18 +72,30 @@ class ManagerViewModel(application: Application) : AndroidViewModel(application)
 
     fun refresh() {
         perform("refresh", coalesce = true, work = {
+            refreshDiscovered()
             _statuses.value = manager.refresh()
+            refreshDiscovered()
+            playerSession.devices(_statuses.value.filter {
+                it.online && it.error == null && !it.certificateChanged && !it.keyRejected && !it.firmwareOutdated
+            }.map { it.id })
             _storeError.value = null
             null
         })
     }
 
     fun onDiscovered(items: List<FoundDevice>) {
-        _found.value = items
+        latestDiscovered = items
         perform("discovery-update", coalesce = true, work = {
-            manager.saveDiscovered(_found.value)
+            refreshDiscovered()
             null
         })
+    }
+
+    private suspend fun refreshDiscovered() {
+        val generation = ++discoveryGeneration
+        val items = latestDiscovered
+        val classified = manager.saveDiscovered(items)
+        if (generation == discoveryGeneration && items == latestDiscovered) _found.value = classified
     }
 
     fun fingerprint(host: String, port: String, success: (Pair<HostAddress, String>) -> Unit) =
@@ -64,7 +110,9 @@ class ManagerViewModel(application: Application) : AndroidViewModel(application)
         replaceId: String?,
         success: (String) -> Unit,
     ) = perform("enroll", work = {
-        manager.enroll(host, port, fingerprint, password, name, replaceId)
+        val id = manager.enroll(host, port, fingerprint, password, name, replaceId)
+        refreshDiscovered()
+        id
     }, onSuccess = {
         success(it)
         refresh()
@@ -115,6 +163,30 @@ class ManagerViewModel(application: Application) : AndroidViewModel(application)
     fun updateAll(success: (List<UpdateOutcome>) -> Unit) =
         perform("update-all", work = { manager.updateAll() }, onSuccess = success)
 
+    fun createMusicSync(leaderId: String, followerIds: Set<String>, dissolveFirst: Boolean) =
+        perform("music-sync", work = {
+            _musicSyncResults.value = emptyList()
+            val current = _statuses.value
+            val leader = current.first { it.id == leaderId }
+            val followers = current.filter { it.id in followerIds }
+            require(followers.size == followerIds.size) { "A selected display is no longer enrolled. Refresh and try again." }
+            val oldGroups = if (dissolveFirst) MusicSyncRules.reassignedGroups(current, followerIds + leaderId) else emptyList()
+            manager.createMusicSync(leader, followers, oldGroups)
+        }, onSuccess = {
+            _musicSyncResults.value = it
+            refresh()
+        })
+
+    fun dissolveMusicSync(group: MusicSyncGroup) = perform("music-sync", work = {
+        _musicSyncResults.value = emptyList()
+        manager.dissolveMusicSync(group)
+    }, onSuccess = { _musicSyncResults.value = it; refresh() })
+
+    fun removeMusicSyncFollower(follower: DeviceStatus) = perform("music-sync", work = {
+        _musicSyncResults.value = emptyList()
+        manager.removeMusicSyncFollower(follower)
+    }, onSuccess = { _musicSyncResults.value = it; refresh() })
+
     fun dismissNotice() {
         _notice.value = null
     }
@@ -160,7 +232,9 @@ class ManagerViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun cancelNetwork() {
+        playerSession.pause()
         remoteSession.pause()
+        settingsEditor.pause()
         jobs.toList().forEach { it.cancel() }
         PinnedHttp.pauseNetwork()
     }

@@ -151,6 +151,17 @@ class PlexClient:
             "version": root.attrib.get("version", ""),
         }
 
+    def like_track(self, rating_key: str) -> None:
+        if not isinstance(rating_key, str) or not RATING_KEY.fullmatch(rating_key):
+            raise ValueError("Invalid Plex track")
+        try:
+            with self.open("/:/rate", {
+                "key": rating_key, "identifier": "com.plexapp.plugins.library", "rating": 10,
+            }, method="PUT"):
+                pass
+        except (OSError, urllib.error.URLError, http.client.HTTPException, ValueError):
+            raise ValueError("Could not save the track rating in Plex; check the connection and permissions") from None
+
     def libraries(self) -> list[dict[str, str]]:
         root = self.xml("/library/sections")
         return [

@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { api, type RailDataConfig } from "../api";
+import type { RailDataConfig } from "../api";
+import { useDeviceApi } from "../DeviceApiContext";
 import type { Notice } from "./Toast";
 
 interface Props {
@@ -8,6 +9,7 @@ interface Props {
 }
 
 export function RailDataCard({ notify, fail }: Props) {
+  const api = useDeviceApi();
   const [config, setConfig] = useState<RailDataConfig | null>(null);
   const [apiKey, setApiKey] = useState("");
   const [detailsApiKey, setDetailsApiKey] = useState("");

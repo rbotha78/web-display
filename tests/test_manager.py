@@ -6,7 +6,7 @@ import subprocess
 import tempfile
 import threading
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 from urllib.parse import urlsplit
 from http.server import ThreadingHTTPServer
 from pathlib import Path
@@ -280,9 +280,93 @@ class ServerTests(ManagerCase):
         self.assertEqual(self.call("DELETE", f"/api/devices/{identifier}")[0], 200)
         self.assertEqual(self.call("DELETE", f"/api/devices/{identifier}")[0], 404)
 
+    def test_sync_routes_are_token_protected_bounded_and_return_results(self):
+        routes = [("/api/sync-groups", {"leader": "a", "followers": ["b"]}, "create_sync_group", ("a", ["b"])),
+                  ("/api/sync-groups/dissolve", {"group_id": "group_abcdefghijkl"}, "dissolve_sync_group", ("group_abcdefghijkl",)),
+                  ("/api/devices/aaaaaaaaaaaa/sync/leave", {}, "leave_sync_group", ("aaaaaaaaaaaa",))]
+        for path, body, method, args in routes:
+            with self.subTest(path=path), patch.object(self.manager, method, return_value={"results": [{"id": "a", "ok": True}]}) as operation:
+                self.assertEqual(self.call("POST", path, body, token=False)[0], 401)
+                self.assertEqual(self.call("POST", path, body, {"Origin": "https://evil.example"})[0], 403)
+                self.assertEqual(self.call("POST", path, {"padding": "x" * (16 * 1024)})[0], 400)
+                status, reply = self.call("POST", path, body)
+                self.assertEqual(status, 200)
+                self.assertTrue(reply["results"][0]["ok"])
+                operation.assert_called_once_with(*args)
+
     def test_bad_enrol_is_a_client_error(self):
         status, _ = self.call("POST", "/api/enroll", {"host": "bad host"})
         self.assertEqual(status, 400)
+
+    def test_native_configuration_reads_saves_and_preserves_device_guards(self):
+        identifier = self.enroll()
+        path = f"/api/devices/{identifier}/settings"
+        get = {"method": "GET", "path": "/api/config"}
+        self.assertEqual(self.call("POST", path, get, token=False)[0], 401)
+        self.assertEqual(self.call("POST", path, get, host="evil.example:80")[0], 403)
+        self.assertEqual(self.call("POST", path, get, {"Origin": "https://evil.example"})[0], 403)
+        status, config = self.call("POST", path, get)
+        self.assertEqual(status, 200)
+        self.assertNotIn(str(self.store.get(identifier)["key"]), json.dumps(config))
+        status, saved = self.call("POST", path, {
+            "method": "PUT", "path": "/api/config", "body": {"url": "https://settings.example", "safe_area_percent": 3},
+        })
+        self.assertEqual(status, 200)
+        self.assertEqual(saved["safe_area_percent"], 3)
+        self.assertEqual(self.device.app.config.load()["url"], "https://settings.example")
+        status, playlist = self.call("POST", path, {
+            "method": "PUT", "path": "/api/playlist",
+            "body": {"enabled": False, "scenes": [{
+                "id": "test", "kind": "train", "station_crs": "EUS",
+                "show_previous_departure": False, "duration": 300,
+            }]},
+        })
+        self.assertEqual(status, 200)
+        self.assertFalse(playlist["scenes"][0]["show_previous_departure"])
+        self.assertEqual(self.call("POST", path, {
+            "method": "POST", "path": "/api/playlist/control", "body": {"action": "pause"},
+        })[0], 409)
+        self.assertEqual(self.call("POST", path, {
+            "method": "PUT", "path": "/api/config", "body": {"url": "not a URL"},
+        })[0], 400)
+        for request in (
+            {"method": "GET", "path": "https://evil.example/api/config"},
+            {"method": "GET", "path": "/api/keys"},
+            {"method": "POST", "path": "/api/login", "body": {}},
+            {"method": "POST", "path": "/api/admin-login-token", "body": {}},
+            {"method": "GET", "path": "/api/config#ignored"},
+            {"method": "GET", "path": "/api/config?anything=1"},
+            {"method": "GET", "path": "/api/config", "body": {}},
+            {"method": "PUT", "path": "/api/config", "body": []},
+            {"method": [], "path": "/api/config"},
+            {"method": "GET", "path": "/api/config", "headers": {"Authorization": "other"}},
+        ):
+            with self.subTest(request=request):
+                self.assertEqual(self.call("POST", path, request)[0], 400)
+        entry = self.store.get(identifier)
+        with patch.object(self.store, "get", return_value={**entry, "fingerprint": "00:" * 31 + "00"}):
+            self.assertEqual(self.call("POST", path, get)[0], 502)
+
+    def test_native_configuration_preserves_optional_endpoint_errors_and_large_drafts(self):
+        identifier = self.enroll()
+        path = f"/api/devices/{identifier}/settings"
+        with patch.object(self.manager, "client", return_value=DeviceClient("127.0.0.1", 1, self.device.fingerprint)):
+            with patch.object(DeviceClient, "request", return_value=(503, {"error": "weather unavailable"}, {})):
+                status, error = self.call("POST", path, {"method": "GET", "path": "/api/weather/config"})
+                self.assertEqual(status, 503)
+                self.assertIn("weather unavailable", error["error"])
+        scene = {"id": "notice", "kind": "dashboard", "layout": "notice", "duration": 60, "text": "x" * 1000}
+        status, saved = self.call("POST", path, {
+            "method": "PUT", "path": "/api/playlist",
+            "body": {"enabled": False, "scenes": [{**scene, "id": f"notice-{i}"} for i in range(20)]},
+        })
+        self.assertEqual(status, 200)
+        self.assertEqual(len(saved["scenes"]), 20)
+        with patch.object(self.manager, "client", return_value=DeviceClient("127.0.0.1", 1, self.device.fingerprint)):
+            with patch.object(DeviceClient, "request", return_value=(404, {"error": "Update this device first"}, {})):
+                status, error = self.call("POST", path, {"method": "GET", "path": "/api/sleep"})
+                self.assertEqual(status, 404)
+                self.assertEqual(error["error"], "Update this device first")
 
     def test_remote_view_proxy_uses_pinned_client_and_api_guards(self):
         from webdisplay import remote_view
@@ -421,6 +505,27 @@ class MultiAddressTests(ManagerCase):
         self.manager.discovered()
         self.assertIn("10.0.0.9", [a["host"] for a in self.store.get(identifier)["addresses"]])
 
+    def test_discovery_recognizes_saved_dns_alias_before_any_status_refresh(self):
+        identifier = self.enroll()
+        self.store.promote(identifier, "PI-TWO.local.", self.device.port)
+        self.manager.discover_fn = lambda: [
+            {"name": "pi-two", "host": "10.0.0.9", "port": self.device.port},
+            {"name": "Lobby", "host": "10.0.0.50", "port": self.device.port},
+        ]
+        found = self.manager.discovered()
+        self.assertEqual([item["enrolled"] for item in found], [True, False])
+        self.assertIn("10.0.0.9", [a["host"] for a in self.store.get(identifier)["addresses"]])
+
+    def test_discovery_groups_interfaces_without_hiding_other_ports(self):
+        self.enroll()
+        self.manager.discover_fn = lambda: [
+            {"name": "PI-TWO", "host": "10.0.0.9", "port": self.device.port},
+            {"name": "pi-two.local.", "host": "127.0.0.1", "port": self.device.port},
+            {"name": "pi-two", "host": "127.0.0.1", "port": self.device.port + 1},
+        ]
+        found = self.manager.discovered()
+        self.assertEqual([item["enrolled"] for item in found], [True, False])
+
     def test_device_reported_addresses_are_learned(self):
         identifier = self.enroll()
         device = self.manager.client(identifier)
@@ -432,6 +537,131 @@ class MultiAddressTests(ManagerCase):
         self.assertEqual(entry["hostname"], "pi-one")
         self.assertIn("192.168.0.5", [a["host"] for a in entry["addresses"]])
         self.assertNotIn("169.254.1.1", [a["host"] for a in entry["addresses"]])
+
+
+class MusicSyncTests(unittest.TestCase):
+    GROUP = "group_abcdefghijkl"
+
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory(dir=Path.cwd())
+        self.addCleanup(self.directory.cleanup)
+        self.store = DeviceStore(Path(self.directory.name) / "devices.json")
+        self.leader = self.store.save("10.0.0.1", 8443, "AA:" * 31 + "AA", "key-one", "Kitchen")
+        self.follower = self.store.save("10.0.0.2", 8443, "BB:" * 31 + "BB", "key-two", "Lounge")
+        self.other = self.store.save("10.0.0.3", 8443, "CC:" * 31 + "CC", "key-three", "Hall")
+        self.store.learn(self.leader, ["kitchen.local", *[f"10.0.1.{i}" for i in range(10)]], 8443, "kitchen-pi")
+        self.manager = Manager(self.store)
+        self.calls = []
+        self.states = {identifier: {"supported": True, "role": "off", "group_id": "", "connected": True}
+                       for identifier in (self.leader, self.follower, self.other)}
+        self.fail = None
+        self.devices = {}
+        for identifier in self.states:
+            device = Mock(spec=DeviceClient)
+            device.host, device.port = self.store.get(identifier)["host"], 8443
+            device.request.side_effect = lambda method, path, body=None, i=identifier: self.request(i, method, path, body)
+            self.devices[identifier] = device
+        self.patcher = patch.object(self.manager, "client", side_effect=self.devices.__getitem__)
+        self.patcher.start()
+        self.addCleanup(self.patcher.stop)
+
+    def request(self, identifier, method, path, body):
+        self.assertEqual(path, "/api/music/sync")
+        self.calls.append((identifier, method, body))
+        if method == "GET":
+            return 200, self.states[identifier], {}
+        if identifier == self.fail:
+            return 400, {"error": "Rejected " + body.get("token", "")}, {}
+        self.states[identifier] = {"supported": True, "connected": True, **body}
+        return 200, self.states[identifier], {}
+
+    def puts(self):
+        return [(identifier, body) for identifier, method, body in self.calls if method == "PUT"]
+
+    def test_create_leader_first_and_uses_saved_pinned_identity(self):
+        with patch("webdisplay_manager.service.secrets.token_urlsafe", side_effect=[self.GROUP, "secret-token" * 4]) as mint:
+            reply = self.manager.create_sync_group(self.leader, [self.follower, self.other])
+        self.assertEqual([call.args for call in mint.call_args_list], [(16,), (32,)])
+        writes = self.puts()
+        self.assertEqual([identifier for identifier, _ in writes], [self.leader, self.follower, self.other])
+        self.assertEqual(writes[0][1], {"role": "leader", "group_id": self.GROUP, "token": "secret-token" * 4})
+        info = writes[1][1]["leader"]
+        self.assertEqual(info, {"name": "Kitchen", "hostname": "kitchen-pi", "port": 8443,
+                               "addresses": ["10.0.0.1", "kitchen.local", *[f"10.0.1.{i}" for i in range(6)]],
+                               "fingerprint": "AA:" * 31 + "AA"})
+        self.assertEqual(writes[2][1]["leader"], info)
+        self.assertTrue(all(result["ok"] for result in reply["results"]))
+        self.assertNotIn("secret-token", json.dumps(reply))
+        self.assertNotIn("secret-token", json.dumps(self.manager._sync_states))
+        self.assertNotIn("secret-token", self.store.path.read_text())
+        self.assertNotIn("fingerprint", json.dumps(self.manager._sync_states))
+
+    def test_leader_failure_aborts_followers_and_redacts_errors(self):
+        self.fail = self.leader
+        with patch("webdisplay_manager.service.secrets.token_urlsafe", side_effect=[self.GROUP, "secret-token" * 4]):
+            reply = self.manager.create_sync_group(self.leader, [self.follower])
+        self.assertEqual([identifier for identifier, _ in self.puts()], [self.leader])
+        self.assertFalse(any(result["ok"] for result in reply["results"]))
+        self.assertIn("Not attempted", reply["results"][1]["error"])
+        self.assertNotIn("secret-token", json.dumps(reply))
+
+    def test_follower_failure_does_not_abort_remaining_followers(self):
+        self.fail = self.follower
+        reply = self.manager.create_sync_group(self.leader, [self.follower, self.other])
+        self.assertEqual([result["ok"] for result in reply["results"]], [True, False, True])
+
+    def test_dissolve_followers_before_leader_and_reports_each_result(self):
+        self.manager.create_sync_group(self.leader, [self.follower, self.other])
+        group_id = self.manager._sync_states[self.leader]["group_id"]
+        self.calls.clear()
+        self.fail = self.follower
+        reply = self.manager.dissolve_sync_group(group_id)
+        self.assertEqual(self.puts(), [(self.follower, {"role": "off"}), (self.other, {"role": "off"}),
+                                      (self.leader, {"role": "off"})])
+        self.assertEqual([result["ok"] for result in reply["results"]], [False, True, True])
+        self.assertEqual(self.manager._sync_states[self.follower]["group_id"], group_id)
+
+    def test_remove_follower_only_and_leader_leave_dissolves(self):
+        self.manager.create_sync_group(self.leader, [self.follower, self.other])
+        self.calls.clear()
+        self.manager.leave_sync_group(self.follower)
+        self.assertEqual(self.puts(), [(self.follower, {"role": "off"})])
+        self.calls.clear()
+        self.manager.leave_sync_group(self.leader)
+        self.assertEqual(self.puts(), [(self.other, {"role": "off"}), (self.leader, {"role": "off"})])
+
+    def test_sync_404_is_unsupported_without_marking_device_offline(self):
+        device = self.devices[self.leader]
+        device.request.side_effect = None
+        device.request.return_value = (404, {"error": "not found"}, {})
+        device.call.side_effect = lambda method, path: {"hostname": "kitchen-pi"} if path == "/api/status" else {}
+        with patch.object(self.manager, "connect", return_value=(device, {"version": "9.9.9"})):
+            summary = self.manager.summary(self.leader, self.store.get(self.leader))
+        self.assertTrue(summary["online"])
+        self.assertEqual(summary["music_sync"], {"supported": False})
+        reply = self.manager.create_sync_group(self.leader, [self.follower])
+        self.assertFalse(reply["results"][0]["ok"])
+        self.assertIn("Not attempted", reply["results"][1]["error"])
+        self.devices[self.follower].request.assert_not_called()
+
+    def test_offline_omits_current_sync_but_keeps_last_known_membership(self):
+        self.manager.create_sync_group(self.leader, [self.follower])
+        with patch.object(self.manager, "connect", side_effect=DeviceError("offline")):
+            summary = self.manager.summary(self.follower, self.store.get(self.follower))
+        self.assertFalse(summary["online"])
+        self.assertIsNone(summary.get("music_sync"))
+        self.assertEqual(summary["music_sync_last_known"]["role"], "follower")
+        self.assertNotIn("token", json.dumps(summary))
+
+    def test_input_validation_happens_before_any_writes(self):
+        for leader, followers in ((self.leader, []), (self.leader, [self.leader]),
+                                  (self.leader, [self.follower, self.follower]),
+                                  ("unknown", [self.follower]), (self.leader, ["unknown"]),
+                                  (self.leader, "not a list"), (None, [self.follower]),
+                                  (self.leader, [123])):
+            with self.subTest(leader=leader, followers=followers), self.assertRaises(ValueError):
+                self.manager.create_sync_group(leader, followers)
+        self.assertEqual(self.calls, [])
 
 
 class DiscoveryTests(unittest.TestCase):

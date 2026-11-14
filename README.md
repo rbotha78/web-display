@@ -3,10 +3,11 @@
 A 32-bit Raspberry Pi OS appliance for Raspberry Pi 2 and Raspberry Pi 3,
 with Chromium on HDMI, authenticated HTTPS administration, Wi-Fi provisioning,
 signed application updates and PC and Android display managers.
-Release **[v0.5.18](https://github.com/rbotha78/web-display/releases/tag/v0.5.18)**
-adds optional previous departures, train-layout refinements, Plex playlists/custom
-mixes, a Plex smart-playlist builder, floating admin music controls and an animated
-now-playing icon. Global settings is now the default administration view.
+Release **[v0.5.19](https://github.com/rbotha78/web-display/releases/tag/v0.5.19)**
+adds synchronized music groups across displays, per-weekday music sources, a
+five-star Plex Like button in the floating player, device configuration inside
+both managers without a browser tab, and a simplified manager home with player
+controls.
 Saving settings retains the saved values when confirmation notifications appear,
 without reloading stale configuration into the editor.
 Administration opens on **Global settings** (display defaults, sleep, provider credentials,
@@ -163,7 +164,9 @@ and first-boot user renaming is explicitly disabled.
   `sudo disable-web-display-debug` on the device to turn it off.
   Development devices also show a **Development SSH keys** card in the admin
   UI, and in each device card of the PC manager, to add or remove `webdebug`
-  keys. Anyone with the admin password or a manager key can thereby gain root
+  keys. In device administration, long key names and fingerprints wrap inside
+  the card, and settings cards shrink to the phone's available width.
+  Anyone with the admin password or a manager key can thereby gain root
   over SSH, so it exists only on development builds; devices built or pushed before this
   feature need `tools/push-to-device.sh` once to gain it.
 - `VARIANT=release ./build-image.sh` is hardened: no debug account, SSH masked.
@@ -330,6 +333,35 @@ the current playlist, so smart-playlist changes take effect at the next queue
 renewal or playback restart. Empty playlists report an explicit playback error
 rather than falling back to another source.
 
+**Weekday sources** optionally assign a different station or playlist to any day
+of the week; days left on **Use default source** play the main music source,
+which is still required to enable music. The display chooses by its local date:
+after midnight, the song already playing finishes (or is skipped) before the new
+day's source starts. Saving a change to today's source restarts music
+immediately. The device page and both managers can edit weekday sources; custom
+artist/album mixes are built for the main source, but a weekday mix saved
+through the API is preserved and shown.
+
+**Music sync groups** play the same song at the same position on several displays.
+Create a group in the PC or Android manager: choose a leader and one or more
+followers among enrolled, online displays running sync-capable firmware. The
+leader's music settings (enabled, source and weekday sources) become the group's;
+followers ignore their own source while following but keep their own volume and
+audio output. Every member must use the **same Plex server**, because each display
+streams the song from its own Plex connection. Play, pause, resume, stop, skip and
+like on any member act on the whole group. Video audio and sleep silence only
+that display; it rejoins the live group position afterwards. When no member is
+listening for 15 seconds, the group freezes instead of advancing through Plex.
+
+The leader schedules each song about 1.5 seconds ahead; followers poll it over
+pinned HTTPS every 2 seconds, estimate the clock offset, then correct drift with
+small speed changes (at most 3%) or a re-seek above 0.25 seconds. Expect sync
+within tens of milliseconds on a quiet network, not sample-accurate playback.
+Followers reach the leader at its saved manager addresses, then `<hostname>.local`.
+The device's **Background music** card shows its group role and offers **Leave
+group**; dissolve or edit groups in a manager. A group token protects follower
+requests; the leader stores only its hash and managers never store it.
+
 Use **Global settings -> Background music -> Create Plex smart playlist** to
 create a dynamic audio playlist in Plex itself. Choose a music library, give the
 playlist a unique name and optionally select an **Album decade**, **Track genre**
@@ -383,6 +415,17 @@ music or restarting the administration service clears it. Stop remains effective
 across service/device restarts. Settings drafts keep their source and volume when
 using the player; Play/Stop updates their enabled checkbox.
 
+The **heart** button gives the displayed song **five stars in Plex** (rating
+10/10) for the account owning the configured Plex token. It fills after Plex
+accepts the rating and is disabled for an already five-star song, missing song,
+stopped/sleeping music or an unavailable player. If the song changes before the
+request reaches the service, it rejects the request rather than rating the next
+song. Rating does not pause, skip or change music settings.
+Existing Plex smart playlists filtered by track rating include matching songs
+automatically; no separate liked playlist is created. Change or remove ratings
+in Plex/Plexamp. The heart reflects the current queue's rating metadata and
+ratings saved here, not continuous polling for edits in other Plex clients.
+
 **Display → Audio output** selects the device-wide output for both background
 music and video audio. HDMI is the default; available playback devices include
 the Pi's 3.5 mm jack and connected USB audio devices. Reload the administration
@@ -409,6 +452,11 @@ Authenticated endpoints: `GET /api/plex/stations`, `GET /api/plex/music/browse`,
 `POST /api/plex/music/control` accepts an `action` of `play`, `pause`, `resume`,
 `stop` or `skip` and returns the sanitized current music configuration/status.
 Session requests require CSRF; the private relay capability is never returned.
+`POST /api/plex/music/like` accepts only `{"rating_key": "<current song ID>"}`
+and sets that song's Plex rating to 10/10, returning current music configuration
+and status. Session requests require CSRF. Status includes the current
+`rating_key` and `liked` flag when a song is selected; credentials and relay
+capabilities remain private.
 The stations endpoint now includes audio playlists and advertised mixes.
 `GET /api/plex/music/filters?library=<id>` lists available decades/genres/moods.
 `POST /api/plex/music/playlists/preview` accepts `library`, `decade`, `genre` and
@@ -421,6 +469,10 @@ Music browsing accepts `library`, `kind` (`artist`/`album`), `search`, and
 The backwards-compatible `station_key` also accepts `/playlists/<id>/items`
 and `mix:artist:<comma-separated IDs>` / `mix:album:<comma-separated IDs>`;
 arbitrary URLs and non-music selections are rejected.
+Music settings also include `day_sources`, an object keyed `monday` to `sunday`
+whose values are blank (use `station_key`) or a valid source. Older clients that
+omit it keep the saved schedule. Reads add `active_day` and
+`active_station_key`, today's device-local effective source.
 
 Slice 1 was accepted on 2026-10-19 after physical video playback confirmation on
 Pi 2 and Pi 3, unavailable-content and browser/player-crash recovery checks,
@@ -430,8 +482,8 @@ no automatic service restarts and no current throttling; sampled video playback
 used hardware decoding with no reported dropped frames. Some transient scene
 failures occurred and later cleared. Pi 3 temperature and Pi 2 swap growth remain
 monitoring items, not guarantees of indefinite unattended operation. Plex
-playback has been validated on both devices; audio validation, image uploads
-and manager-side playlist editing remain deferred.
+playback has been validated on both devices; audio validation and image uploads
+remain deferred. Native manager playlist editing is now implemented.
 
 ### Weekly sleep mode
 
@@ -706,7 +758,34 @@ It serves a UI on `127.0.0.1:8765` and opens the browser. Devices are found via 
 fingerprint (compare it with the device screen), then uses the administrator password once to
 create an API key for this PC. Only the key and pinned fingerprint are stored, in
 `~/.config/web-display-manager/devices.json` (mode 0600); passwords are never stored.
-Functions: status, change display address, check/install updates (one or all), restart.
+Both managers match discoveries against saved enrollment addresses and hostname
+aliases, including `.local`, trailing-dot and case differences. An enrolled
+display is not offered as new merely because it is offline or discovered through
+another known interface. This does not change certificate pinning or require
+creating another API key.
+
+Home cards show display identity/online status, the current music state and song,
+and inline player controls. Music has Play/Pause/Resume, Stop, Skip and Like;
+carousel has Pause/Resume and Next scene. Configuration stays under **Configure
+device**. Network/version details, SSH keys, updates, restart, browser links and
+local removal are tucked under **More actions**; fleet updates are under
+**Manager actions**. The Android home follows the same compact layout, with
+maintenance in its secondary menu.
+Android playback refreshes and pending commands use an animated sync icon in a
+reserved top-right card slot instead of inserting status text, so polling does
+not move the card content. Errors remain visible in the player.
+The Android home refresh button is a fixed-size icon that spins while refreshing,
+without changing width or moving adjacent buttons.
+
+Carousel pause freezes scene timing and native video playback; website content
+and live dashboard clocks continue updating. Next scene keeps the carousel
+paused when already paused. Commands apply on the next kiosk tick, without
+changing the saved playlist. Pause clears when the service restarts or settings
+republish the runtime playlist; a kiosk-only restart retains the requested pause
+without replaying previous Next commands. Updated firmware is required for these
+controls, and a missing/stale kiosk heartbeat disables them rather than showing
+old playback state as live.
+
 **Remote view** opens a reconstructed preview of the current display scene,
 refreshing every five seconds only while the view is open. Dashboard clocks
 and notices, train boards and weather use the display's current scene data.
@@ -716,7 +795,22 @@ session: browser page contents, playback pixels and exact TV layout are not
 reproduced. The view identifies recovery/sleep states and reports unavailable
 or stale data rather than presenting it as live. Device firmware must support
 the authenticated `/api/remote-view` endpoint.
-**Open admin page** signs the browser in using the manager's existing key, without
+**Configure device** opens native editors inside the manager, with **Global
+settings** and **Carousel** tabs. The PC version shares the device's React
+editors: display/audio, sleep, Plex and background music, RailData/weather,
+hostname/Wi-Fi, published updates and development SSH keys. Carousel editing
+supports all scene types, ordering and explicit **Save and apply**.
+Drafts survive tab switches and device-list refreshes; closing configuration
+asks before discarding unsaved edits. Saves apply only to the selected display.
+The manager proxies an explicit allowlist of JSON device APIs over its pinned
+connection; the browser never receives the enrolled device API key. Both the
+PC manager service and its bundled UI must be updated for this view.
+API-key creation/list/revocation still require an administrator-password device
+session. Raw signed-file uploads also remain in device administration; published
+update checks/installations are available in the integrated view.
+
+**Open admin page** remains an optional fallback. It signs the browser in using
+the manager's existing key, without
 storing or asking for the password. The device issues a single-use login token that
 expires after one minute; it travels in the URL fragment (not access logs) and is
 removed from the address bar before exchange for a secure, HttpOnly session cookie.
@@ -728,6 +822,14 @@ Keys are listed and revoked in the device admin page's "Manager access" card (AP
 Notifications in both web UIs disappear after five seconds (ten for errors) and
 can also be dismissed immediately.
 Rebuild the manager UI with `cd ui && npm run build`.
+
+**Music sync groups** (PC and Android managers) create a group from a leader and
+followers, list groups with each follower's connection state, remove a follower or
+dissolve a group. Creation configures the leader first, then each follower with the
+leader's pinned fingerprint and saved addresses; failures are reported per display
+and are not rolled back automatically. Displays on older firmware show sync as
+unsupported. The group token is sent only to the displays and never stored by a
+manager. Device cards show "Music sync: leading (N followers)" or "following <leader>".
 
 The manager shares the firmware version (`WEB_DISPLAY_VERSION`; `--version` prints it). When releasing, bump
 `WEB_DISPLAY_VERSION` and `version` in `pyproject.toml` together (a test enforces this). The manager refuses to
@@ -747,8 +849,24 @@ online/offline and network status, URL changes, restart, individual and fleet
 update checks/installations, SSH public-key management on development images,
 automatic or manual browser administration links, and the same reconstructed
 **Remote view** available in the PC manager. Installation does not
-automatically reboot a display. Detailed device settings and carousel editing
-remain in the device's administration page, as with the PC manager.
+automatically reboot a display.
+
+**Configure device** opens native **Global settings** and **Carousel** tabs,
+without launching a browser. Global settings cover display/audio, sleep, Plex,
+background music and its mix/smart-playlist builders, RailData/weather, hostname,
+Wi-Fi, published updates and development SSH keys. Carousel supports every scene
+type, including Plex video browsing, ordering and explicit **Save and apply**.
+Settings drafts survive tab/section changes and background status refreshes.
+Closing or reloading asks before discarding changes; each section saves
+separately. Music-builder search/filter state is temporary and resets when
+switching tabs, but a selected source remains in the music draft.
+Sleep, music and carousel saves check for intervening device changes before
+offering an explicit overwrite; this is a client-side check, not an atomic lock
+against another editor. Network-disrupting actions ask for confirmation.
+Provider credentials stay write-only: blank keeps the saved value, and removal
+is explicit. Password/API-key management and raw signed-file uploads still use
+device administration. A firmware section that is unavailable is labelled
+instead of silently substituting defaults.
 
 Enrollment shows the certificate's SHA-256 fingerprint for confirmation before
 sending the administrator password. Subsequent connections verify the saved

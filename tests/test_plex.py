@@ -6,6 +6,7 @@ import urllib.parse
 import urllib.request
 import unittest
 import xml.etree.ElementTree as ET
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -15,6 +16,8 @@ from webdisplay.plex import PlexClient, PlexPlaybackProxy, validate_server_url, 
 from webdisplay.music import MusicRelay, validate_music
 from webdisplay.sleep import DAYS, default_schedule
 from webdisplay.storage import atomic_write
+
+NO_DAYS = {"day_sources": {day: "" for day in DAYS}}
 
 
 class FakePlexHandler(http.server.BaseHTTPRequestHandler):
@@ -29,6 +32,7 @@ class FakePlexHandler(http.server.BaseHTTPRequestHandler):
     created_queue_queries = []
     music_browse_queries = []
     created_playlist_queries = []
+    rating_queries = []
     slow_music = None
     token = "private-test-token"
 
@@ -219,6 +223,16 @@ class FakePlexHandler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def do_PUT(self):
+        self.assert_token()
+        parsed = urllib.parse.urlsplit(self.path)
+        if parsed.path != "/:/rate":
+            self.send_error(404)
+            return
+        self.rating_queries.append(urllib.parse.parse_qs(parsed.query))
+        self.send_response(204)
+        self.end_headers()
+
     def assert_token(self):
         if self.headers.get("X-Plex-Token") != self.token:
             self.send_error(401)
@@ -256,6 +270,21 @@ class PlexTests(unittest.TestCase):
                 validate_server_url(value)
         with self.assertRaises(ValueError):
             validate_token("bad\nvalue")
+
+    def test_like_track_sends_five_star_rating_and_sanitizes_plex_errors(self):
+        client = self.client()
+        FakePlexHandler.rating_queries = []
+        client.like_track("42")
+        self.assertEqual(FakePlexHandler.rating_queries, [{
+            "key": ["42"], "identifier": ["com.plexapp.plugins.library"], "rating": ["10"],
+        }])
+        for key in ("", "42&rating=1", "/library/metadata/42", 42, None):
+            with self.subTest(key=key), self.assertRaisesRegex(ValueError, "Invalid Plex track"):
+                client.like_track(key)
+        with patch.object(client, "open", side_effect=urllib.error.URLError(FakePlexHandler.token)):
+            with self.assertRaisesRegex(ValueError, "Could not save the track rating") as error:
+                client.like_track("42")
+            self.assertNotIn(FakePlexHandler.token, str(error.exception))
 
     def test_playlist_stores_only_plex_rating_key_and_runtime_urls_must_be_local(self):
         playlist = {"enabled": False, "scenes": [{
@@ -295,7 +324,7 @@ class PlexTests(unittest.TestCase):
         ])
 
     def test_music_defaults_off_and_requires_valid_station_and_volume(self):
-        self.assertEqual(validate_music({}), {"enabled": False, "station_key": "", "volume": 30})
+        self.assertEqual(validate_music({}), {"enabled": False, "station_key": "", "volume": 30, **NO_DAYS})
         for value in ({"enabled": True}, {"volume": True}, {"volume": 101},
                       {"station_key": "/library/metadata/42"}, {"enabled": "true"}):
             with self.subTest(value=value), self.assertRaises(ValueError):
@@ -355,6 +384,53 @@ class PlexTests(unittest.TestCase):
                         self.assertEqual(first_query["playlistID"], [key.split("/")[2]])
                 finally:
                     relay.close()
+
+    def test_weekday_source_overrides_default_and_switches_at_next_song(self):
+        saturday = datetime(2026, 11, 14, 23, 59, tzinfo=timezone.utc)
+        sunday = datetime(2026, 11, 15, 0, 1, tzinfo=timezone.utc)
+        settings = validate_music({"enabled": True, "station_key": "/playlists/11/items", "volume": 30,
+                                   "day_sources": {"sunday": "mix:artist:501,502"}})
+        relay = MusicRelay(self.client)
+        try:
+            relay.clock = lambda: saturday
+            relay.configure(settings, "identity")
+            current = relay.control({"action": "current"})
+            self.assertEqual(FakePlexHandler.created_queue_queries[-1]["playlistID"], ["11"])
+            created = len(FakePlexHandler.created_queue_queries)
+            relay.clock = lambda: sunday
+            # The day change neither restarts the song nor rebuilds on unrelated republication.
+            relay.configure(dict(settings), "identity")
+            self.assertEqual(relay.control({"action": "current"})["track_id"], current["track_id"])
+            self.assertEqual(len(FakePlexHandler.created_queue_queries), created)
+            relay.control({"action": "next", "track_id": current["track_id"]})
+            self.assertEqual(len(FakePlexHandler.created_queue_queries), created + 1)
+            self.assertEqual(FakePlexHandler.created_queue_queries[-1]["shuffle"], ["1"])
+        finally:
+            relay.close()
+
+    def test_weekday_sources_validate_and_survive_clients_that_omit_them(self):
+        for days in ([], {"funday": ""}, {"monday": "/library/metadata/1"}, {"monday": 3}):
+            with self.subTest(days=days), self.assertRaises(ValueError):
+                validate_music({"day_sources": days})
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            app = Application(root / "config.json", root / "pairing", root / "target", Path("/bin/true"))
+            try:
+                app.save_plex_config({"server_url": self.url, "token": FakePlexHandler.token})
+                days = {**NO_DAYS["day_sources"], "friday": "mix:album:601,602"}
+                app.save_music_config({"enabled": True, "station_key": "/playlists/11/items",
+                                       "volume": 20, "day_sources": days})
+                with self.assertRaises(ValueError):
+                    app.save_music_config({"enabled": True, "station_key": "/playlists/11/items", "volume": 20,
+                                           "day_sources": {**days, "monday": "mix:artist:999"}})
+                app.save_music_config({"enabled": True, "station_key": "/playlists/11/items", "volume": 25})
+                self.assertEqual(app.config.load()["music"]["day_sources"], days)
+                self.assertEqual(app.config.load()["music"]["volume"], 25)
+                result = app.music_config()
+                self.assertEqual(result["active_station_key"],
+                                 days[result["active_day"]] or "/playlists/11/items")
+            finally:
+                app.close()
 
     def test_smart_playlist_filters_preview_and_persist_typed_match_all_query(self):
         client = self.client()
@@ -435,7 +511,7 @@ class PlexTests(unittest.TestCase):
                 for key in ("/playlists/11/items", "mix:artist:501,502", "mix:album:601,602"):
                     settings = {"enabled": True, "station_key": key, "volume": 20}
                     app.save_music_config(settings)
-                    self.assertEqual(app.config.load()["music"], settings)
+                    self.assertEqual(app.config.load()["music"], {**settings, **NO_DAYS})
                     self.assertEqual(json.loads((root / "music.json").read_text())["station_key"], key)
                 with self.assertRaises(ValueError):
                     app.save_music_config({"enabled": True, "station_key": "mix:artist:999", "volume": 20})
@@ -604,7 +680,7 @@ class PlexTests(unittest.TestCase):
                 paused = app.control_music({"action": "pause"})
                 self.assertEqual(paused["status"]["state"], "paused")
                 self.assertTrue(paused["status"]["paused_by_user"])
-                self.assertEqual(app.config.load()["music"], settings)
+                self.assertEqual(app.config.load()["music"], {**settings, **NO_DAYS})
                 app.save_playlist({"enabled": False, "scenes": []})
                 runtime = json.loads((root / "music.json").read_text())
                 self.assertTrue(runtime["paused"])
@@ -619,12 +695,12 @@ class PlexTests(unittest.TestCase):
                 self.assertFalse(json.loads((root / "music.json").read_text())["paused"])
                 app.control_music({"action": "stop"})
                 self.assertIsNone(app.music.queue)
-                self.assertEqual(app.config.load()["music"], {**settings, "enabled": False})
+                self.assertEqual(app.config.load()["music"], {**settings, **NO_DAYS, "enabled": False})
                 self.assertFalse(json.loads((root / "music.json").read_text())["enabled"])
                 with self.assertRaisesRegex(ValueError, "Enable background music"):
                     app.control_music({"action": "pause"})
                 app.control_music({"action": "play"})
-                self.assertEqual(app.config.load()["music"], settings)
+                self.assertEqual(app.config.load()["music"], {**settings, **NO_DAYS})
                 self.assertFalse(app.music.user_paused)
                 self.assertIsNone(json.loads((root / "music.json").read_text())["skip"])
                 for value in ({"action": []}, {"action": "next"}, {"action": "pause", "url": "http://other.invalid"}):
@@ -637,6 +713,54 @@ class PlexTests(unittest.TestCase):
                         app.control_music({"action": "resume"})
                 self.assertNotIn(FakePlexHandler.token, (root / "music.json").read_text())
                 self.assertNotIn("control_url", json.dumps(paused))
+            finally:
+                app.close()
+
+    def test_liking_targets_current_song_and_preserves_playback_and_settings(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            app = Application(root / "config.json", root / "pairing", root / "target", Path("/bin/true"))
+            try:
+                app.save_plex_config({"server_url": self.url, "token": FakePlexHandler.token})
+                settings = {"enabled": True, "station_key": "/playlists/11/items", "volume": 20}
+                app.save_music_config(settings)
+                with self.assertRaisesRegex(ValueError, "No current song"):
+                    app.like_music({"rating_key": "1"})
+                current = app.music.control({"action": "current"})
+                queue = app.music.queue
+                app.control_music({"action": "pause"})
+                runtime = (root / "music.json").read_bytes()
+                FakePlexHandler.rating_queries = []
+                with patch.object(app.music.client, "like_track", side_effect=ValueError("Plex unavailable")):
+                    with self.assertRaisesRegex(ValueError, "Plex unavailable"):
+                        app.like_music({"rating_key": "1"})
+                self.assertFalse(app.music_config()["status"]["liked"])
+                liked = app.like_music({"rating_key": "1"})
+                self.assertTrue(liked["status"]["liked"])
+                self.assertTrue(liked["status"]["paused_by_user"])
+                self.assertEqual(liked["status"]["rating_key"], "1")
+                self.assertIs(app.music.queue, queue)
+                self.assertEqual(app.config.load()["music"], {**settings, **NO_DAYS})
+                self.assertEqual((root / "music.json").read_bytes(), runtime)
+                self.assertNotIn("control_url", json.dumps(liked))
+                self.assertNotIn(FakePlexHandler.token, json.dumps(liked))
+                app.music.control({"action": "next", "track_id": current["track_id"]})
+                self.assertFalse(app.music_config()["status"]["liked"])
+                with self.assertRaisesRegex(ValueError, "song has changed"):
+                    app.like_music({"rating_key": "1"})
+                for value in ({}, {"rating_key": []}, {"rating_key": "2", "rating": 1}):
+                    with self.subTest(value=value), self.assertRaises(ValueError):
+                        app.like_music(value)
+                with patch.object(app.music, "sleeping", return_value=True):
+                    with self.assertRaisesRegex(ValueError, "No current song"):
+                        app.like_music({"rating_key": "2"})
+                app.music.track.set("userRating", "10.0")
+                self.assertTrue(app.music_config()["status"]["liked"])
+                app.control_music({"action": "stop"})
+                self.assertNotIn("rating_key", app.music_config()["status"])
+                with self.assertRaisesRegex(ValueError, "No current song"):
+                    app.like_music({"rating_key": "2"})
+                self.assertEqual(len(FakePlexHandler.rating_queries), 1)
             finally:
                 app.close()
 

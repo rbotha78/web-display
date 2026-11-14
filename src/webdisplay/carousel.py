@@ -43,6 +43,12 @@ class Playlist(TypedDict):
     scenes: list[Scene]
 
 
+class TransportControl(TypedDict):
+    generation: str
+    paused: bool
+    next: int
+
+
 def validate_url(value: object) -> str:
     if not isinstance(value, str):
         raise ValueError("URL must be a string")
@@ -177,12 +183,17 @@ class Renderer(Protocol):
     def recovery(self) -> None: ...
     def failure(self, reason: str | None = None) -> None: ...
     def countdown(self, progress: float | None) -> None: ...
+    def set_paused(self, paused: bool) -> None: ...
+
+
+class CarouselUnavailable(ValueError):
+    pass
 
 
 class Carousel:
     """Monotonic scheduler; start hands over without tearing down shared renderers."""
 
-    def __init__(self, playlist: Playlist, renderer: Renderer):
+    def __init__(self, playlist: Playlist, renderer: Renderer, generation: str = ""):
         self.scenes = [scene for scene in playlist["scenes"] if scene["enabled"]]
         self.renderer = renderer
         self.current: Scene | None = None
@@ -190,26 +201,53 @@ class Carousel:
         self.attempted_at = 0.0
         self.started_at: float | None = None
         self.cooldowns: dict[str, float] = {}
+        self.generation = generation
+        self.paused_at: float | None = None
+        self.next_sequence = 0
+        self.renderer.set_paused(False)
+
+    def apply_control(self, value: object, now: float, *, initial: bool = False) -> None:
+        if not isinstance(value, dict) or value.get("generation") != self.generation:
+            return
+        paused, sequence = value.get("paused"), value.get("next")
+        if type(paused) is not bool or type(sequence) is not int or sequence < self.next_sequence:
+            raise ValueError("Invalid carousel control")
+        if paused != (self.paused_at is not None):
+            self.renderer.set_paused(paused)
+            if paused:
+                self.paused_at = now
+            else:
+                elapsed = now - self.paused_at
+                self.attempted_at += elapsed
+                if self.started_at is not None:
+                    self.started_at += elapsed
+                self.paused_at = None
+        advances = 0 if initial else sequence - self.next_sequence
+        self.next_sequence = sequence
+        if advances and self.scenes:
+            self.cursor = (self.cursor + advances - 1) % len(self.scenes)
+            self.current = None
 
     def stop(self) -> None:
         self.renderer.stop()
         self.current = None
 
     def tick(self, now: float) -> None:
+        clock = self.paused_at if self.paused_at is not None else now
         if self.current is not None:
             state = self.renderer.state()
-            timed_out = self.started_at is None and now - self.attempted_at >= STARTUP_TIMEOUT
+            timed_out = self.started_at is None and clock - self.attempted_at >= STARTUP_TIMEOUT
             if state == "playing" and self.started_at is None:
-                self.started_at = now
+                self.started_at = clock
             failed = state == "failed" or timed_out
             duration = self.current["duration"]
             expired = (
                 self.started_at is not None and duration is not None
-                and now - self.started_at >= duration
+                and clock - self.started_at >= duration
             )
-            if not failed and state != "finished" and not expired:
+            if not failed and (self.paused_at is not None or (state != "finished" and not expired)):
                 self.renderer.countdown(
-                    min(1.0, (now - self.started_at) / duration)
+                    min(1.0, (clock - self.started_at) / duration)
                     if duration is not None and self.started_at is not None else None,
                 )
                 return
@@ -227,6 +265,8 @@ class Carousel:
             self.current = scene
             self.attempted_at = now
             self.started_at = None
+            if self.paused_at is not None:
+                self.paused_at = now
             self.renderer.start(scene)
             self.renderer.countdown(None)
             return

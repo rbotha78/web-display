@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { api, type PlaybackStatus, type PlexBrowseItem, type Playlist, type Scene } from "../api";
+import type { PlaybackStatus, PlexBrowseItem, Playlist, Scene } from "../api";
+import { useDeviceApi } from "../DeviceApiContext";
 import type { Notice } from "./Toast";
 
 interface Props {
@@ -9,6 +10,7 @@ interface Props {
 }
 
 export function PlaylistCard({ notify, fail, active = true }: Props) {
+  const api = useDeviceApi();
   const [playlist, setPlaylist] = useState<Playlist | null>(null);
   const [busy, setBusy] = useState(false);
   const [kind, setKind] = useState<Scene["kind"]>("web");

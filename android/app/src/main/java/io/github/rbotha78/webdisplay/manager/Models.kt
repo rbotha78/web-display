@@ -15,7 +15,7 @@ data class Device(
 
 data class HostAddress(val host: String, val port: Int)
 
-data class FoundDevice(val name: String, val host: String, val port: Int)
+data class FoundDevice(val name: String, val host: String, val port: Int, val enrolled: Boolean = false)
 
 data class DeviceStatus(
     val id: String,
@@ -37,6 +37,7 @@ data class DeviceStatus(
     val keyRejected: Boolean = false,
     val firmwareOutdated: Boolean = false,
     val minFirmware: String? = null,
+    val musicSync: MusicSyncState = MusicSyncState(),
 )
 
 data class SshKey(val id: String, val type: String, val comment: String, val fingerprint: String)
@@ -47,6 +48,23 @@ object ManagerRules {
     const val DEFAULT_PORT = 8443
     const val MIN_FIRMWARE = "0.5.7"
     const val KEY_NAME = "Web Display Manager"
+
+    private fun sameHostname(first: String?, second: String?): Boolean {
+        fun normalized(value: String?) = value.orEmpty().trim().trimEnd('.').lowercase().removeSuffix(".local")
+        val name = normalized(first)
+        return name.isNotEmpty() && name == normalized(second)
+    }
+
+    fun matchesDiscovered(device: Device, found: FoundDevice): Boolean =
+        (listOf(HostAddress(device.host, device.port)) + device.addresses).any {
+            it.port == found.port && (
+                sameHostname(it.host, found.host) || sameHostname(it.host, found.name) ||
+                    sameHostname(device.hostname, found.name)
+                )
+        }
+
+    fun markEnrolled(found: List<FoundDevice>, saved: List<Device>): List<FoundDevice> =
+        found.map { item -> item.copy(enrolled = saved.any { matchesDiscovered(it, item) }) }
 
     fun normalizeFingerprint(value: String): String {
         val hex = value.replace(":", "").replace(" ", "").uppercase()
@@ -131,7 +149,7 @@ object ManagerRules {
 
     fun candidateAddresses(device: Device, discovered: List<FoundDevice>): List<HostAddress> {
         val candidates = discovered.asSequence()
-            .filter { device.hostname != null && it.name.equals(device.hostname, ignoreCase = true) }
+            .filter { sameHostname(device.hostname, it.name) }
             .map { HostAddress(it.host, it.port) }
         return (sequenceOf(device.addresses.firstOrNull() ?: HostAddress(device.host, device.port)) +
             device.addresses.asSequence() + candidates)

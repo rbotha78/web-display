@@ -544,6 +544,25 @@ class RendererTests(unittest.TestCase):
         self.renderer._stop_video()
         self.renderer.music_pause.assert_called_with(False)
 
+    def test_transport_pauses_video_including_new_activation_and_suppresses_stall(self):
+        self.start_video()
+        self.renderer.ipc = Mock()
+        self.renderer._command = Mock(return_value=False)
+        self.renderer.set_paused(True)
+        self.renderer._activate()
+        self.renderer._command.assert_any_call(["set_property", "pause", True])
+        self.renderer._command.assert_any_call(["set_property", "mute", True])
+        self.renderer.video_state = "playing"
+        self.renderer.last_progress = 0
+        self.renderer.ipc.recv.side_effect = socket.timeout()
+        with patch("webdisplay.scene_player.time.monotonic", return_value=100):
+            self.assertEqual(self.renderer._video_status(), "playing")
+            self.renderer.set_paused(False)
+            self.renderer._command.assert_called_with(["set_property", "pause", False])
+            self.assertEqual(self.renderer.last_progress, 100)
+        status = json.loads((Path(self.directory.name) / "carousel-status.json").read_text())
+        self.assertFalse(status["paused"])
+
     def test_video_handover_waits_for_decoded_output_and_ignores_outgoing_stop(self):
         self.start_video()
         ipc = Mock()

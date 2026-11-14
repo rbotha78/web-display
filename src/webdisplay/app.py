@@ -27,6 +27,8 @@ from urllib.parse import parse_qs, urlsplit
 from . import releases
 from .carousel import (
     DEFAULT_PLEX_BITRATE_KBPS,
+    CarouselUnavailable,
+    TransportControl,
     validate_plex_bitrate,
     validate_playlist,
     validate_url,
@@ -35,8 +37,9 @@ from .display import DEFAULT_SAFE_AREA_PERCENT, validate_safe_area
 from .audio import DEFAULT_AUDIO_OUTPUT, audio_outputs, validate_audio_output
 from .hostname_helper import validate_hostname
 from .network import default_route_interface, internet_status, website_status
-from .plex import PlexClient, PlexPlaybackProxy, validate_server_url, validate_token
-from .music import MusicRelay, validate_music
+from .plex import RATING_KEY, PlexClient, PlexPlaybackProxy, validate_server_url, validate_token
+from .music import MusicRelay, active_source, validate_music
+from . import music_sync
 from .raildata import REFRESH_INTERVAL, RailDataWorker, validate_api_key, validate_refresh_interval
 from .weather import WeatherWorker, validate_weather_config
 from .storage import atomic_write
@@ -97,7 +100,7 @@ class ConfigStore:
                         "api_keys": [], "playlist": {"enabled": False, "scenes": []},
                         "plex_server_url": "", "plex_token": "", "plex_client_identifier": "",
                         "plex_default_bitrate_kbps": DEFAULT_PLEX_BITRATE_KBPS,
-                        "music": validate_music({}),
+                        "music": validate_music({}), "music_sync": {"role": "off"},
                         "sleep": default_schedule(), "sleep_wake_until": None,
                         "raildata_api_key": "", "service_details_api_key": "",
                         "raildata_refresh_seconds": REFRESH_INTERVAL,
@@ -122,6 +125,7 @@ class ConfigStore:
                     data.get("plex_default_bitrate_kbps", DEFAULT_PLEX_BITRATE_KBPS)
                 ),
                 "music": validate_music(data.get("music", {})),
+                "music_sync": music_sync.validate_stored_sync(data.get("music_sync")),
                 "sleep": validate_schedule(data.get("sleep", default_schedule())),
                 "sleep_wake_until": validate_wake_until(data.get("sleep_wake_until")),
                 "raildata_api_key": (
@@ -159,6 +163,7 @@ class ConfigStore:
                 data.get("plex_default_bitrate_kbps", DEFAULT_PLEX_BITRATE_KBPS)
             )
             data["music"] = validate_music(data.get("music", {}))
+            data["music_sync"] = music_sync.validate_stored_sync(data.get("music_sync"))
             data["sleep"] = validate_schedule(data.get("sleep", default_schedule()))
             data["sleep_wake_until"] = validate_wake_until(data.get("sleep_wake_until"))
             data["raildata_api_key"] = (
@@ -426,6 +431,13 @@ class Application:
                 str(config["url"]) + "\n",
                 mode=0o640,
             )
+            self.carousel_control: TransportControl = {
+                "generation": secrets.token_hex(16), "paused": False, "next": 0,
+            }
+            atomic_write(
+                self.target_path.with_name("carousel-control.json"),
+                json.dumps(self.carousel_control) + "\n", mode=0o640,
+            )
             atomic_write(
                 self.target_path.with_name("playlist.json"),
                 json.dumps({
@@ -433,9 +445,28 @@ class Application:
                     "revision": config.get("playlist_revision", ""),
                     "safe_area_percent": config["safe_area_percent"],
                     "audio_output": config["audio_output"],
+                    "control_generation": self.carousel_control["generation"],
                 }) + "\n",
                 mode=0o640,
             )
+
+    def control_carousel(self, value: dict) -> dict[str, bool]:
+        if set(value) != {"action"} or value["action"] not in ("pause", "resume", "next"):
+            raise ValueError("Choose pause, resume or next")
+        with self.publish_lock:
+            if not self.config.load()["playlist"]["enabled"]:
+                raise CarouselUnavailable("Enable the carousel in configuration first")
+            control = self.carousel_control.copy()
+            if value["action"] == "next":
+                control["next"] += 1
+            else:
+                control["paused"] = value["action"] == "pause"
+            atomic_write(
+                self.target_path.with_name("carousel-control.json"),
+                json.dumps(control) + "\n", mode=0o640,
+            )
+            self.carousel_control = control
+        return {"ok": True}
 
     def close(self) -> None:
         self.raildata_worker.close()
@@ -444,10 +475,14 @@ class Application:
         self.music.close()
 
     def music_config(self) -> dict[str, object]:
-        return {**self.config.load()["music"], "status": self.music.get_status()}
+        settings = self.config.load()["music"]
+        day, source = active_source(settings, self.music.clock())
+        return {**settings, "active_day": day, "active_station_key": source,
+                "status": self.music.get_status()}
 
     def _publish_music(self, config: dict[str, object]) -> None:
-        runtime = self.music.configure(config["music"], (config["plex_server_url"], config["plex_token"]))
+        runtime = self.music.configure(config["music"], (config["plex_server_url"], config["plex_token"]),
+                                       config["music_sync"])
         runtime["audio_output"] = config["audio_output"]
         atomic_write(self.target_path.with_name("music.json"), json.dumps(runtime) + "\n", mode=0o640)
 
@@ -456,6 +491,10 @@ class Application:
         if (set(value) != {"action"} or not isinstance(action, str)
                 or action not in {"pause", "resume", "play", "stop", "skip"}):
             raise ValueError("Choose play, pause, resume, stop or skip")
+        if self.config.load()["music_sync"]["role"] == "follower":
+            # Followers act on the whole group through the leader.
+            self.music.forward({"action": action})
+            return self.music_config()
         with self.publish_lock:
             config = self.config.load()
             settings = dict(config["music"])
@@ -472,6 +511,52 @@ class Application:
                 self.music.request_playback(action)
             self._publish_music(config)
         return self.music_config()
+
+    def like_music(self, value: dict) -> dict[str, object]:
+        if set(value) != {"rating_key"}:
+            raise ValueError("Supply the current song's Plex rating key")
+        if self.config.load()["music_sync"]["role"] == "follower":
+            if not isinstance(value["rating_key"], str) or not RATING_KEY.fullmatch(value["rating_key"]):
+                raise ValueError("Invalid Plex track")
+            self.music.forward({"like": value["rating_key"]})
+            return self.music_config()
+        with self.publish_lock:
+            self.music.like_track(value["rating_key"])
+            return self.music_config()
+
+    def music_sync_status(self) -> dict[str, object]:
+        sync = self.config.load()["music_sync"]
+        connected, error = self.music.sync_connected()
+        result: dict[str, object] = {
+            "supported": True, "role": sync["role"], "group_id": sync.get("group_id", ""),
+            "leader": None, "members": [], "connected": connected, "error": error,
+        }
+        if sync["role"] == "follower":
+            leader = sync["leader"]
+            result["leader"] = {key: leader[key] for key in ("name", "hostname", "port", "addresses")}
+        elif sync["role"] == "leader":
+            result["members"] = self.music.members()
+        return result
+
+    def save_music_sync(self, value: object) -> dict[str, object]:
+        sync = music_sync.sync_from_request(value)
+        with self.publish_lock:
+            config = self.config.update(music_sync=sync)
+            self._publish_music(config)
+        return self.music_sync_status()
+
+    def music_sync_peer(self, token: str, value: object) -> dict[str, object] | None:
+        """Leader endpoint for followers; returns None when the token does not match."""
+        sync = self.config.load()["music_sync"]
+        if sync["role"] != "leader" or not music_sync.token_matches(token, str(sync["token_hash"])):
+            return None
+        request = music_sync.peer_request(value)
+        command = request.get("command")
+        if isinstance(command, dict) and "action" in command:
+            self.control_music({"action": command["action"]})
+        elif isinstance(command, dict) and "like" in command:
+            self.like_music({"rating_key": command["like"]})
+        return self.music.peer(str(request["name"]), bool(request["listening"]))
 
     def _publish_sleep(self, config: dict[str, object]) -> None:
         atomic_write(
@@ -506,10 +591,17 @@ class Application:
 
     def save_music_config(self, value: object) -> dict[str, object]:
         with self.publish_lock:
+            current = self.config.load()["music"]
+            if isinstance(value, dict) and "day_sources" not in value:
+                # Older managers omit weekday sources; keep the saved schedule.
+                value = {**value, "day_sources": current["day_sources"]}
             settings = validate_music(value)
             if settings["station_key"] and (settings["enabled"] or
-                    settings["station_key"] != self.config.load()["music"]["station_key"]):
+                    settings["station_key"] != current["station_key"]):
                 self.plex_client().validate_music_source(settings["station_key"])
+            for day, source in settings["day_sources"].items():
+                if source and source != current["day_sources"][day] and source != settings["station_key"]:
+                    self.plex_client().validate_music_source(source)
             self.config.update(music=settings)
             config = self.config.load()
             self._publish_music(config)
@@ -958,6 +1050,19 @@ def make_handler(app: Application) -> type[BaseHTTPRequestHandler]:
                 return None
             return session
 
+        def _music_sync_peer(self) -> None:
+            client = self.client_address[0]
+            if not app.throttle.allowed(client):
+                self._json(HTTPStatus.TOO_MANY_REQUESTS, {"error": "try again later"})
+                return
+            body = self._body(4096)
+            result = app.music_sync_peer(self.headers.get("X-Music-Sync-Token", ""), body)
+            if result is None:
+                app.throttle.failure(client)
+                self._json(HTTPStatus.FORBIDDEN, {"error": "This display is not leading that music group"})
+                return
+            self._json(HTTPStatus.OK, result)
+
         def do_GET(self) -> None:
             if self.path == "/health":
                 self._json(HTTPStatus.OK, {"status": "ok", "paired": app.paired(), "version": app.updater.running_version()})
@@ -1024,6 +1129,10 @@ def make_handler(app: Application) -> type[BaseHTTPRequestHandler]:
             if request_path.path == "/api/plex/config" and not request_path.query:
                 if self._require_session():
                     self._json(HTTPStatus.OK, app.plex_config())
+                return
+            if request_path.path == "/api/music/sync" and not request_path.query:
+                if self._require_session():
+                    self._json(HTTPStatus.OK, app.music_sync_status())
                 return
             if request_path.path in ("/api/plex/music", "/api/plex/stations") and not request_path.query:
                 if not self._require_session():
@@ -1102,13 +1211,28 @@ def make_handler(app: Application) -> type[BaseHTTPRequestHandler]:
                     return
                 try:
                     status = json.loads(PLAYBACK_STATUS_PATH.read_text(encoding="utf-8"))
+                    if not isinstance(status, dict):
+                        raise ValueError("Invalid carousel status")
                 except FileNotFoundError:
                     status = {"failures": {}, "updated": None}
                 except (OSError, ValueError):
                     LOG.exception("Reading carousel status failed")
                     self._json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": "Could not read carousel playback status"})
                     return
-                self._json(HTTPStatus.OK, status)
+                playlist = app.config.load()["playlist"]
+                active = status.get("active_scene")
+                self._json(HTTPStatus.OK, {
+                    **status, "enabled": playlist["enabled"],
+                    "paused": status.get("paused", False), "transport_supported": True,
+                    "transport_available": (
+                        type(status.get("updated")) in (int, float)
+                        and 0 <= time.time() - status["updated"] <= 10
+                    ),
+                    "scene_title": next((
+                        scene["title"] or scene["kind"].capitalize()
+                        for scene in playlist["scenes"] if scene["id"] == active
+                    ), ""),
+                })
                 return
             if self.path == "/api/remote-view":
                 if not self._require_session():
@@ -1169,6 +1293,9 @@ def make_handler(app: Application) -> type[BaseHTTPRequestHandler]:
                     if self._require_session(csrf=True):
                         self._upload_update()
                     return
+                if self.path == "/api/music/sync/peer":
+                    self._music_sync_peer()
+                    return
                 body = self._body()
                 if self.path == "/api/pair":
                     self._pair(body)
@@ -1227,6 +1354,16 @@ def make_handler(app: Application) -> type[BaseHTTPRequestHandler]:
                 elif self.path == "/api/plex/music/control":
                     if self._require_session(csrf=True):
                         self._json(HTTPStatus.OK, app.control_music(body))
+                elif self.path == "/api/playlist/control":
+                    if not self._require_session(csrf=True):
+                        return
+                    try:
+                        self._json(HTTPStatus.OK, app.control_carousel(body))
+                    except CarouselUnavailable as error:
+                        self._json(HTTPStatus.CONFLICT, {"error": str(error)})
+                elif self.path == "/api/plex/music/like":
+                    if self._require_session(csrf=True):
+                        self._json(HTTPStatus.OK, app.like_music(body))
                 elif self.path == "/api/debug-keys":
                     if not self._require_session(csrf=True):
                         return
@@ -1315,6 +1452,10 @@ def make_handler(app: Application) -> type[BaseHTTPRequestHandler]:
                 if self.path == "/api/plex/music":
                     if self._require_session(csrf=True):
                         self._json(HTTPStatus.OK, app.save_music_config(self._body()))
+                    return
+                if self.path == "/api/music/sync":
+                    if self._require_session(csrf=True):
+                        self._json(HTTPStatus.OK, app.save_music_sync(self._body()))
                     return
                 if self.path == "/api/raildata/config":
                     if self._require_session(csrf=True):

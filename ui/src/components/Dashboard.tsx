@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
-import { ApiError, api, type MusicConfig, type NetworkStatus, type Status } from "../api";
+import { ApiError, type MusicConfig, type NetworkStatus, type Status } from "../api";
+import { useDeviceApi } from "../DeviceApiContext";
 import { DebugKeysCard } from "./DebugKeysCard";
 import { DisplayCard } from "./DisplayCard";
 import { PlaylistCard } from "./PlaylistCard";
@@ -66,6 +67,7 @@ function GlobalSettings({ notify, fail, canManageKeys, active, playbackConfig }:
   active: boolean;
   playbackConfig?: MusicConfig;
 }) {
+  const api = useDeviceApi();
   const [status, setStatus] = useState<Status | null>(null);
   const [network, setNetwork] = useState<NetworkStatus | null>(null);
   const refreshNetwork = useCallback(async () => {
@@ -98,7 +100,8 @@ function GlobalSettings({ notify, fail, canManageKeys, active, playbackConfig }:
       {canManageKeys ? <ManagerKeysCard notify={notify} fail={fail} /> : (
         <section className="card">
           <h2>Manager access</h2>
-          <p className="muted">Signed in through the display manager. Sign out and log in with the administrator password to manage API keys.</p>
+          <p className="muted">Signed in through the display manager. Manager access cannot create, list or revoke API keys.
+            Those operations require an administrator-password session on the device.</p>
         </section>
       )}
       <DebugKeysCard notify={notify} fail={fail} />

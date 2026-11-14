@@ -1,5 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { api, type MusicBrowseItem, type MusicBrowseResult, type MusicConfig, type MusicStation } from "../api";
+import { WEEKDAYS, type MusicBrowseItem, type MusicBrowseResult, type MusicConfig, type MusicStation,
+  type MusicSyncStatus, type Weekday } from "../api";
+import { useDeviceApi } from "../DeviceApiContext";
 import type { Notice } from "./Toast";
 import { SmartPlaylistBuilder } from "./SmartPlaylistBuilder";
 
@@ -9,6 +11,7 @@ export function MusicCard({ configured, notify, fail, playbackConfig }: {
   fail: (error: unknown) => void;
   playbackConfig?: MusicConfig;
 }) {
+  const api = useDeviceApi();
   const [config, setConfig] = useState<MusicConfig | null>(null);
   const [stations, setStations] = useState<MusicStation[]>([]);
   const [station, setStation] = useState("");
@@ -26,6 +29,15 @@ export function MusicCard({ configured, notify, fail, playbackConfig }: {
   const [selected, setSelected] = useState<MusicBrowseItem[]>([]);
   const [loadingSaved, setLoadingSaved] = useState(false);
   const [smartBuilder, setSmartBuilder] = useState(false);
+  const [days, setDays] = useState<Record<Weekday, string> | null>(null);
+  const [sync, setSync] = useState<MusicSyncStatus | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    // Older firmware or manager proxies without sync support simply hide the section.
+    api.musicSync().then((value) => { if (active) setSync(value); }).catch(() => undefined);
+    return () => { active = false; };
+  }, []);
 
   useEffect(() => {
     if (!playbackConfig) return;
@@ -41,6 +53,7 @@ export function MusicCard({ configured, notify, fail, playbackConfig }: {
       setStation(value.station_key);
       setEnabled(value.enabled);
       setVolume(value.volume);
+      setDays(value.day_sources ? { ...value.day_sources } : null);
       if (configured && value.station_key.startsWith("mix:")) {
         setLoadingSaved(true);
         api.musicBrowse({ key: value.station_key }).then((mix) => {
@@ -90,7 +103,8 @@ export function MusicCard({ configured, notify, fail, playbackConfig }: {
     event.preventDefault();
     setBusy(true);
     try {
-      const saved = await api.saveMusicConfig({ enabled, station_key: station, volume });
+      const saved = await api.saveMusicConfig({ enabled, station_key: station, volume,
+        ...(days ? { day_sources: days } : {}) });
       setConfig(saved);
       notify(saved.enabled ? "Background music enabled." : "Background music disabled.", "success");
     } catch (error) {
@@ -117,10 +131,45 @@ export function MusicCard({ configured, notify, fail, playbackConfig }: {
     setStation(items.length ? `mix:${builder}:${items.map((item) => item.id).join(",")}` : "");
   }
 
+  function sourceLabel(key: string) {
+    if (key.startsWith("mix:")) {
+      return `Custom ${key.split(":")[1]} mix (${key.split(":")[2].split(",").length} selections)`;
+    }
+    const item = stations.find((current) => current.key === key);
+    return item ? `${item.library}: ${item.title}` : "Saved music source (currently unavailable)";
+  }
+
+  async function leaveGroup() {
+    setBusy(true);
+    try {
+      setSync(await api.leaveMusicSync());
+      setConfig(await api.musicConfig());
+      notify("This display left its music group");
+    } catch (error) {
+      fail(error);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const syncText = !sync || sync.role === "off" ? "" : sync.role === "leader"
+    ? `Music sync: leading (${sync.members.length} ${sync.members.length === 1 ? "follower" : "followers"})`
+    : `Music sync: following ${sync.leader?.name ?? "the leader"}`;
+
+  const dayName = (day: Weekday) => day[0].toUpperCase() + day.slice(1);
+
   return <form className="card wide" onSubmit={save}>
     <h2>Background music</h2>
     <p className="muted">Plex radio, music playlists and custom mixes play across scene changes,
       pause for videos with audio, and resume afterwards. Choose a source and enable music to play it.</p>
+    {syncText && <div className="music-sync-status">
+      <p role="status">{syncText}</p>
+      {sync?.role === "follower" && <p className="muted">The leader's music settings play here while
+        following; this display keeps its own volume.</p>}
+      {sync?.role === "follower" && (!sync.connected || sync.error) &&
+        <p role="alert">{sync.error || "Waiting for the leader display"}</p>}
+      <button type="button" disabled={busy} onClick={leaveGroup}>Leave group</button>
+    </div>}
     <label>Music source
       <select value={station} disabled={!configured || busy || !config || loadingSaved} onChange={(event) => {
         setStation(event.target.value);
@@ -199,6 +248,24 @@ export function MusicCard({ configured, notify, fail, playbackConfig }: {
     <p className="muted">Regular and smart playlists are listed from your Plex account. Saved Plexamp mixes appear
       when Plex exposes them as playlists or stations; app-only mixes must be saved as playlists first.
       Custom mixes shuffle your selected artists/albums, not sonic recommendations.</p>
+    {days && <fieldset className="weekday-sources" disabled={!configured || busy || !config}>
+      <legend>Weekday sources</legend>
+      <p className="muted">Optionally play a different source on specific days; other days use the music source
+        above. Days change at midnight on the display, after the current song finishes.</p>
+      {WEEKDAYS.map((day) => <label key={day}>
+        {dayName(day)}{config?.active_day === day ? " (today)" : ""}
+        <select value={days[day]} onChange={(event) => setDays({ ...days, [day]: event.target.value })}>
+          <option value="">Use default source</option>
+          {days[day] && !stations.some((item) => item.key === days[day]) &&
+            <option value={days[day]}>{sourceLabel(days[day])}</option>}
+          {stations.map((item) => <option key={item.key} value={item.key}>
+            {item.library}: {item.title}{item.smart ? " (smart playlist)" : ""}
+          </option>)}
+        </select>
+      </label>)}
+      {config?.active_day && config.active_station_key && <p className="muted">
+        Today ({dayName(config.active_day)}) uses the saved source: {sourceLabel(config.active_station_key)}</p>}
+    </fieldset>}
     <label><input type="checkbox" checked={enabled} disabled={busy || (!enabled && (!configured || !station))}
       onChange={(event) => setEnabled(event.target.checked)} />Enable background music</label>
     <label>Music volume

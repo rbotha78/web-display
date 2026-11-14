@@ -16,6 +16,19 @@ from .audio import DEFAULT_AUDIO_OUTPUT, audio_outputs, validate_audio_output
 from .sleep import SleepRuntime
 
 LOG = logging.getLogger(__name__)
+# Load/seek this far ahead of the group, then unpause exactly when the group arrives.
+SYNC_PRIME = 0.8
+SYNC_SEEK_THRESHOLD = 0.25
+
+
+def sync_correction(drift: float) -> tuple[float, bool]:
+    """Return (mpv speed, needs seek) for drift = local - group position, in seconds."""
+    if abs(drift) > SYNC_SEEK_THRESHOLD:
+        return 1.0, True
+    if abs(drift) <= 0.03:
+        return 1.0, False
+    # Converge over roughly two seconds, never bending pitch by more than 3%.
+    return round(1.0 - max(-0.03, min(0.03, drift / 2)), 4), False
 
 
 def control_url(value: object) -> str:
@@ -43,6 +56,8 @@ class MusicPlayer:
         self.ended = None
         self.paused = False
         self.user_paused = False
+        self.sync_mode = False
+        self.sync = {"track": None, "armed": False, "settle_at": 0.0}
         self._now_playing = {"state": "disabled", "title": "", "artist": ""}
         self.audio_output = DEFAULT_AUDIO_OUTPUT
         self.sleep_runtime = SleepRuntime(config_path.with_name("sleep.json"))
@@ -67,6 +82,11 @@ class MusicPlayer:
     def pause_for_video(self, paused: bool):
         with self.lock:
             self.paused = paused
+            if getattr(self, "sync_mode", False):
+                # The sync loop rejoins the live group position after video audio ends.
+                if paused and self.ipc is not None:
+                    self._silence()
+                return
             if self.ipc is not None:
                 self._pause()
 
@@ -85,6 +105,12 @@ class MusicPlayer:
         else:
             self._command(["set_property", "aid", "auto"])
             self._command(["set_property", "pause", False])
+
+    def _silence(self):
+        self._command(["set_property", "pause", True])
+        self._command(["set_property", "aid", "no"])
+        self._command(["set_property", "speed", 1.0])
+        self.sync["armed"] = False
 
     def _command(self, command):
         self.request_id += 1
@@ -192,6 +218,11 @@ class MusicPlayer:
                         settings = json.loads(self.config_path.read_text())
                     except (FileNotFoundError, ValueError):
                         settings = {"enabled": False}
+                    if settings.get("sync") is True:
+                        self._stop_player()
+                        identity, track, endpoint = None, None, ""
+                        self._run_sync()
+                        continue
                     audio_output = validate_audio_output(settings.get("audio_output", DEFAULT_AUDIO_OUTPUT))
                     enabled = bool(settings.get("enabled") and not self.sleep_runtime.sleeping())
                     new_identity = (enabled, settings.get("station_key"),
@@ -303,6 +334,130 @@ class MusicPlayer:
                     self._control(endpoint, "stop")
                 except (OSError, ValueError):
                     pass
+
+    # ----- Music sync group playback ------------------------------------------------
+
+    def _run_sync(self):
+        """Follow the relay's group playhead until the display leaves its group."""
+        endpoint, failures, retry_at = "", 0, 0.0
+        with self.lock:
+            self.sync_mode, self.user_paused = True, False
+            self.sync = {"track": None, "armed": False, "settle_at": 0.0}
+        try:
+            while not self.shutdown.is_set():
+                try:
+                    settings = json.loads(self.config_path.read_text())
+                except (FileNotFoundError, ValueError):
+                    settings = {}
+                if settings.get("sync") is not True:
+                    return
+                try:
+                    new_endpoint = control_url(settings["control_url"])
+                    output = validate_audio_output(settings.get("audio_output", DEFAULT_AUDIO_OUTPUT))
+                    if new_endpoint != endpoint or output != self.audio_output:
+                        self._stop_player()
+                        endpoint, self.audio_output = new_endpoint, output
+                        self.sync["track"], failures, retry_at = None, 0, 0.0
+                    if time.monotonic() < retry_at:
+                        self.shutdown.wait(0.5)
+                        continue
+                    sleeping = self.sleep_runtime.sleeping()
+                    with self.lock:
+                        muted = self.paused or sleeping
+                    state = self._control(endpoint, "sync", listening=not muted)
+                    self._sync_apply(state, endpoint, muted, sleeping, settings["volume"])
+                    failures = 0
+                except (OSError, ValueError, KeyError, TypeError):
+                    self._stop_player()
+                    with self.lock:
+                        self._now_playing = {"state": "error", "title": "", "artist": ""}
+                        self.sync["track"] = None
+                    failures += 1
+                    delay = 5 if failures == 1 else 15
+                    retry_at = time.monotonic() + delay
+                    LOG.warning("Synced music interrupted; retrying in %s seconds", delay)
+                self.shutdown.wait(0.5)
+        finally:
+            self._stop_player()
+            with self.lock:
+                self.sync_mode = False
+
+    def _sync_apply(self, state, endpoint, muted, sleeping, volume):
+        url = state.get("url")
+        if state.get("state") not in {"playing", "paused", "idle"} or not url:
+            if self.process is not None:
+                self._stop_player()
+            with self.lock:
+                self.sync["track"] = None
+                waiting = state.get("state") in {"waiting", "playing", "paused", "idle"}
+                self._now_playing = {"state": "waiting" if waiting else "error" if state.get("state") == "error"
+                                     else "disabled", "title": "", "artist": ""}
+            return
+        prefix = endpoint.removesuffix("control") + "stream/"
+        if not url.startswith(prefix) or not re.fullmatch(r"[A-Za-z0-9_-]{32}", url[len(prefix):]):
+            raise ValueError("Invalid audio stream")
+        started_at, duration = float(state["started_at"]), float(state["duration"])
+        with self.lock:
+            self._now_playing = {"state": "playing" if state["state"] == "playing" and not muted else "paused",
+                                 "title": str(state.get("title", "")), "artist": str(state.get("artist", ""))}
+            if sleeping:
+                # The sleep watcher owns stopping mpv; never relaunch while asleep.
+                self.sync["track"] = None
+                return
+            if muted or state["state"] != "playing":
+                if self.ipc is not None:
+                    self._silence()
+                return
+            if self.process is None:
+                self._launch()
+                self.sync["track"] = None
+            if self.process.poll() is not None:
+                raise OSError("Audio player exited")
+            if self.sync["track"] != state["track_id"]:
+                self._command(["set_property", "pause", True])
+                self._command(["set_property", "speed", 1.0])
+                self._command(["set_property", "volume", volume])
+                self._command(["set_property", "aid", "auto"])
+                target = max(0.0, time.time() - started_at + SYNC_PRIME)
+                self._command(["set_property", "start", f"{target:.3f}"])
+                self._command(["loadfile", url, "replace"])
+                self.ended = None
+                self.sync.update(track=state["track_id"], armed=False, volume=volume)
+                return
+            if self.sync.get("volume") != volume:
+                self._command(["set_property", "volume", volume])
+                self.sync["volume"] = volume
+            position = self._command(["get_property", "time-pos"])
+            if self.ended == "error":
+                raise OSError("Audio playback failed")
+            if position is None:
+                return
+            expected = time.time() - started_at
+            if not self.sync["armed"]:
+                wait = started_at + position - time.time()
+                if wait < -SYNC_SEEK_THRESHOLD or position >= max(duration - 0.5, 0.0) > 0:
+                    # Too late to start from the primed point; prime again ahead of the group.
+                    self._command(["seek", f"{max(0.0, expected + SYNC_PRIME):.3f}", "absolute+exact"])
+                    return
+                if wait > 1.0:
+                    return
+                if wait > 0:
+                    self.shutdown.wait(wait)
+                self._command(["set_property", "aid", "auto"])
+                self._command(["set_property", "pause", False])
+                self.sync.update(armed=True, settle_at=time.monotonic() + 2)
+                return
+            if time.monotonic() < self.sync["settle_at"]:
+                return
+            speed, seek = sync_correction(position - expected)
+            if seek:
+                self.sync["armed"] = False
+                self._command(["set_property", "pause", True])
+                self._command(["set_property", "speed", 1.0])
+                self._command(["seek", f"{max(0.0, expected + SYNC_PRIME):.3f}", "absolute+exact"])
+                return
+            self._command(["set_property", "speed", speed])
+            self.sync["settle_at"] = time.monotonic() + 2
 
     def close(self):
         self.shutdown.set()

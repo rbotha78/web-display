@@ -40,7 +40,7 @@ class ManagerRulesTest {
             hostname = "display-lobby",
         )
         val found = listOf(
-            FoundDevice("display-lobby", "192.168.1.20", 8443),
+            FoundDevice("DISPLAY-LOBBY.LOCAL.", "192.168.1.20", 8443),
             FoundDevice("other-device", "192.168.1.30", 8443),
         )
         assertEquals(
@@ -51,6 +51,36 @@ class ManagerRulesTest {
             ),
             ManagerRules.candidateAddresses(device, found),
         )
+    }
+
+    @Test
+    fun discoveryUsesSavedAddressesAndHostnameInsteadOfStatusOrDisplayLabel() {
+        val device = Device(
+            id = "pi2", name = "Living room", host = "192.168.0.249", port = 8443,
+            fingerprint = "AA".repeat(32), key = "test-key", hostname = "web-display-pi2",
+            addresses = listOf(HostAddress("192.168.0.249", 8443), HostAddress("192.168.0.150", 8443)),
+        )
+        val found = listOf(
+            FoundDevice("another-name", "192.168.0.150", 8443),
+            FoundDevice("WEB-DISPLAY-PI2.LOCAL.", "192.168.0.151", 8443),
+            FoundDevice("Living room", "192.168.0.152", 8443),
+            FoundDevice("other-device", "192.168.0.153", 8443),
+            FoundDevice("web-display-pi2", "192.168.0.249", 9000),
+        )
+        val classified = ManagerRules.markEnrolled(found, listOf(device))
+        assertEquals(listOf(true, true, false, false, false), classified.map { it.enrolled })
+        assertTrue(ManagerRules.markEnrolled(classified, emptyList()).none { it.enrolled })
+    }
+
+    @Test
+    fun discoveryRecognizesSavedDnsAddressBeforeStatusHasLoaded() {
+        val device = Device(
+            id = "pi2", name = "Living room", host = "WEB-DISPLAY-PI2.local.", port = 8443,
+            fingerprint = "AA".repeat(32), key = "test-key",
+            addresses = listOf(HostAddress("192.168.0.249", 8443)),
+        )
+        val found = FoundDevice("web-display-pi2", "192.168.0.150", 8443)
+        assertTrue(ManagerRules.markEnrolled(listOf(found), listOf(device)).single().enrolled)
     }
 
     @Test

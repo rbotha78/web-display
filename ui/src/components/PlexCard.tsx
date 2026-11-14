@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { api, type MusicConfig, type PlexConfig } from "../api";
+import type { MusicConfig, PlexConfig } from "../api";
+import { useDeviceApi } from "../DeviceApiContext";
 import type { Notice } from "./Toast";
 import { MusicCard } from "./MusicCard";
 
@@ -10,6 +11,7 @@ interface Props {
 }
 
 export function PlexCard({ notify, fail, playbackConfig }: Props) {
+  const api = useDeviceApi();
   const [config, setConfig] = useState<PlexConfig | null>(null);
   const [serverUrl, setServerUrl] = useState("");
   const [token, setToken] = useState("");

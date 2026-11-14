@@ -1,4 +1,26 @@
-import type { RemoteView } from "../api";
+import { ApiError, createApi, type ApiRequest, type RemoteView } from "../api";
+
+export interface MusicSyncState {
+  supported: boolean;
+  role?: "off" | "leader" | "follower";
+  group_id?: string;
+  leader?: { name: string; hostname: string; port: number; addresses: string[] } | null;
+  members?: { name: string; listening: boolean; last_seen: number }[];
+  connected?: boolean;
+  error?: string;
+}
+
+export interface SyncResult {
+  id: string;
+  name: string;
+  ok: boolean;
+  error?: string;
+}
+
+export interface SyncReply {
+  group_id?: string;
+  results: SyncResult[];
+}
 
 export interface Device {
   id: string;
@@ -20,6 +42,8 @@ export interface Device {
   key_rejected?: boolean;
   firmware_outdated?: boolean;
   min_firmware?: string;
+  music_sync?: MusicSyncState | null;
+  music_sync_last_known?: MusicSyncState;
 }
 
 export interface Found {
@@ -49,7 +73,9 @@ export interface SshKeys {
   keys: SshKey[];
 }
 
-export class ManagerError extends Error {}
+export class ManagerError extends Error {
+  constructor(message: string, readonly status: number) { super(message); }
+}
 
 let token = "";
 
@@ -72,11 +98,38 @@ async function request<T>(path: string, method = "GET", body?: unknown, signal?:
   } catch {
     // Keep the generic message below.
   }
-  if (!response.ok) throw new ManagerError(payload.error || "Request failed (" + response.status + ")");
+  if (!response.ok) throw new ManagerError(payload.error || "Request failed (" + response.status + ")", response.status);
   return payload as T;
 }
 
+export function settingsApi(id: string, lifetime: AbortSignal) {
+  const send: ApiRequest = async <T,>(path: string, method = "GET", body?: unknown, signal?: AbortSignal) => {
+    const controller = new AbortController();
+    const abort = () => controller.abort();
+    for (const source of [lifetime, signal]) {
+      if (source?.aborted) controller.abort();
+      source?.addEventListener("abort", abort, { once: true });
+    }
+    try {
+      return await request<T>("/api/devices/" + id + "/settings", "POST", { method, path, body }, controller.signal);
+    } catch (error) {
+      if (error instanceof ManagerError) throw new ApiError(error.message, error.status);
+      throw error;
+    } finally {
+      lifetime.removeEventListener("abort", abort);
+      signal?.removeEventListener("abort", abort);
+    }
+  };
+  return createApi(send, null);
+}
+
 export const api = {
+  createSyncGroup: (leader: string, followers: string[]) =>
+    request<SyncReply>("/api/sync-groups", "POST", { leader, followers }),
+  dissolveSyncGroup: (group_id: string) =>
+    request<SyncReply>("/api/sync-groups/dissolve", "POST", { group_id }),
+  leaveSyncGroup: (id: string) =>
+    request<SyncReply>("/api/devices/" + id + "/sync/leave", "POST", {}),
   devices: () => request<{ devices: Device[]; manager_version?: string }>("/api/devices"),
   remoteView: (id: string, signal?: AbortSignal) =>
     request<RemoteView>("/api/devices/" + id + "/remote-view", "GET", undefined, signal),

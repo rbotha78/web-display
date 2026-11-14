@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { api, type WeatherConfig } from "../api";
+import type { WeatherConfig } from "../api";
+import { useDeviceApi } from "../DeviceApiContext";
 import type { Notice } from "./Toast";
 
 interface Props {
@@ -8,6 +9,7 @@ interface Props {
 }
 
 export function WeatherCard({ notify, fail }: Props) {
+  const api = useDeviceApi();
   const [config, setConfig] = useState<WeatherConfig | null>(null);
   const [city, setCity] = useState("St Albans");
   const [country, setCountry] = useState("GB");

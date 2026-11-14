@@ -70,14 +70,14 @@ def make_handler(manager: Manager, token: str, port_getter) -> type[BaseHTTPRequ
                 return False
             return True
 
-        def _body(self) -> dict[str, object]:
+        def _body(self, maximum: int = MAX_BODY) -> dict[str, object]:
             try:
                 length = int(self.headers.get("Content-Length", "0"))
             except ValueError:
                 raise ValueError("Invalid Content-Length") from None
             if length == 0:
                 return {}
-            if length < 0 or length > MAX_BODY:
+            if length < 0 or length > maximum:
                 raise ValueError("Invalid request body size")
             try:
                 value = json.loads(self.rfile.read(length))
@@ -142,9 +142,25 @@ def make_handler(manager: Manager, token: str, port_getter) -> type[BaseHTTPRequ
         def _post(self) -> None:
             if not self._authorised():
                 return
+            settings = re.fullmatch(r"/api/devices/([0-9a-f]{12})/settings", self.path)
+            if settings:
+                body = self._body(512 * 1024)
+                try:
+                    self._json(HTTPStatus.OK, manager.settings(settings.group(1), body))
+                except DeviceError as error:
+                    status = error.status if error.status in (400, 401, 403, 404, 409, 429, 503) else 502
+                    self._json(HTTPStatus(status), {"error": str(error), "status": error.status})
+                return
             body = self._body()
             keys = re.fullmatch(r"/api/devices/([0-9a-f]{12})/debug-keys", self.path)
-            if keys:
+            leave = re.fullmatch(r"/api/devices/([0-9a-f]{12})/sync/leave", self.path)
+            if self.path == "/api/sync-groups":
+                self._json(HTTPStatus.OK, manager.create_sync_group(body.get("leader"), body.get("followers")))
+            elif self.path == "/api/sync-groups/dissolve":
+                self._json(HTTPStatus.OK, manager.dissolve_sync_group(body.get("group_id")))
+            elif leave:
+                self._json(HTTPStatus.OK, manager.leave_sync_group(leave.group(1)))
+            elif keys:
                 self._json(HTTPStatus.CREATED, manager.debug_keys(keys.group(1), "add", body))
             elif self.path == "/api/fingerprint":
                 self._json(HTTPStatus.OK, manager.fingerprint(body.get("host"), body.get("port")))

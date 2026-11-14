@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { api, type MusicBrowseItem, type MusicFilters, type MusicStation, type SmartPlaylistCriteria } from "../api";
+import type { MusicBrowseItem, MusicFilters, MusicStation, SmartPlaylistCriteria } from "../api";
+import { useDeviceApi } from "../DeviceApiContext";
 
 export function SmartPlaylistBuilder({ disabled, onCreated, onClose, fail }: {
   disabled: boolean;
@@ -7,6 +8,7 @@ export function SmartPlaylistBuilder({ disabled, onCreated, onClose, fail }: {
   onClose: () => void;
   fail: (error: unknown) => void;
 }) {
+  const api = useDeviceApi();
   const [libraries, setLibraries] = useState<MusicBrowseItem[]>([]);
   const [criteria, setCriteria] = useState<SmartPlaylistCriteria>({ library: "", decade: "", genre: "", mood: "" });
   const [filters, setFilters] = useState<MusicFilters | null>(null);

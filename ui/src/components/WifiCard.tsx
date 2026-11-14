@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { api, type Network, type NetworkStatus } from "../api";
+import type { Network, NetworkStatus } from "../api";
+import { useDeviceApi } from "../DeviceApiContext";
 import type { Notice } from "./Toast";
 
 interface Props {
@@ -10,6 +11,7 @@ interface Props {
 }
 
 export function WifiCard({ network, notify, fail, refresh }: Props) {
+  const api = useDeviceApi();
   const [country, setCountry] = useState("");
   const [networks, setNetworks] = useState<Network[]>([]);
   const [ssid, setSsid] = useState("");

@@ -457,6 +457,7 @@ def main() -> None:
                     carousel.stop()
                     carousel = None
             revision = ""
+            control_generation = ""
             safe_area = DEFAULT_SAFE_AREA_PERCENT
             audio_output = DEFAULT_AUDIO_OUTPUT
             try:
@@ -464,7 +465,8 @@ def main() -> None:
                 playlist = validate_playlist(published, allow_runtime=True)
                 safe_area = validate_safe_area(published.get("safe_area_percent", DEFAULT_SAFE_AREA_PERCENT))
                 audio_output = validate_audio_output(published.get("audio_output", DEFAULT_AUDIO_OUTPUT))
-                revision = f"{published.get('revision', '')}:{safe_area}:{audio_output}"
+                control_generation = published.get("control_generation", "")
+                revision = f"{published.get('revision', '')}:{safe_area}:{audio_output}:{control_generation}"
                 playlist_error = False
             except FileNotFoundError:
                 playlist = Playlist(enabled=False, scenes=[])
@@ -481,6 +483,7 @@ def main() -> None:
                     scenes=[scene for scene in playlist["scenes"] if scene["kind"] != "video"],
                 )
             if playlist["enabled"] and not ap_active:
+                new_carousel = False
                 if renderer is None:
                     stop_process(process)
                     process = None
@@ -494,11 +497,21 @@ def main() -> None:
                         carousel.stop()
                     renderer.set_safe_area(safe_area)
                     renderer.audio_output = audio_output
-                    carousel = Carousel(playlist, renderer)
+                    carousel = Carousel(playlist, renderer, control_generation)
+                    new_carousel = True
                     previous_playlist = playlist
                     previous_revision = revision
                 icon.set_visible(False)
-                carousel.tick(time.monotonic())
+                now = time.monotonic()
+                try:
+                    control = json.loads(target_path.with_name("carousel-control.json").read_text(encoding="utf-8"))
+                    carousel.apply_control(control, now, initial=new_carousel)
+                except FileNotFoundError:
+                    pass
+                except (OSError, ValueError):
+                    LOG.exception("Could not apply carousel control")
+                carousel.tick(now)
+                renderer.publish_status()
                 update_notification()
                 active = renderer.active_scene
                 active_process = renderer.process if active and active["kind"] == "video" else renderer.browser.process

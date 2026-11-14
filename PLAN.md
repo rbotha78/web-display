@@ -142,7 +142,8 @@ after overnight endurance checks and physical screen power-cycle recovery
 confirmation. Subsequent implemented scope includes private Plex playback,
 retained renderers, train/weather scenes, background music, sleep and manager
 remote views. Persistent-renderer endurance acceptance remains open. Image
-uploads and manager playlist editing remain deferred. The dated status below and
+uploads remain deferred. Native manager configuration was subsequently approved.
+The dated status below and
 `HANDOFF.md` supersede historical implementation-stage wording in this design.
 
 ### Initial Scope
@@ -275,11 +276,19 @@ uploads and manager playlist editing remain deferred. The dated status below and
   rule editing/deletion stays in Plex.
 - Floating bottom-pinned administration music controls provide play,
   pause/resume, stop and skip without controlling carousel video audio.
+  A Like heart sets the identified current song's Plex rating to five stars,
+  feeding existing rating-based smart playlists without creating another.
   Manual pause survives video handovers; stop disables saved music while
   retaining source/volume, and play starts a fresh queue for that source.
-- PC and Android managers with sanitized reconstructed remote views. The
-  managers can open device administration; dedicated music configuration and
-  playlist editing are not native manager features.
+- PC and Android managers with sanitized reconstructed remote views and native
+  editable Global settings/Carousel views, without embedding device web pages.
+  Settings use enrolled, fingerprint-pinned connections and retain manager-key
+  permissions. Drafts remain local until explicit save/apply; opening an external
+  administration page remains an optional fallback.
+- Both manager home screens now focus on display identity, music playback status
+  and inline music/carousel controls. Configuration and maintenance are secondary.
+  Carousel pause/resume also controls native video, and Next preserves pause;
+  transport is transient, independent of persisted playlist configuration.
 
 These features are implemented, not an instruction to reimplement them. The
 latest train-layout refinements and playlist/custom-mix support are newer than
@@ -332,7 +341,9 @@ also tested on both devices. Phase B (A/B root images) remains deferred.
 Milestone 4 (central device management) is implemented and hardware-tested,
 including discovery/enrolment, multi-address reporting, management actions and
 device-side API-key revocation. The latest published application/manager release
-is **v0.5.17**, with signed update, Android APK and full release-image assets.
+is **v0.5.19**; verify its asset-building workflows before assuming completion.
+It includes native manager configuration, Plex liking, weekday music sources and
+leader-coordinated music sync groups.
 Both development Pis also have newer train-layout and Plex playlist/mix changes.
 Version metadata remains 0.5.17 until a separately requested release.
 

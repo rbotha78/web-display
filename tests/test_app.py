@@ -419,7 +419,8 @@ class ApiTests(unittest.TestCase):
         path = Path(self.directory.name) / "playlist.json"
         published = json.loads(path.read_text())
         self.assertEqual(published, {**saved, "revision": published["revision"], "safe_area_percent": 5,
-                                     "audio_output": "alsa/hdmi:CARD=vc4hdmi,DEV=0"})
+                                     "audio_output": "alsa/hdmi:CARD=vc4hdmi,DEV=0",
+                                     "control_generation": published["control_generation"]})
         self.assertTrue(published["revision"])
         self.assertEqual(path.stat().st_mode & 0o777, 0o640)
         private = Path(self.directory.name) / "config.json"
@@ -529,6 +530,25 @@ class ApiTests(unittest.TestCase):
             self.assertTrue(result["status"]["paused_by_user"])
             control.assert_called_once_with(body)
             self.assertNotIn("control_url", result)
+
+    def test_liking_current_song_requires_authentication_and_csrf(self):
+        token, session = self.app.sessions.create()
+        body = {"rating_key": "42"}
+        with patch.object(self.app, "like_music", return_value={
+            "enabled": True, "station_key": "/playlists/11/items", "volume": 30,
+            "status": {"state": "playing", "title": "Song", "error": "", "rating_key": "42", "liked": True},
+        }) as like:
+            response, _ = self.request("POST", "/api/plex/music/like", body)
+            self.assertEqual(response.status, 401)
+            response, _ = self.request("POST", "/api/plex/music/like", body,
+                                       {"Cookie": f"session={token}"})
+            self.assertEqual(response.status, 403)
+            like.assert_not_called()
+            response, result = self.request("POST", "/api/plex/music/like", body,
+                                           {"Cookie": f"session={token}", "X-CSRF-Token": session.csrf})
+            self.assertEqual(response.status, 200)
+            self.assertTrue(result["status"]["liked"])
+            like.assert_called_once_with(body)
 
     def test_smart_playlist_endpoints_authenticate_validate_queries_and_require_csrf(self):
         token, session = self.app.sessions.create()
@@ -693,16 +713,56 @@ class ApiTests(unittest.TestCase):
         with patch.object(webdisplay_app, "PLAYBACK_STATUS_PATH", path):
             response, payload = self.request("GET", "/api/playlist/status", headers=headers)
             self.assertEqual(response.status, 200)
-            self.assertEqual(payload, {"failures": {}, "updated": None})
+            self.assertEqual(payload["failures"], {})
+            self.assertIsNone(payload["updated"])
+            self.assertFalse(payload["enabled"])
+            self.assertTrue(payload["transport_supported"])
+            self.assertFalse(payload["transport_available"])
             status = {"failures": {"scene": {"message": "Website could not be reached.", "time": 1}}, "updated": 1}
             path.write_text(json.dumps(status))
             response, payload = self.request("GET", "/api/playlist/status", headers=headers)
-            self.assertEqual(payload, status)
+            self.assertEqual(payload["failures"], status["failures"])
             path.write_text("invalid")
             with self.assertLogs("web-display", level="ERROR"):
                 response, payload = self.request("GET", "/api/playlist/status", headers=headers)
             self.assertEqual(response.status, 500)
             self.assertIn("Could not read", payload["error"])
+
+    def test_carousel_transport_is_authenticated_transient_and_generation_bound(self):
+        response, _ = self.request("POST", "/api/playlist/control", {"action": "pause"})
+        self.assertEqual(response.status, 401)
+        token, session = self.app.sessions.create()
+        cookie = {"Cookie": f"session={token}"}
+        response, _ = self.request("POST", "/api/playlist/control", {"action": "pause"}, cookie)
+        self.assertEqual(response.status, 403)
+        key = self.app.create_key("manager")["key"]
+        headers = {"Authorization": f"Bearer {key}"}
+        response, _ = self.request("POST", "/api/playlist/control", {"action": "pause"}, headers)
+        self.assertEqual(response.status, 409)
+        response, _ = self.request("PUT", "/api/playlist", {"enabled": True, "scenes": [
+            {"id": "test", "kind": "dashboard", "title": "Clock"},
+        ]}, headers)
+        self.assertEqual(response.status, 200)
+        before = self.app.config.path.read_bytes()
+        path = self.app.target_path.with_name("carousel-control.json")
+        initial = json.loads(path.read_text())
+        for action in ("pause", "next", "next"):
+            response, result = self.request("POST", "/api/playlist/control", {"action": action}, headers)
+            self.assertEqual((response.status, result), (200, {"ok": True}))
+        control = json.loads(path.read_text())
+        self.assertEqual(control["generation"], initial["generation"])
+        self.assertTrue(control["paused"])
+        self.assertEqual(control["next"], 2)
+        self.assertEqual(self.app.config.path.read_bytes(), before)
+        response, _ = self.request("POST", "/api/playlist/control", {"action": "resume"},
+                                   {**cookie, "X-CSRF-Token": session.csrf})
+        self.assertEqual(response.status, 200)
+        self.assertFalse(json.loads(path.read_text())["paused"])
+        for invalid in ({}, {"action": "stop"}, {"action": "pause", "extra": 1}):
+            self.assertEqual(self.request("POST", "/api/playlist/control", invalid, headers)[0].status, 400)
+        self.app.publish_target()
+        self.assertNotEqual(json.loads(path.read_text())["generation"], initial["generation"])
+        self.assertEqual(json.loads(path.read_text())["next"], 0)
 
 
 class StaticUiTests(unittest.TestCase):

@@ -14,12 +14,18 @@ vitals or deployment instructions.
 ## Current Repository And Release
 
 - Branch `main`; use `git status` and `git log` for the actual checkout/commit.
+  v0.5.19 adds five-star Plex liking, the Global SSH-card phone overflow fix,
+  integrated manager configuration/compact home playback controls, stable sync
+  indicator, enrolled-discovery matching, weekday music sources and music sync
+  groups (user confirmed a Pi 2/Pi 3 group working well by ear on Nov 14).
   Train layout refinements were committed in `f5a18e4`; Plex playlists/mixes and
   the guidance refresh followed in `c82595c`. The v0.5.18 release work includes
   the deployed animated equalizer icon, Plex smart-playlist builder, floating
   admin music controls and admin landing/guidance refinements.
-- Release version/tag: **v0.5.18**. The user requested commit, push and release
-  publication on Nov 12. This release adds optional previous departures,
+- Latest published release/tag: **v0.5.19**, published Nov 14 with the APK
+  below; signed-update and image assets come from release workflows.
+- Previous release **v0.5.18**, committed in `552e85d` and published
+  on Nov 12. That release added optional previous departures,
   reclaimed row space, the larger footer clock, Plex playlists/custom mixes,
   smart-playlist creation, floating admin music controls, the animated music
   icon and Global settings as the default administration view.
@@ -30,26 +36,34 @@ vitals or deployment instructions.
   (run `42657619061`); it is no longer waiting to build. This is not a claim that
   this newly built image has been flashed/boot-accepted on both Pis.
 - The local Android APK at
-  `android/app/build/outputs/apk/debug/web-display-manager.apk` was built Nov 9
-  at 14:58 UTC and matches the release APK (25,197,967 bytes). No Android source
-  changed for v0.5.18; the same APK can be attached without rebuilding it.
+  `android/app/build/outputs/apk/debug/web-display-manager.apk` was rebuilt Nov 12
+  Nov 14 at 08:34 UTC with native configuration, compact home, stable sync
+  indicators, fixed-width refresh, discovery matching, weekday music sources and
+  music sync groups (26,200,539 bytes), SHA-256
+  `643f86748f1068aeea37cfe04663fc0884533c96ddfa23ea33c720b966244523`.
+  This APK is attached to v0.5.19.
 
 ## Current Development Deployment (2026-11-12)
 
-- Both targets listed in `AGENTS.md` received the Global settings default and
-  carousel warning cleanup
+- Both targets listed in `AGENTS.md` received the five-star Plex Like heart,
+  Global settings SSH-key/card width fix and shared native-manager editor API
+  context refactor and carousel playback transport; the original admin
+  single-row player controls are restored
   using `tools/push-to-device.sh --restart-kiosk`, with pinned SSH host checking.
   They remain development targets; confirm this again before future pushes.
 - Both now run the factory package at
   `/usr/lib/python3/dist-packages/webdisplay`, not patched `versions/0.5.11`.
   Development pushes removed installed update versions/state but preserved
   private configuration, API keys and carousel playlists. They are not signed
-  update installations, even though version metadata still says 0.5.17.
-- Final deployed device UI: `static/assets/index-Dnu0bTpF.js`,
-  CSS `static/assets/style-BAC1ff-r.css`. The manager CSS was rebuilt too.
+  update installations, even though version metadata now says 0.5.18.
+- Final deployed device UI: `static/assets/index-FolTy0d-.js`,
+  CSS `static/assets/style-d-DuA2sQ.css`. Local PC manager UI:
+  `static/assets/manager-33lwhFgJ.js`; both UIs were rebuilt together.
   Both services (`web-display` and `web-display-kiosk`) were active; HTTPS
   `/health`, Python module hashes, static index/JS hashes and served JS bytes
   matched the final local build on both devices.
+  The new carousel transport heartbeat was fresh on both, the command file had
+  matching runtime generation/mode 0640, and unauthenticated transport was denied.
 - Remote-view snapshot: `/run/web-display-kiosk/remote-view.json`, not
   `/run/web-display/remote-view.json`. Private configuration remains
   `/var/lib/web-display/config.json`; never print credentials or relay capability
@@ -60,12 +74,54 @@ vitals or deployment instructions.
 
 ## Latest Implemented Features
 
+- Discovery no longer offers already-enrolled displays as new solely because
+  NSD chooses an alternate interface, hostname spelling or `.local` alias.
+  Android classifies discovery results against persisted enrollment before
+  publishing them, not incomplete/offline status snapshots; enrollment and
+  refresh reclassify the current scan. The Add dialog marks/disables already
+  added entries except during explicit re-trust. PC discovery uses matching
+  normalized saved endpoints and groups interface announcements; the home UI
+  also reconciles stale scan flags with current device records. Friendly display
+  labels are not identities, different service ports remain distinct and TLS
+  pins/API keys are untouched. Newly forgotten devices can be discovered again.
+- Both managers now have compact home cards: display identity/online status,
+  music state/song and inline music/carousel controls. Configure device and
+  remote preview remain prominent; diagnostics, SSH keys, updates, restart,
+  browser links and local removal are secondary actions rather than default
+  card content. Music uses existing transport/Like APIs. Carousel adds Pause/
+  Resume and Next scene through authenticated `POST /api/playlist/control`.
+  Pause freezes the scheduler and native mpv playback, not web page activity or
+  dashboard clocks. Next preserves pause. Commands are transient and asynchronous;
+  runtime/settings republish or service restart resets pause, while kiosk-only
+  restart retains it without replaying old Next commands. No saved playlist or
+  private config is changed by transport.
+  `/api/playlist/status` reports capability, enabled/applied pause, scene title
+  and a <=10-second kiosk heartbeat gate. Old firmware and unavailable players
+  remain explicit; neither client invents live playback state.
+- Android home playback refreshes/commands now use a rotating sync icon in an
+  always-reserved 24dp top-right header slot, rather than inserting/removing a
+  status-text row. Rotation uses a graphics layer, so it does not affect layout.
+  Accessible refresh/command descriptions remain; errors stay inline.
+  The home refresh action also uses this icon in a fixed 48dp touch target,
+  spinning while busy instead of widening its text label; repeat taps remain
+  disabled during refresh.
 - Administration opens on **Global settings**; the menu switches to **Carousel**
   without discarding either screen's drafts. The obsolete experimental/browser-
   relaunch banner is removed; retained Chromium is the current transition path.
   Display backgrounds are black. Existing endurance acceptance remains open.
 - Both admin screens have a floating bottom-pinned background-music player:
-  Play/Pause/Resume, Stop and Skip. Manual pause retains position through video
+  Play/Pause/Resume, Stop, Skip and a five-star Plex Like heart. The heart shows
+  confirmed five-star ratings and cannot clear ratings; edit those in Plex.
+  The original single-row button layout is retained on both screens. A temporary
+  two-column player layout was reverted at the user's request: the reported phone
+  overflow came from SSH fingerprints/key names in Global settings. SSH entries
+  now wrap within their card, cards have zero automatic minimum width, and the
+  settings grid can shrink below its usual 20rem column minimum.
+  Requests identify the displayed song and reject a changed track rather than
+  rating its replacement. Ratings belong to the configured Plex token's user.
+  Existing rating-filtered Plex smart playlists update without creating another
+  playlist; rating metadata from other clients refreshes with the queue.
+  Manual pause retains position through video
   handovers; a paused skip defers loading until Resume. Stop persists disabled
   playback but retains the source/volume; Play starts a fresh queue for that
   source. Source/volume drafts remain intact and Play/Stop updates the enabled
@@ -103,11 +159,121 @@ vitals or deployment instructions.
   paused/loading/retry states retain explicit text. The bars indicate playback,
   not measured audio levels. Only the small icon is redrawn at five frames per
   second; carousel/configuration polling retains its one-second cadence.
-  PC/Android managers open device administration for music configuration; they
-  have no dedicated native music editor or carousel playlist editor.
+- The PC manager now has **Configure device**, with native editable Global
+  settings and Carousel tabs, shared React editors, retained local drafts,
+  discard confirmation on closing and abort-on-close requests. It includes the
+  existing Plex browse/mix/smart-playlist tools and floating music controls.
+  `DeviceApiContext` scopes the editor API per selected view; never replace the
+  global default device API/CSRF transport. Keep callbacks stable so periodic
+  manager refreshes cannot reload cards and overwrite drafts.
+  A token/Host/Origin-protected JSON gateway forwards only explicitly allowlisted
+  settings operations through the enrolled device's pinned connection. No bearer
+  key reaches browser code. Password-only API-key management and raw signed-file
+  uploads are excluded; published update checks/installation remain available.
+  Optional external browser administration links remain.
+- Android now has native **Configure device** Global/Carousel tabs too, using
+  `SettingsModels`, `SettingsSession`, Compose settings widgets, music builders
+  and carousel editors. Requests retain existing pinned address fallback,
+  cancellation and single-mutation admission. Drafts survive section/tab changes
+  and background refreshes, with dirty-close/reload confirmation. Sleep, music
+  and carousel saves detect intervening edits and ask before overwriting; the
+  check is client-side, not atomic against another editor.
+  Global coverage includes display/audio, weekly sleep/wake, Plex credentials,
+  stations/playlists/custom artist/album mixes, smart-playlist filters/preview/
+  creation, transport/Like, RailData/weather, hostname/Wi-Fi, published updates,
+  development SSH keys and restart. Carousel supports all scene types and Plex
+  video browsing, preserving newer unknown fields. Credentials are write-only
+  in-memory drafts, never saved state. Password/API-key management and raw
+  update uploads stay external. Builder search/filter state resets on tab
+  switches; selected music sources remain drafts. No phone UI or physical
+  hardware acceptance has been performed for these new native screens.
 
 ## Latest Validation
 
+- Music sync groups (leader-coordinated): full Python suite 429 tests, 109 UI
+  tests, typecheck/both builds, Android 73 tests/lint (0 errors, 5 warnings)/APK
+  passed. Deployed Nov 14 to both Pis (development targets): services active,
+  `/api/music/sync` live, served `index-D-WKPZ6H.js`, `music*.py`/`app.py` match
+  local, configs unchanged (both remain `role: off`). Pi mpv 0.40 accepts the
+  `start`/`speed`/`aid` IPC properties used for priming and drift correction.
+  No group has been created on hardware yet: actual audible sync accuracy, Pi 2
+  CPU cost and leader-loss behaviour are unobserved.
+
+- Weekday music sources: full Python suite 414 tests (one static-bundle test
+  re-run after it overlapped the concurrent bundle rebuild), 104 UI tests,
+  typecheck/build, Android 54 tests/lint (0 errors, 5 warnings)/APK passed.
+  `music.day_sources` (monday..sunday, blank = default) is preserved when PUTs
+  omit it; the relay resolves the device-local weekday and switches only at the
+  next song/skip/queue end. Android hides the editor for firmware lacking it.
+  No live midnight transition was observed on hardware. Deployed Nov 14 to both
+  Pis (development targets): services healthy, installed/served `index-B5S4RRMl.js`
+  / `style-C5bgXRkd.css` and `music.py`/`app.py` match local, configs unchanged.
+
+- Fixed-width Android refresh icon: 51 unit tests, lint (zero errors, five
+  existing warnings) and APK assembly passed. Both web bundles rebuilt unchanged;
+  no Pi deployment was needed. No phone installation or visual acceptance claimed.
+- Enrolled discovery: 42 manager Python tests and 14 targeted manager UI tests
+  passed; both web bundles rebuilt/typechecked. Android 51 unit tests, lint
+  (zero errors, five existing warnings) and APK assembly passed. Coverage
+  includes saved secondary addresses, DNS aliases before status refresh,
+  normalized names, grouped interface announcements, distinct ports, new-device
+  visibility, forgotten records and stale scan flags with offline devices.
+  Device-side firmware/UI bundles did not change in this manager-only iteration;
+  no phone installation or live phone discovery acceptance is claimed.
+- Stable sync indicator: Android unit tests (49), lint (zero errors, five
+  existing warnings) and APK assembly passed. Both web bundles were rebuilt and
+  remained unchanged. This iteration changes Android presentation only; no phone
+  installation or physical layout acceptance is claimed.
+- Compact manager home: 29 targeted UI tests/typecheck passed and both UIs were
+  rebuilt. Chromium checked native home/player bounds at seven widths from
+  320 to 1280px, hidden maintenance content, non-floating inline controls and
+  continued native configuration/draft behavior. Fake-device config was unchanged.
+  Carousel/API/renderer/manager regressions exercised authenticated/CSRF gates,
+  transient commands, paused timeouts/countdowns, next while paused, restart-safe
+  sequence handling, mpv pause/resume and suppression of intentional-pause stalls.
+  Existing kiosk sleep/AP/single-page transition tests passed too.
+  Android rebuilt successfully with 49 passing unit tests, zero lint errors and
+  five dependency-version warnings. No physical phone or live video-pause
+  acceptance is claimed.
+- Native PC settings: all 99 UI tests and typecheck passed; both UIs were rebuilt.
+  All 40 manager Python tests passed, including pinning, token/Host/Origin gates,
+  forbidden routes/envelopes, optional-endpoint errors and larger carousel drafts.
+  A real Chromium 390px-wide session against a disposable TLS device and actual
+  manager server confirmed native rendering without an iframe, SSH/page/player
+  bounds, retained Global/Carousel drafts, manager permissions and upload gating.
+  Browsing/unsaved edits did not change device configuration. No real device
+  settings or music sources were changed for this check.
+- Android native settings: JDK 17 / platform 36 / build tools 35.0.0;
+  `ANDROID_HOME=$HOME/Android/Sdk ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug`
+  passed from `android/`. All 37 unit tests passed, including 10 new settings
+  cases; lint reported zero errors and five existing warnings. APK existence,
+  byte count and hash were independently checked. Install the local APK to use
+  these features on a phone; no phone installation or UI interaction is claimed.
+- Global settings overflow: reproduced page/card expansion from a normal-length
+  SHA256 SSH fingerprint and long key names in the actual SSH-card markup and
+  settings grid, while the carousel/player remained within bounds. Restored the
+  original player styles and fixed SSH-entry wrapping/card/grid sizing instead.
+  24 UI tests passed across `MusicControls.test.tsx` and `App.test.tsx`; both UIs
+  rebuilt/typechecked. Real Chromium checks passed 60 cases at 10 widths from
+  320 to 1280px, with empty/normal/long-name key lists and both screen visibility
+  states. Checked document/card/text/input/action bounds and the unchanged
+  single-row player layout. This is not a physical-phone or endurance sign-off.
+- Plex liking: 56 Python tests passed across `test_plex` and `test_app`;
+  compilation passed. 24 UI tests passed across `MusicControls.test.tsx` and
+  `App.test.tsx`. Both UIs rebuilt/typechecked. Regressions cover the authenticated/
+  CSRF-protected endpoint, actual PUT rating protocol against fake Plex, existing
+  ratings, failed requests without optimistic liking, track-change rejection and
+  unchanged playback/settings. Real Chromium layout checks passed for all three
+  Play/Pause/Resume labels at five sizes from 320x640 to 1280x720, with all four
+  buttons fitting, reachable save controls and separated notifications.
+- Both Pis received this iteration with pinned SSH and kiosk restart; their
+  private configuration hashes were unchanged. Both services/HTTPS health were
+  healthy, installed Python/UI hashes matched local files, served UI matched
+  installed assets and the Like endpoint rejected unauthenticated requests.
+  Read-only live Plex inspection confirmed existing rating-filtered smart audio
+  playlists; no real track ratings or music settings were changed for probes.
+  This is development code newer than the v0.5.18 release, not new physical-audio
+  or endurance acceptance.
 - Release preparation: all 399 Python tests and 94 UI tests passed; both UIs
   typechecked and rebuilt with the same final assets already deployed above.
   Firmware/Python package versions are aligned at 0.5.18. The development

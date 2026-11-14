@@ -34,7 +34,7 @@ test("polls only when open, switches active scenes, ticks in device time and nev
   vi.stubGlobal("fetch", fetch);
   const card = render(<DeviceCard
     device={{ id: "aabbccddeeff", name: "Lobby", host: "10.0.0.1", port: 8443, online: false }}
-    notify={vi.fn()} refresh={vi.fn()} readd={vi.fn()} />);
+    notify={vi.fn()} refresh={vi.fn()} readd={vi.fn()} configure={vi.fn()} />);
   expect(fetch).not.toHaveBeenCalled();
   fireEvent.click(screen.getByText("Preview display"));
   await settle();

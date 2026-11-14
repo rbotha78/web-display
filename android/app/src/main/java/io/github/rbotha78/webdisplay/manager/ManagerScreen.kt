@@ -19,7 +19,10 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -61,11 +64,22 @@ fun ManagerScreen(viewModel: ManagerViewModel) {
     val storeError by viewModel.storeError.collectAsState()
     val managerVersion by viewModel.managerVersion.collectAsState()
     val remoteView by viewModel.remoteView.collectAsState()
+    val settings by viewModel.settings.collectAsState()
+    val players by viewModel.players.collectAsState()
     var addDevice by remember { mutableStateOf<AddRequest?>(null) }
     var confirmUpdateAll by remember { mutableStateOf(false) }
     var updateResults by remember { mutableStateOf<List<UpdateOutcome>?>(null) }
+    var managerMore by remember { mutableStateOf(false) }
+    var musicSyncOpen by remember { mutableStateOf(false) }
+    val musicSyncResults by viewModel.musicSyncResults.collectAsState()
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
+    val homeVisible = settings == null && remoteView == null && addDevice == null &&
+        !confirmUpdateAll && updateResults == null && !musicSyncOpen && "update-all" !in busy
+    DisposableEffect(homeVisible) {
+        viewModel.homeVisible(homeVisible)
+        onDispose { viewModel.homeVisible(false) }
+    }
 
     LaunchedEffect(notice) {
         notice?.let {
@@ -88,19 +102,49 @@ fun ManagerScreen(viewModel: ManagerViewModel) {
             },
             snackbarHost = { SnackbarHost(snackbar) },
         ) { padding ->
+            val open = settings
+            if (open != null) {
+                SettingsScreen(open, viewModel.settingsEditor, viewModel, Modifier.fillMaxSize().padding(padding))
+                return@Scaffold
+            }
+            if (musicSyncOpen) {
+                MusicSyncScreen(statuses, "music-sync" in busy || "refresh" in busy, musicSyncResults,
+                    onClose = { musicSyncOpen = false }, onRefresh = viewModel::refresh,
+                    onCreate = viewModel::createMusicSync, onDissolve = viewModel::dissolveMusicSync,
+                    onRemove = viewModel::removeMusicSyncFollower,
+                    modifier = Modifier.fillMaxSize().padding(padding))
+                return@Scaffold
+            }
             Column(
                 modifier = Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(onClick = viewModel::refresh, enabled = "refresh" !in busy) {
-                        Text(if ("refresh" in busy) "Refreshing…" else "Refresh")
+                    IconButton(
+                        onClick = viewModel::refresh,
+                        enabled = "refresh" !in busy,
+                        modifier = Modifier.size(48.dp),
+                    ) {
+                        SyncIcon(
+                            refreshing = "refresh" in busy,
+                            contentDescription = if ("refresh" in busy) "Refreshing displays" else "Refresh displays",
+                        )
                     }
-                    OutlinedButton(
-                        onClick = { confirmUpdateAll = true },
-                        enabled = statuses.isNotEmpty() && "update-all" !in busy,
-                    ) { Text("Update all") }
                     Button(onClick = { addDevice = AddRequest() }) { Text("Add device") }
+                    Column {
+                        TextButton(onClick = { managerMore = true }) { Text("More") }
+                        DropdownMenu(expanded = managerMore, onDismissRequest = { managerMore = false }) {
+                            DropdownMenuItem(
+                                text = { Text("Music sync groups") },
+                                onClick = { managerMore = false; musicSyncOpen = true; viewModel.refresh() },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Update all devices") },
+                                enabled = statuses.isNotEmpty() && "update-all" !in busy,
+                                onClick = { managerMore = false; confirmUpdateAll = true },
+                            )
+                        }
+                    }
                 }
                 if (storeError != null) {
                     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
@@ -117,10 +161,7 @@ fun ManagerScreen(viewModel: ManagerViewModel) {
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    val unpaired = found.filter { item ->
-                        statuses.none { it.host == item.host && it.port == item.port } &&
-                            !statuses.any { status -> status.hostname.equals(item.name, ignoreCase = true) }
-                    }
+                    val unpaired = found.filterNot { it.enrolled }
                     if (unpaired.isNotEmpty()) {
                         item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) {
                             FoundDevices(unpaired) { item ->
@@ -131,9 +172,10 @@ fun ManagerScreen(viewModel: ManagerViewModel) {
                     items(statuses, key = { it.id }) { status ->
                         DeviceCard(
                             status = status,
-                            deviceBusy = "device:${status.id}" in busy,
-                            keyBusy = "keys:${status.id}" in busy,
+                            deviceBusy = "device:${status.id}" in busy || players[status.id]?.working == true,
+                            keyBusy = "keys:${status.id}" in busy || players[status.id]?.working == true,
                             viewModel = viewModel,
+                            player = players[status.id],
                             onReenroll = { addDevice = AddRequest(status.host, status.port.toString(), status.name, status.id) },
                         )
                     }
@@ -230,27 +272,16 @@ private fun DeviceCard(
     deviceBusy: Boolean,
     keyBusy: Boolean,
     viewModel: ManagerViewModel,
+    player: PlayerState?,
     onReenroll: () -> Unit,
 ) {
     val context = LocalContext.current
-    var url by remember(status.id) { mutableStateOf(status.url.orEmpty()) }
-    var editing by remember(status.id) { mutableStateOf(false) }
+    var more by remember(status.id) { mutableStateOf(false) }
     var available by remember(status.id) { mutableStateOf<String?>(null) }
     var confirmReboot by remember { mutableStateOf(false) }
     var confirmInstall by remember { mutableStateOf(false) }
     var confirmRemove by remember { mutableStateOf(false) }
     var keysOpen by remember { mutableStateOf(false) }
-    var keys by remember(status.id) { mutableStateOf<SshKeys?>(null) }
-    var newKey by remember { mutableStateOf("") }
-    var keyName by remember { mutableStateOf("") }
-    var removeKey by remember { mutableStateOf<SshKey?>(null) }
-
-    LaunchedEffect(status.url, editing) {
-        if (!editing) url = status.url.orEmpty()
-    }
-    LaunchedEffect(keysOpen, status.id) {
-        if (keysOpen) viewModel.debugKeys(status.id) { keys = it }
-    }
 
     val connection = if (status.defaultRoute == null) "Unknown" else
         if (status.wifiConnected == true && status.defaultRoute.startsWith("wl")) "Wi-Fi" else status.defaultRoute
@@ -262,14 +293,28 @@ private fun DeviceCard(
             Modifier.fillMaxWidth().padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
                 Text(status.name, style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
                 StatePill(if (status.online) "Online" else "Offline", status.online)
+                PlaybackSyncIndicator(
+                    refreshing = player?.refreshing == true,
+                    working = player?.working == true,
+                )
             }
             Text(
                 (status.addresses.takeIf { it.size > 1 }?.joinToString(", ") ?: status.host) +
                     ":${status.port}" + (status.hostname?.let { " · $it" } ?: ""),
                 style = MaterialTheme.typography.bodySmall,
+            )
+            Text(
+                MusicSyncRules.summary(status.musicSync),
+                style = MaterialTheme.typography.bodySmall,
+                maxLines = 1, minLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                modifier = Modifier.fillMaxWidth(),
             )
             if (status.certificateChanged) {
                 Text("The device certificate changed. Confirm its new fingerprint before trusting it again.",
@@ -287,31 +332,33 @@ private fun DeviceCard(
             if (status.error != null && !status.certificateChanged && !status.keyRejected) {
                 Text(status.error, color = MaterialTheme.colorScheme.error)
             }
-            OutlinedButton(
-                onClick = { viewModel.openRemoteView(status.id, status.name) },
-                enabled = !status.certificateChanged && !status.keyRejected,
-            ) { Text("Remote view") }
-            if (healthy) {
+            if (healthy && !status.firmwareOutdated) {
+                PlayerControls(
+                    player = player ?: PlayerState(),
+                    enabled = !deviceBusy,
+                    onCommand = { viewModel.playerCommand(status.id, it) },
+                    onReenroll = onReenroll,
+                )
+            }
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    onClick = { viewModel.openSettings(status) },
+                    enabled = status.online && !status.certificateChanged && !status.keyRejected && !deviceBusy,
+                ) { Text("Configure device") }
+                OutlinedButton(
+                    onClick = { viewModel.openRemoteView(status.id, status.name) },
+                    enabled = !status.certificateChanged && !status.keyRejected,
+                ) { Text("Remote view") }
+                TextButton(onClick = { more = !more }) { Text(if (more) "Less" else "More") }
+            }
+            if (more && healthy) {
                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text("Firmware: ${status.version ?: "unknown"}" +
                         if (status.restartNeeded) " · ${status.installedVersion} installed; restart to apply" else "")
                     Text("Connection: ${connection ?: "Unknown"}")
                     Text("Internet: ${status.internet?.let { if (it) "Online" else "Offline" } ?: "Unknown"}")
                 }
-                OutlinedTextField(
-                    value = url,
-                    onValueChange = { url = it; editing = true },
-                    label = { Text("Display address") },
-                    placeholder = { Text("https://example.com") },
-                    modifier = Modifier.fillMaxWidth(),
-                    enabled = !deviceBusy,
-                    singleLine = true,
-                )
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(
-                        onClick = { viewModel.setUrl(status.id, url.trim()) { editing = false } },
-                        enabled = !deviceBusy && editing,
-                    ) { Text("Save address") }
                     OutlinedButton(onClick = {
                         viewModel.checkUpdate(status.id) { version ->
                             available = version
@@ -331,49 +378,9 @@ private fun DeviceCard(
                 TextButton(onClick = { keysOpen = !keysOpen }) {
                     Text(if (keysOpen) "Hide development SSH keys" else "Development SSH keys")
                 }
-                if (keysOpen) {
-                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text("Public keys can log in as webdebug with full root access.")
-                        if (keyBusy && keys == null) CircularProgressIndicator(Modifier.size(24.dp))
-                        keys?.let { data ->
-                            if (!data.enabled) Text("SSH key management is disabled on this device.")
-                            else if (data.keys.isEmpty()) Text("No SSH keys are authorised.")
-                            else data.keys.forEach { item ->
-                                Column {
-                                    Text(item.comment.ifBlank { "(no name)" }, fontWeight = FontWeight.SemiBold)
-                                    Text("${item.type} · ${item.fingerprint}", style = MaterialTheme.typography.bodySmall)
-                                    TextButton(onClick = { removeKey = item }, enabled = !keyBusy) { Text("Remove key") }
-                                }
-                            }
-                        }
-                        if (keys?.enabled == true) {
-                            OutlinedTextField(
-                                value = newKey,
-                                onValueChange = { newKey = it },
-                                label = { Text("Public key") },
-                                placeholder = { Text("ssh-ed25519 AAAA… name") },
-                                modifier = Modifier.fillMaxWidth(),
-                                minLines = 2,
-                            )
-                            OutlinedTextField(
-                                value = keyName,
-                                onValueChange = { if (it.length <= 40) keyName = it },
-                                label = { Text("Name (optional)") },
-                                modifier = Modifier.fillMaxWidth(),
-                                singleLine = true,
-                            )
-                            OutlinedButton(onClick = {
-                                viewModel.addDebugKey(status.id, newKey.trim(), keyName.trim()) {
-                                    keys = it
-                                    newKey = ""
-                                    keyName = ""
-                                }
-                            }, enabled = !keyBusy && newKey.isNotBlank()) { Text("Add SSH key") }
-                        }
-                    }
-                }
+                if (keysOpen) SshKeysPanel(status.id, status.name, keyBusy, viewModel)
             }
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (more) FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (healthy) {
                     OutlinedButton(onClick = {
                         viewModel.adminUrl(status.id) { url ->
@@ -387,8 +394,9 @@ private fun DeviceCard(
                         .onFailure { viewModel.reportNotice("No browser is available to open the admin page.") }
                 }) { Text(if (healthy) "Open without login" else "Open admin page") }
                 TextButton(onClick = { confirmRemove = true }, enabled = !deviceBusy) { Text("Remove") }
+                TextButton(onClick = onReenroll, enabled = !deviceBusy) { Text("Re-enrol") }
             }
-            if (healthy) {
+            if (more && healthy) {
                 Text("Automatic admin login opens your browser. The browser independently verifies TLS; do not bypass certificate warnings unless you have checked the device identity.",
                     style = MaterialTheme.typography.bodySmall)
             }
@@ -422,19 +430,6 @@ private fun DeviceCard(
         onDismiss = { confirmRemove = false },
         onConfirm = { confirmRemove = false; viewModel.forget(status.id) },
     )
-    removeKey?.let { item ->
-        ConfirmDialog(
-            title = "Remove SSH key?",
-            text = "Remove ${item.comment.ifBlank { item.fingerprint }} from ${status.name}?" +
-                if (keys?.keys?.size == 1) " This is the last key; nobody will be able to log in over SSH." else "",
-            confirm = "Remove key",
-            onDismiss = { removeKey = null },
-            onConfirm = {
-                removeKey = null
-                viewModel.removeDebugKey(status.id, item.id) { keys = it }
-            },
-        )
-    }
 }
 
 @Composable
@@ -446,7 +441,7 @@ private fun StatePill(text: String, positive: Boolean) {
 }
 
 @Composable
-private fun ConfirmDialog(
+internal fun ConfirmDialog(
     title: String,
     text: String,
     confirm: String,
@@ -494,12 +489,12 @@ private fun AddDeviceDialog(
                 if (foundElsewhere.isNotEmpty()) {
                     Text("Found on the local network", style = MaterialTheme.typography.titleSmall)
                     foundElsewhere.forEach { item ->
-                        TextButton(enabled = !targetBusy, onClick = {
+                        TextButton(enabled = !targetBusy && (!item.enrolled || request.replaceId != null), onClick = {
                             host = item.host
                             port = item.port.toString()
                             name = item.name
                             pin = null
-                        }) { Text("${item.name} · ${item.host}:${item.port}") }
+                        }) { Text("${item.name} · ${item.host}:${item.port}" + if (item.enrolled) " · already added" else "") }
                     }
                 }
                 OutlinedTextField(
@@ -560,4 +555,68 @@ private fun AddDeviceDialog(
 private fun deviceAdminUrl(host: String, port: Int): String {
     val formatted = if (host.contains(':') && !host.startsWith("[")) "[$host]" else host
     return "https://$formatted:$port/"
+}
+
+/** Development SSH key management shared by the device card and the settings screen. */
+@Composable
+internal fun SshKeysPanel(deviceId: String, deviceName: String, keyBusy: Boolean, viewModel: ManagerViewModel) {
+    var keys by remember(deviceId) { mutableStateOf<SshKeys?>(null) }
+    var newKey by remember(deviceId) { mutableStateOf("") }
+    var keyName by remember(deviceId) { mutableStateOf("") }
+    var removeKey by remember(deviceId) { mutableStateOf<SshKey?>(null) }
+    LaunchedEffect(deviceId) { viewModel.debugKeys(deviceId) { keys = it } }
+
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text("Public keys can log in as webdebug with full root access.")
+        if (keyBusy && keys == null) CircularProgressIndicator(Modifier.size(24.dp))
+        keys?.let { data ->
+            if (!data.enabled) Text("SSH key management is disabled on this device.")
+            else if (data.keys.isEmpty()) Text("No SSH keys are authorised.")
+            else data.keys.forEach { item ->
+                Column {
+                    Text(item.comment.ifBlank { "(no name)" }, fontWeight = FontWeight.SemiBold)
+                    Text("${item.type} · ${item.fingerprint}", style = MaterialTheme.typography.bodySmall)
+                    TextButton(onClick = { removeKey = item }, enabled = !keyBusy) { Text("Remove key") }
+                }
+            }
+        }
+        if (keys?.enabled == true) {
+            OutlinedTextField(
+                value = newKey,
+                onValueChange = { newKey = it },
+                label = { Text("Public key") },
+                placeholder = { Text("ssh-ed25519 AAAA… name") },
+                modifier = Modifier.fillMaxWidth(),
+                minLines = 2,
+            )
+            OutlinedTextField(
+                value = keyName,
+                onValueChange = { if (it.length <= 40) keyName = it },
+                label = { Text("Name (optional)") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+            )
+            OutlinedButton(onClick = {
+                viewModel.addDebugKey(deviceId, newKey.trim(), keyName.trim()) {
+                    keys = it
+                    newKey = ""
+                    keyName = ""
+                }
+            }, enabled = !keyBusy && newKey.isNotBlank()) { Text("Add SSH key") }
+        }
+    }
+
+    removeKey?.let { item ->
+        ConfirmDialog(
+            title = "Remove SSH key?",
+            text = "Remove ${item.comment.ifBlank { item.fingerprint }} from $deviceName?" +
+                if (keys?.keys?.size == 1) " This is the last key; nobody will be able to log in over SSH." else "",
+            confirm = "Remove key",
+            onDismiss = { removeKey = null },
+            onConfirm = {
+                removeKey = null
+                viewModel.removeDebugKey(deviceId, item.id) { keys = it }
+            },
+        )
+    }
 }

@@ -130,6 +130,9 @@ body {
 }
 
 .admin-menu { display: flex; flex-wrap: wrap; gap: .5rem; margin-bottom: 1rem; }
+.manager-settings .topbar { flex-wrap: wrap; gap: 1rem; }
+.manager-shell > .topbar { flex-wrap: wrap; gap: .75rem; }
+.manager-device-card > :is(h2, p) { overflow-wrap: anywhere; }
 
 .music-controls-space { height: 7rem; }
 .music-controls {
@@ -152,10 +155,24 @@ body {
 .music-controls-track strong { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .music-controls-track :is(span, small) { color: var(--muted); font-size: .85rem; }
 .music-controls-buttons { display: flex; gap: .5rem; flex-shrink: 0; }
+.music-controls.music-controls-inline {
+  position: static;
+  transform: none;
+  width: 100%;
+  padding: .75rem;
+  flex-direction: column;
+  align-items: stretch;
+  box-shadow: none;
+}
+.music-controls-inline .music-controls-buttons { flex-wrap: wrap; }
+.carousel-controls { display: flex; flex-direction: column; gap: .5rem; overflow-wrap: anywhere; }
+.music-like svg { width: 1.2rem; height: 1.2rem; vertical-align: middle; fill: none; stroke: currentColor; stroke-width: 1.5; }
+.music-like.liked { color: #ff8296; }
+.music-like.liked svg { fill: currentColor; }
 .admin-shell .toast { bottom: 8rem; z-index: 30; }
 @media (max-width: 480px) {
   .music-controls { flex-direction: column; align-items: stretch; gap: .5rem; padding: .75rem; }
-  .music-controls-buttons button { flex: 1; }
+  .music-controls-buttons button { flex: 1; padding-inline: .5rem; }
   .music-controls-space { height: 11rem; }
   .admin-shell .toast { bottom: 12rem; }
 }
@@ -163,10 +180,11 @@ body {
 .grid {
   display: grid;
   gap: 1rem;
-  grid-template-columns: repeat(auto-fit, minmax(20rem, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 20rem), 1fr));
 }
 
 .card {
+  min-width: 0;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -179,6 +197,8 @@ body {
 .card.wide {
   grid-column: 1 / -1;
 }
+
+.ssh-key-entry { overflow-wrap: anywhere; }
 
 .playlist-fields {
   display: grid;
@@ -606,6 +626,20 @@ label.check {
   color: var(--text);
 }
 
+.weekday-sources {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr));
+  gap: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.weekday-sources > p { grid-column: 1 / -1; margin: 0; }
+.weekday-sources select { min-width: 0; }
+.music-sync-status { display: grid; gap: 0.5rem; justify-items: start; min-width: 0; }
+.music-sync-status p { margin: 0; overflow-wrap: anywhere; }
+
 label.check input {
   width: 1.1rem;
   height: 1.1rem;
@@ -793,3 +827,28 @@ textarea {
   color: var(--muted, #667085);
   font-size: 0.85rem;
 }
+
+/* PC manager music sync groups */
+.manager-sync-line {
+  height: 1.5em;
+  line-height: 1.5;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.manager-sync-panel,
+.manager-sync-panel form,
+.manager-sync-panel fieldset,
+.manager-sync-panel select {
+  min-width: 0;
+  max-width: 100%;
+}
+.manager-sync-panel { margin-bottom: 1rem; overflow-wrap: anywhere; }
+.manager-sync-heading { justify-content: space-between; }
+.manager-sync-group { border-top: 1px solid var(--border); padding: 0.75rem 0; }
+.manager-sync-group ul { padding-left: 1.25rem; }
+.manager-sync-group li { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin: 0.5rem 0; }
+.manager-sync-choice { display: flex; align-items: center; gap: 0.5rem; margin: 0.5rem 0; }
+.manager-sync-choice input { flex: 0 0 auto; width: auto; }
+.manager-sync-warning { margin: 0.75rem 0; }
+.manager-sync-panel button { max-width: 100%; white-space: normal; }

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
-import { api, type UpdateCheck, type UpdateStatus } from "../api";
+import type { UpdateCheck, UpdateStatus } from "../api";
+import { useDeviceApi } from "../DeviceApiContext";
 import type { Notice } from "./Toast";
 
 interface Props {
@@ -12,6 +13,7 @@ function megabytes(bytes: number): string {
 }
 
 export function UpdatesCard({ notify, fail }: Props) {
+  const api = useDeviceApi();
   const [status, setStatus] = useState<UpdateStatus | null>(null);
   const [unavailable, setUnavailable] = useState(false);
   const [check, setCheck] = useState<UpdateCheck | null>(null);
@@ -62,8 +64,9 @@ export function UpdatesCard({ notify, fail }: Props) {
 
   const upload = (event: FormEvent) => {
     event.preventDefault();
-    if (!file) return;
-    return run(async () => installed((await api.uploadUpdate(file)).version));
+    const uploadUpdate = api.uploadUpdate;
+    if (!file || !uploadUpdate) return;
+    return run(async () => installed((await uploadUpdate(file)).version));
   };
 
   const restart = () => {
@@ -128,7 +131,7 @@ export function UpdatesCard({ notify, fail }: Props) {
           </button>
         )}
       </div>
-      <form onSubmit={upload}>
+      {api.uploadUpdate ? <form onSubmit={upload}>
         <label>
           Signed update file
           <input
@@ -143,7 +146,8 @@ export function UpdatesCard({ notify, fail }: Props) {
         <div className="actions">
           <button disabled={!file || busy}>Upload and install</button>
         </div>
-      </form>
+      </form> : <p className="hint">Signed-file uploads are available in device administration.
+        You can check for and install published updates here.</p>}
     </section>
   );
 }

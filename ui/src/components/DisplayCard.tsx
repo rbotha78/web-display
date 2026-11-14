@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { api } from "../api";
+import { useDeviceApi } from "../DeviceApiContext";
 import type { Notice } from "./Toast";
 
 interface Props {
@@ -8,6 +8,7 @@ interface Props {
 }
 
 export function DisplayCard({ notify, fail }: Props) {
+  const api = useDeviceApi();
   const [url, setUrl] = useState("");
   const [autoAp, setAutoAp] = useState(false);
   const [safeArea, setSafeArea] = useState(5);

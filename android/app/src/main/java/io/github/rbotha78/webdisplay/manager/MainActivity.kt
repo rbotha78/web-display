@@ -37,6 +37,8 @@ class MainActivity : ComponentActivity() {
         super.onStart()
         PinnedHttp.resumeNetwork()
         viewModel.resumeRemoteView()
+        viewModel.resumeSettings()
+        viewModel.resumePlayers()
         discovery.start()
         viewModel.refresh()
     }

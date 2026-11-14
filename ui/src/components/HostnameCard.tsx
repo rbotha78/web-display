@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { api } from "../api";
+import { useDeviceApi } from "../DeviceApiContext";
 import type { Notice } from "./Toast";
 
 interface Props {
@@ -9,6 +9,7 @@ interface Props {
 }
 
 export function HostnameCard({ current, notify, fail }: Props) {
+  const api = useDeviceApi();
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
 

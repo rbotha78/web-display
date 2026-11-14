@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
-import { api, type ApiKey } from "../api";
+import type { ApiKey } from "../api";
+import { useDeviceApi } from "../DeviceApiContext";
 import type { Notice } from "./Toast";
 
 interface Props {
@@ -12,6 +13,7 @@ function created(seconds: number | null): string {
 }
 
 export function ManagerKeysCard({ notify, fail }: Props) {
+  const api = useDeviceApi();
   const [keys, setKeys] = useState<ApiKey[] | null>(null);
   const [busy, setBusy] = useState(false);
 

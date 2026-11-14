@@ -83,11 +83,28 @@ export interface PlexConfig {
   server_name?: string;
 }
 
+export const WEEKDAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"] as const;
+export type Weekday = typeof WEEKDAYS[number];
+
 export interface MusicConfig {
   enabled: boolean;
   station_key: string;
   volume: number;
-  status: { state: string; title: string; error: string; paused_by_user?: boolean };
+  day_sources?: Record<Weekday, string>;
+  active_day?: Weekday;
+  active_station_key?: string;
+  status: { state: string; title: string; error: string; paused_by_user?: boolean;
+    rating_key?: string; liked?: boolean };
+}
+
+export interface MusicSyncStatus {
+  supported: boolean;
+  role: "off" | "leader" | "follower";
+  group_id: string;
+  leader: { name: string; hostname: string; port: number; addresses: string[] } | null;
+  members: { name: string; listening: boolean; last_seen: number }[];
+  connected: boolean;
+  error: string;
 }
 
 export interface MusicStation {
@@ -146,6 +163,11 @@ export interface Playlist {
 export interface PlaybackStatus {
   failures: Record<string, { message: string; time: number }>;
   updated: number | null;
+  enabled?: boolean;
+  paused?: boolean;
+  transport_supported?: boolean;
+  transport_available?: boolean;
+  scene_title?: string;
 }
 
 export interface Network {
@@ -269,7 +291,10 @@ async function uploadUpdate(file: File): Promise<UpdateResult> {
   return (await response.json()) as UpdateResult;
 }
 
-export const api = {
+export type ApiRequest = typeof request;
+
+export function createApi(request: ApiRequest, upload: typeof uploadUpdate | null = uploadUpdate) {
+  return {
   health: () => request<{ paired: boolean }>("/health"),
   session: () => request<Session>("/api/session"),
   managerLogin: (token: string) => request<Session>("/api/admin-login", "POST", { token }),
@@ -284,13 +309,19 @@ export const api = {
   saveSleep: (schedule: SleepSchedule) => request<SleepConfig>("/api/sleep", "PUT", schedule),
   wake: (duration_minutes: number) => request<SleepConfig>("/api/sleep/wake", "POST", { duration_minutes }),
   playlist: () => request<Playlist>("/api/playlist"),
-  playlistStatus: () => request<PlaybackStatus>("/api/playlist/status"),
+  playlistStatus: (signal?: AbortSignal) => request<PlaybackStatus>("/api/playlist/status", "GET", undefined, signal),
+  controlCarousel: (action: "pause" | "resume" | "next") =>
+    request<{ ok: boolean }>("/api/playlist/control", "POST", { action }),
   remoteView: () => request<RemoteView>("/api/remote-view"),
   savePlaylist: (playlist: Playlist) => request<Playlist>("/api/playlist", "PUT", playlist),
   plexConfig: () => request<PlexConfig>("/api/plex/config"),
   musicConfig: (signal?: AbortSignal) => request<MusicConfig>("/api/plex/music", "GET", undefined, signal),
   controlMusic: (action: "play" | "pause" | "resume" | "stop" | "skip") =>
     request<MusicConfig>("/api/plex/music/control", "POST", { action }),
+  likeMusic: (ratingKey: string) =>
+    request<MusicConfig>("/api/plex/music/like", "POST", { rating_key: ratingKey }),
+  musicSync: () => request<MusicSyncStatus>("/api/music/sync"),
+  leaveMusicSync: () => request<MusicSyncStatus>("/api/music/sync", "PUT", { role: "off" }),
   musicStations: () => request<{ items: MusicStation[] }>("/api/plex/stations"),
   musicFilters: (library: string) =>
     request<MusicFilters>(`/api/plex/music/filters?${new URLSearchParams({ library })}`),
@@ -303,7 +334,8 @@ export const api = {
     for (const [key, value] of Object.entries(query)) params.set(key, String(value));
     return request<MusicBrowseResult>("/api/plex/music/browse" + (params.size ? `?${params}` : ""));
   },
-  saveMusicConfig: (config: { enabled: boolean; station_key: string; volume: number }) =>
+  saveMusicConfig: (config: { enabled: boolean; station_key: string; volume: number;
+    day_sources?: Record<Weekday, string> }) =>
     request<MusicConfig>("/api/plex/music", "PUT", config),
   railDataConfig: () => request<RailDataConfig>("/api/raildata/config"),
   weatherConfig: () => request<WeatherConfig>("/api/weather/config"),
@@ -348,5 +380,8 @@ export const api = {
     request<SshKeys>("/api/debug-keys", "POST", name ? { key, name } : { key }),
   removeDebugKey: (id: string) => request<SshKeys>("/api/debug-keys/" + id, "DELETE"),
   installUpdate: () => request<UpdateResult>("/api/update/install", "POST"),
-  uploadUpdate,
-};
+  uploadUpdate: upload,
+  };
+}
+
+export const api = createApi(request);
