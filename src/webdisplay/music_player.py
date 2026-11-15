@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import re
 import socket
 import subprocess
@@ -18,6 +19,7 @@ from .sleep import SleepRuntime
 
 LOG = logging.getLogger(__name__)
 MAX_ART_BYTES = 2 * 1024 * 1024
+ART_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif", "image/x-icon"}
 
 
 def track_details(track: dict, endpoint: str) -> dict[str, str]:
@@ -139,7 +141,7 @@ class MusicPlayer:
                 body = response.read(MAX_ART_BYTES + 1)
         except (OSError, ValueError):
             return None
-        if content_type not in {"image/jpeg", "image/png", "image/webp"} or not body or len(body) > MAX_ART_BYTES:
+        if content_type not in ART_TYPES or not body or len(body) > MAX_ART_BYTES:
             return None
         with self.lock:
             self._art_cache = (url, (body, content_type))
@@ -212,6 +214,8 @@ class MusicPlayer:
             self.mpv, "--no-config", "--no-terminal", "--no-video", "--idle=yes",
             "--ao=alsa", f"--audio-device={self.audio_output}", "--audio-pitch-correction=no",
             "--pause=yes", "--volume=0", f"--input-ipc-server={self.ipc_path}",
+            # Never seek backwards; a long radio session must not retain played audio.
+            "--demuxer-max-back-bytes=4MiB",
         ], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             start_new_session=True)
         for _ in range(50):
@@ -264,6 +268,7 @@ class MusicPlayer:
             self._command(["set_property", "pause", True])
             self._command(["set_property", "aid", "no" if self.paused else "auto"])
             self._command(["set_property", "volume", volume])
+            self._command(["set_property", "start", "none"])
             self._command(["loadfile", track["url"], "replace"])
             self.ended = None
             self._pause()
@@ -329,6 +334,13 @@ class MusicPlayer:
                                 if self.process is not None and self.ipc is not None:
                                     self._command(["stop"])
                                 self._now_playing = {"state": "waiting", "title": "", "artist": ""}
+                    with self.lock:
+                        if (track is not None and track.get("live") and (self.paused or self.user_paused)
+                                and self.process is not None):
+                            # Live radio cannot resume where it paused; reconnect at the live edge instead.
+                            previous = dict(self._now_playing)
+                            self._stop_player()
+                            self._now_playing = previous
                     if not endpoint or time.monotonic() < retry_at:
                         self.shutdown.wait(1)
                         continue
@@ -380,9 +392,13 @@ class MusicPlayer:
                     elif ended == "error":
                         raise OSError("Audio playback failed")
                     elif time.monotonic() >= timeline_at and (paused or position is not None):
-                        self._control(endpoint, "timeline", track_id=track["track_id"],
-                                      state="paused" if paused else "playing", time=int((position or 0) * 1000))
-                        timeline_at = time.monotonic() + 10
+                        reply = self._control(endpoint, "timeline", track_id=track["track_id"],
+                                              state="paused" if paused else "playing", time=int((position or 0) * 1000))
+                        if (track.get("live") and isinstance(reply, dict) and reply.get("track_id") == track["track_id"]
+                                and reply.get("url") == track["url"]):
+                            # Radio titles change mid-stream.
+                            track = reply
+                        timeline_at = time.monotonic() + (5 if track.get("live") else 10)
                     self.shutdown.wait(0.5)
                 except (OSError, ValueError, KeyError, TypeError) as error:
                     self._stop_player()
@@ -473,6 +489,7 @@ class MusicPlayer:
         # Run ahead of the group by the speaker's extra latency so sound leaves it in step.
         started_at = float(state["started_at"]) - getattr(self, "output_delay", 0.0)
         duration = float(state["duration"])
+        live = state.get("live") is True
         with self.lock:
             self._now_playing = {"state": "playing" if state["state"] == "playing" and not muted else "paused",
                                  "title": str(state.get("title", "")), "artist": str(state.get("artist", "")),
@@ -495,23 +512,40 @@ class MusicPlayer:
                 self._command(["set_property", "speed", 1.0])
                 self._command(["set_property", "volume", volume])
                 self._command(["set_property", "aid", "auto"])
-                target = max(0.0, time.time() - started_at + SYNC_PRIME)
-                self._command(["set_property", "start", f"{target:.3f}"])
+                target, offset = max(0.0, time.time() - started_at + SYNC_PRIME), 0.0
+                if live:
+                    # Live radio cannot seek: the relay starts the stream at a whole frame of the group's
+                    # timeline instead, and mpv's position counts from there.
+                    frame = float(state["frame_duration"])
+                    frames = math.ceil(target / frame)
+                    url, offset = f"{url}/{frames}", frames * frame
+                    self._command(["set_property", "start", "none"])
+                else:
+                    self._command(["set_property", "start", f"{target:.3f}"])
                 self._command(["loadfile", url, "replace"])
                 self.ended = None
-                self.sync.update(track=state["track_id"], armed=False, volume=volume)
+                self.sync.update(track=state["track_id"], armed=False, volume=volume, offset=offset)
                 return
+            started_at += self.sync.get("offset", 0.0)
             if self.sync.get("volume") != volume:
                 self._command(["set_property", "volume", volume])
                 self.sync["volume"] = volume
             position = self._command(["get_property", "time-pos"])
             if self.ended == "error":
                 raise OSError("Audio playback failed")
+            if live and self.ended == "eof":
+                # The relay ended the stream (the station dropped); rejoin the group's timeline.
+                self.sync["track"] = None
+                return
             if position is None:
                 return
             expected = time.time() - started_at
             if not self.sync["armed"]:
                 wait = started_at + position - time.time()
+                if live and wait < -SYNC_SEEK_THRESHOLD:
+                    self._silence()
+                    self.sync["track"] = None
+                    return
                 if wait < -SYNC_SEEK_THRESHOLD or position >= max(duration - 0.5, 0.0) > 0:
                     # Too late to start from the primed point; prime again ahead of the group.
                     self._command(["seek", f"{max(0.0, expected + SYNC_PRIME):.3f}", "absolute+exact"])

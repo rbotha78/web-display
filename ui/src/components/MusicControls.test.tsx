@@ -140,3 +140,14 @@ test("reports a polling outage once instead of repeating notifications", async (
   expect(screen.getByText("Play")).toHaveProperty("disabled", true);
   expect(screen.getByRole("button", { name: "Like song in Plex" })).toHaveProperty("disabled", true);
 });
+
+test("live radio hides like and skip but keeps pause and stop", async () => {
+  vi.spyOn(api, "musicConfig").mockResolvedValue({ ...playing, station_key: "radio:96062a7b-0601-11e8-ae97-52543be04c81",
+    status: { state: "playing", title: "Song", artist: "Singer", error: "", paused_by_user: false, source: "radio" } });
+  render(<MusicControls fail={vi.fn()} onEnabledChange={vi.fn()} />);
+  await screen.findByText("Song");
+  expect(screen.queryByRole("button", { name: "Like song in Plex" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Skip" })).toBeNull();
+  expect(screen.getByRole("button", { name: "Pause" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Stop" })).toBeTruthy();
+});

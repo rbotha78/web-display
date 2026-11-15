@@ -321,7 +321,8 @@ private fun PlexSection(state: SettingsState, editor: SettingsSession, working: 
     }
 }
 
-private fun musicSourceTitle(key: String, stations: List<MusicStation>): String? {
+private fun musicSourceTitle(key: String, stations: List<MusicStation>, radio: List<RadioStation>): String? {
+    radio.firstOrNull { "radio:${it.id}" == key }?.let { return "Radio: ${it.name}" }
     stations.firstOrNull { it.key == key }?.let {
         return "${it.library}: ${it.title}" + if (it.smart) " (smart playlist)" else ""
     }
@@ -330,12 +331,13 @@ private fun musicSourceTitle(key: String, stations: List<MusicStation>): String?
     return "Custom $kind mix ($count selections)"
 }
 
-private fun musicSourceOptions(emptyTitle: String, selected: String, stations: List<MusicStation>): List<Pair<String, String>> =
+private fun musicSourceOptions(emptyTitle: String, selected: String, stations: List<MusicStation>, radio: List<RadioStation>): List<Pair<String, String>> =
     buildList {
         add("" to emptyTitle)
-        stations.forEach { add(it.key to (musicSourceTitle(it.key, stations) ?: it.title)) }
+        stations.forEach { add(it.key to (musicSourceTitle(it.key, stations, radio) ?: it.title)) }
+        radio.forEach { add("radio:${it.id}" to "Radio: ${it.name}") }
         if (selected.isNotEmpty() && none { it.first == selected }) {
-            add(selected to (musicSourceTitle(selected, stations) ?: "Saved music source (currently unavailable)"))
+            add(selected to (musicSourceTitle(selected, stations, radio) ?: "Saved music source (currently unavailable)"))
         }
     }
 
@@ -345,10 +347,7 @@ private fun MusicSection(state: SettingsState, editor: SettingsSession, working:
         onConflictOverwrite = { editor.saveMusic(force = true) }) { server, draft ->
         draft ?: return@SectionCard
         val configured = state.plex.server?.configured == true
-        if (!configured) {
-            Hint("Configure Plex above to choose background music.")
-            return@SectionCard
-        }
+        if (!configured) Hint("Plex is not configured. Internet radio can play without Plex.")
         val status = server.status
         Text("Status: ${status.state}" + status.title.takeIf { it.isNotBlank() }?.let { " · $it" }.orEmpty())
         if (status.error.isNotBlank()) ErrorText(status.error)
@@ -357,39 +356,45 @@ private fun MusicSection(state: SettingsState, editor: SettingsSession, working:
             OutlinedButton(onClick = { editor.musicControl(primary) }, enabled = !working && server.stationKey.isNotEmpty()) {
                 Text(primary.replaceFirstChar { it.uppercase() })
             }
-            OutlinedButton(onClick = { editor.musicControl("skip") }, enabled = !working && server.enabled) { Text("Skip") }
+            if (status.source != "radio") OutlinedButton(onClick = { editor.musicControl("skip") }, enabled = !working && server.enabled) { Text("Skip") }
             OutlinedButton(onClick = { editor.musicControl("stop") }, enabled = !working && server.enabled) { Text("Stop") }
-            OutlinedButton(onClick = editor::likeMusic,
-                enabled = !working && status.ratingKey.isNotEmpty() && !status.liked) {
-                Text(if (status.liked) "Liked" else "Like song")
+            if (status.source != "radio") {
+                OutlinedButton(onClick = editor::likeMusic,
+                    enabled = !working && status.ratingKey.isNotEmpty() && !status.liked) {
+                    Text(if (status.liked) "Liked" else "Like song")
+                }
             }
             TextButton(onClick = editor::refreshMusic, enabled = !state.music.loading) { Text("Refresh status") }
         }
         Hint("Transport buttons act immediately on the saved music source; they do not save the draft below.")
         val stations = state.stations
         val list = stations.server
-        when {
-            list != null -> ChoiceField("Music source", musicSourceOptions("No music source", draft.stationKey, list),
-                draft.stationKey, { v -> editor.editMusic { it.copy(stationKey = v) } })
-            stations.loading -> Hint("Loading Plex music sources…")
-            else -> {
+        val radio = draft.radioStations.orEmpty()
+        ChoiceField("Music source", musicSourceOptions("No music source", draft.stationKey, list.orEmpty(), radio),
+            draft.stationKey, { v -> editor.editMusic { it.copy(stationKey = v) } },
+            enabled = !working && (list != null || radio.isNotEmpty()))
+        if (configured && list == null) {
+            if (stations.loading) Hint("Loading Plex music sources…") else {
                 ErrorText(stations.error ?: "Music sources unavailable")
                 TextButton(onClick = { editor.reload(SettingsPart.STATIONS) }) { Text("Retry music sources") }
             }
         }
+        if (draft.radioStations != null) RadioSettings(editor, draft, working)
         if (server.supportsDaySources) {
             Text("Weekday sources", fontWeight = FontWeight.SemiBold)
             Hint("Days switch at midnight; a playing song finishes first. Saving a change to today's source restarts playback immediately.")
-            musicSourceTitle(server.activeStationKey, list.orEmpty())?.let { Hint("Playing today: $it") }
+            musicSourceTitle(server.activeStationKey, list.orEmpty(), radio)?.let { Hint("Playing today: $it") }
             SettingsRules.DAYS.forEach { day ->
                 val selected = draft.daySources.getValue(day)
                 val label = day.replaceFirstChar { it.uppercase() } + if (day == server.activeDay) " (today)" else ""
-                ChoiceField(label, musicSourceOptions("Use default source", selected, list.orEmpty()), selected,
-                    { value -> editor.editMusic { it.copy(daySources = it.daySources + (day to value)) } }, enabled = list != null)
+                ChoiceField(label, musicSourceOptions("Use default source", selected, list.orEmpty(), radio), selected,
+                    { value -> editor.editMusic { it.copy(daySources = it.daySources + (day to value)) } }, enabled = !working && (list != null || radio.isNotEmpty()))
             }
         }
-        MusicBuilders(state, editor, draft, working)
-        CheckRow("Play background music", draft.enabled, { v -> editor.editMusic { it.copy(enabled = v) } }, switch = true)
+        if (configured) MusicBuilders(state, editor, draft, working)
+        val playable = draft.stationKey.isNotEmpty() && (configured || draft.stationKey.startsWith("radio:"))
+        CheckRow("Play background music", draft.enabled, { v -> editor.editMusic { it.copy(enabled = v) } },
+            enabled = !working && (playable || draft.enabled), switch = true)
         Text("Volume: ${draft.volume}%")
         Slider(
             value = draft.volume.toFloat(),

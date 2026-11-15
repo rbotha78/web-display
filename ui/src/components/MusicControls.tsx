@@ -74,6 +74,8 @@ export function MusicControls({ fail, onEnabledChange, inline = false, label }: 
   const available = connection === "ready";
   const paused = config?.status.paused_by_user === true;
   const liked = config?.status.liked === true;
+  // Live radio has no song to like in Plex or skip.
+  const radio = config?.status.source === "radio";
   const action = !config?.enabled ? "play" : paused ? "resume" : "pause";
   const state = !available ? (connection === "unavailable" ? "Player unavailable" : "Loading music player...") :
     sleeping ? "Music is sleeping" : !config?.enabled ? "Music stopped" :
@@ -92,7 +94,7 @@ export function MusicControls({ fail, onEnabledChange, inline = false, label }: 
         {available && !config?.station_key && <small>Choose a music source in Global settings.</small>}
       </div>
       <div className="music-controls-buttons">
-        <button type="button" className={`music-like${liked ? " liked" : " ghost"}`}
+        {!radio && <button type="button" className={`music-like${liked ? " liked" : " ghost"}`}
           aria-label="Like song in Plex" aria-pressed={liked}
           title={liked ? "Liked in Plex (5 stars)" : "Rate this song 5 stars in Plex"}
           disabled={busy || !available || sleeping || !config?.enabled || !config.status.rating_key || liked}
@@ -100,13 +102,14 @@ export function MusicControls({ fail, onEnabledChange, inline = false, label }: 
           <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
             <path d="M12 21 3.5 12.5C-3 6 6 0 12 6c6-6 15 0 8.5 6.5Z" />
           </svg>
-        </button>
+        </button>}
         <button type="button" disabled={busy || !available || sleeping || !config?.station_key}
           onClick={() => void control(action)}>{action === "play" ? "Play" : action === "resume" ? "Resume" : "Pause"}</button>
         <button type="button" disabled={busy || !available || !config?.enabled}
           onClick={() => void control("stop")}>Stop</button>
-        <button type="button" disabled={busy || !available || sleeping || !config?.enabled || !config.status.title}
-          onClick={() => void control("skip")}>Skip</button>
+        {!radio && <button type="button"
+          disabled={busy || !available || sleeping || !config?.enabled || !config.status.title}
+          onClick={() => void control("skip")}>Skip</button>}
       </div>
     </section>
   </>;

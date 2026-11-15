@@ -134,7 +134,7 @@ internal fun PlayerControls(
                 onClick = { onCommand(PlayerCommand.Music(primary)) },
                 enabled = musicReady && !music?.stationKey.isNullOrBlank(),
             ) { Text(primary.replaceFirstChar { it.uppercase() }) }
-            OutlinedButton(
+            if (music?.status?.source != "radio") OutlinedButton(
                 onClick = { onCommand(PlayerCommand.Music("skip")) },
                 enabled = musicReady && music?.enabled == true,
             ) { Text("Skip") }
@@ -143,7 +143,7 @@ internal fun PlayerControls(
                 enabled = musicReady && music?.enabled == true,
             ) { Text("Stop") }
             val track = music?.status
-            OutlinedButton(
+            if (track?.source != "radio") OutlinedButton(
                 onClick = { track?.let { onCommand(PlayerCommand.Like(it.ratingKey)) } },
                 enabled = musicReady && track != null && track.ratingKey.matches(Regex("[0-9]{1,20}")) && !track.liked,
             ) { Text(if (track?.liked == true) "Liked" else "Like song") }
@@ -245,7 +245,7 @@ internal fun GroupPlayer(
                 OutlinedButton(onClick = { onCommand(leader.id, PlayerCommand.Music(primary)) },
                     enabled = ready && !music?.stationKey.isNullOrBlank(),
                 ) { Text(primary.replaceFirstChar { it.uppercase() }) }
-                OutlinedButton(onClick = { onCommand(leader.id, PlayerCommand.Music("skip")) },
+                if (music?.status?.source != "radio") OutlinedButton(onClick = { onCommand(leader.id, PlayerCommand.Music("skip")) },
                     enabled = ready && music?.enabled == true) { Text("Skip") }
                 OutlinedButton(onClick = { onCommand(leader.id, PlayerCommand.Music("stop")) },
                     enabled = ready && music?.enabled == true) { Text("Stop") }

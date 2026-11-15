@@ -88,15 +88,33 @@ export interface PlexConfig {
 export const WEEKDAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"] as const;
 export type Weekday = typeof WEEKDAYS[number];
 
+export interface RadioStation {
+  id: string;
+  name: string;
+  url: string;
+  favicon: string;
+  country: string;
+  codec: string;
+  bitrate: number;
+  tags?: string;
+}
+
+export interface RadioSearchResult {
+  items: RadioStation[];
+  offset: number;
+  more: boolean;
+}
+
 export interface MusicConfig {
   enabled: boolean;
   station_key: string;
   volume: number;
   day_sources?: Record<Weekday, string>;
+  radio_stations?: RadioStation[];
   active_day?: Weekday;
   active_station_key?: string;
   status: { state: string; title: string; artist?: string; error: string; paused_by_user?: boolean;
-    rating_key?: string; liked?: boolean };
+    rating_key?: string; liked?: boolean; source?: "radio" };
 }
 
 export interface MusicSyncStatus {
@@ -364,8 +382,13 @@ export function createApi(request: ApiRequest, upload: typeof uploadUpdate | nul
     return request<MusicBrowseResult>("/api/plex/music/browse" + (params.size ? `?${params}` : ""));
   },
   saveMusicConfig: (config: { enabled: boolean; station_key: string; volume: number;
-    day_sources?: Record<Weekday, string> }) =>
+    day_sources?: Record<Weekday, string>; radio_stations?: RadioStation[] }) =>
     request<MusicConfig>("/api/plex/music", "PUT", config),
+  radioSearch: (query: { name?: string; tag?: string; country?: string; offset?: number }) => {
+    const params = new URLSearchParams();
+    for (const [key, value] of Object.entries(query)) if (value !== undefined && value !== "") params.set(key, String(value));
+    return request<RadioSearchResult>(`/api/radio/search?${params}`);
+  },
   railDataConfig: () => request<RailDataConfig>("/api/raildata/config"),
   weatherConfig: () => request<WeatherConfig>("/api/weather/config"),
   saveWeatherConfig: (config: {

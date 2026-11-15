@@ -17,7 +17,7 @@ from webdisplay.music import MusicRelay, validate_music
 from webdisplay.sleep import DAYS, default_schedule
 from webdisplay.storage import atomic_write
 
-NO_DAYS = {"day_sources": {day: "" for day in DAYS}}
+NO_DAYS = {"day_sources": {day: "" for day in DAYS}, "radio_stations": []}
 
 
 class FakePlexHandler(http.server.BaseHTTPRequestHandler):

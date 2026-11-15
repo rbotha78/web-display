@@ -276,3 +276,33 @@ test("shows the follower's music group and leaves it", async () => {
   expect(leave).toHaveBeenCalled();
   expect(screen.queryByText("Music sync: following Kitchen")).toBeNull();
 });
+
+test("searches Radio Browser, saves a favourite and plays it without Plex", async () => {
+  const station = { id: "96062a7b-0601-11e8-ae97-52543be04c81", name: "Groove Salad", url: "https://ice.invalid/gs",
+    favicon: "", country: "The United States Of America", codec: "MP3", bitrate: 128, tags: "ambient" };
+  const config = { enabled: false, station_key: "", volume: 30, radio_stations: [],
+    status: { state: "disabled", title: "", error: "" } };
+  vi.spyOn(api, "musicConfig").mockResolvedValue(config);
+  const stations = vi.spyOn(api, "musicStations").mockResolvedValue({ items: [] });
+  const search = vi.spyOn(api, "radioSearch").mockResolvedValue({ items: [station], offset: 0, more: false });
+  const save = vi.spyOn(api, "saveMusicConfig").mockImplementation(async (settings) => ({ ...config, ...settings }));
+  render(<MusicCard configured={false} notify={vi.fn()} fail={vi.fn()} />);
+  await screen.findByText("Music: disabled");
+  expect(stations).not.toHaveBeenCalled();
+  fireEvent.change(screen.getByLabelText("Genre"), { target: { value: "ambient" } });
+  fireEvent.change(screen.getByLabelText("Country code"), { target: { value: "us " } });
+  fireEvent.click(screen.getByText("Search radio"));
+  await waitFor(() => expect(search).toHaveBeenCalledWith({ name: "", tag: "ambient", country: "us", offset: 0 }));
+  fireEvent.click(await screen.findByRole("button", { name: "Add Groove Salad" }));
+  expect(screen.getByText("Added")).toBeTruthy();
+  expect(screen.getByLabelText("Music source")).toHaveProperty("value", `radio:${station.id}`);
+  fireEvent.click(screen.getByLabelText("Enable background music"));
+  fireEvent.click(screen.getByText("Save music settings"));
+  const { tags: _tags, ...saved } = station;
+  await waitFor(() => expect(save).toHaveBeenCalledWith(expect.objectContaining({
+    enabled: true, station_key: `radio:${station.id}`, radio_stations: [saved],
+  })));
+  fireEvent.click(screen.getByRole("button", { name: "Remove Groove Salad" }));
+  expect(screen.getByLabelText("Music source")).toHaveProperty("value", "");
+  expect((screen.getByLabelText("Enable background music") as HTMLInputElement).checked).toBe(false);
+});

@@ -44,18 +44,24 @@ data class MusicStatus(
     val ratingKey: String,
     val liked: Boolean,
     val artist: String = "",
+    val source: String = "",
 )
 data class MusicSettings(
     val enabled: Boolean, val stationKey: String, val volume: Int, val status: MusicStatus,
     val daySources: Map<String, String> = SettingsRules.DAYS.associateWith { "" },
     val supportsDaySources: Boolean = false,
     val activeDay: String = "", val activeStationKey: String = "",
+    val radioStations: List<RadioStation>? = null,
 )
 data class MusicDraft(
     val enabled: Boolean, val stationKey: String, val volume: Int,
     val daySources: Map<String, String> = SettingsRules.DAYS.associateWith { "" },
     val supportsDaySources: Boolean = false,
+    val radioStations: List<RadioStation>? = null,
 )
+data class RadioStation(val id: String, val name: String, val url: String, val favicon: String, val country: String, val codec: String, val bitrate: Int)
+data class RadioSearchItem(val station: RadioStation, val tags: String)
+data class RadioSearchResult(val items: List<RadioSearchItem>, val offset: Int, val more: Boolean)
 data class MusicStation(val key: String, val title: String, val library: String, val kind: String, val smart: Boolean)
 data class MusicBrowseItem(val id: String, val title: String, val type: String, val artist: String)
 data class MusicBrowseResult(val items: List<MusicBrowseItem>, val total: Int, val offset: Int)
@@ -149,6 +155,7 @@ object SettingsRules {
     private val SCENE_ID = Regex("[A-Za-z0-9_-]{1,64}")
     private val CRS = Regex("[A-Za-z]{3}")
     private val HOSTNAME = Regex("[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?")
+    private val RADIO_KEY = Regex("radio:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
     private val STATION_KEY = Regex("/library/sections/[0-9]{1,10}/stations/(?:1|2|3|8)")
     private val PLAYLIST_KEY = Regex("/playlists/[0-9]{1,20}/items")
     private val MIX_KEY = Regex("mix:(artist|album):([0-9]{1,20}(?:,[0-9]{1,20}){0,19})")
@@ -221,12 +228,49 @@ object SettingsRules {
             json.bool("enabled"), json.str("station_key"), json.int("volume"),
             MusicStatus(
                 status.optString("state", "unknown"), status.optString("title"), status.optString("error"),
-                status.optBoolean("paused_by_user"), status.optString("rating_key"), status.optBoolean("liked"), status.optString("artist"),
+                status.optBoolean("paused_by_user"), status.optString("rating_key"), status.optBoolean("liked"), status.optString("artist"), status.optString("source"),
             ),
             daySources = DAYS.associateWith { day -> days?.str(day) ?: "" },
             supportsDaySources = supportsDaySources,
             activeDay = json.optString("active_day"), activeStationKey = json.optString("active_station_key"),
+            radioStations = if (json.has("radio_stations") && !json.isNull("radio_stations")) json.objects("radio_stations").map(::parseRadioStation) else null,
         )
+    }
+
+    private fun parseRadioStation(json: JSONObject) = RadioStation(
+        json.str("id"), json.str("name"), json.str("url"), json.str("favicon"),
+        json.str("country"), json.str("codec"), json.int("bitrate"),
+    )
+
+    fun parseRadioSearch(json: JSONObject): RadioSearchResult = parsing("radio search") {
+        RadioSearchResult(json.objects("items").map { RadioSearchItem(parseRadioStation(it), it.optString("tags")) },
+            json.int("offset"), json.bool("more"))
+    }
+
+    fun radioSearchPath(name: String, tag: String, country: String, offset: Int): String {
+        val terms = listOf("name" to name.trim(), "tag" to tag.trim(), "country" to country.trim())
+        val params = terms.filter { it.second.isNotEmpty() }.map { (key, value) ->
+            "$key=${java.net.URLEncoder.encode(value, "UTF-8")}"
+        }
+        return "/api/radio/search?" + (params + "offset=$offset").joinToString("&")
+    }
+
+    fun mergeRadioResults(previous: RadioSearchResult?, next: RadioSearchResult): RadioSearchResult =
+        next.copy(items = (previous?.items.orEmpty() + next.items).distinctBy { it.station.id })
+
+    fun addRadioStation(draft: MusicDraft, station: RadioStation): MusicDraft {
+        val stations = draft.radioStations ?: return draft
+        if (stations.size >= 50 || stations.any { it.id == station.id }) return draft
+        return draft.copy(radioStations = stations + station,
+            stationKey = draft.stationKey.ifEmpty { "radio:${station.id}" })
+    }
+
+    fun removeRadioStation(draft: MusicDraft, id: String): MusicDraft {
+        val key = "radio:$id"
+        return draft.copy(radioStations = draft.radioStations?.filterNot { it.id == id },
+            stationKey = if (draft.stationKey == key) "" else draft.stationKey,
+            enabled = draft.enabled && draft.stationKey != key,
+            daySources = draft.daySources.mapValues { (_, source) -> if (source == key) "" else source })
     }
 
     fun parseStations(json: JSONObject): List<MusicStation> = parsing("music source") {
@@ -351,7 +395,7 @@ object SettingsRules {
         DisplayDraft(config.url, config.autoAp, config.safeAreaPercent.toString(), config.audioOutput, config.apCheck)
     fun plexDraft(settings: PlexSettings) = PlexDraft(settings.serverUrl, settings.defaultBitrate.toString())
     fun musicDraft(settings: MusicSettings) = MusicDraft(
-        settings.enabled, settings.stationKey, settings.volume, settings.daySources, settings.supportsDaySources,
+        settings.enabled, settings.stationKey, settings.volume, settings.daySources, settings.supportsDaySources, settings.radioStations,
     )
     fun railDraft(settings: RailSettings) = RailDraft("", "", settings.refreshSeconds.toString())
     fun weatherDraft(settings: WeatherSettings) = WeatherDraft(settings.city, settings.country)
@@ -430,7 +474,7 @@ object SettingsRules {
     fun musicPayload(draft: MusicDraft): JSONObject {
         require(draft.volume in 0..100) { "Music volume must be an integer from 0 to 100" }
         require(draft.stationKey.isEmpty() || validMusicSource(draft.stationKey)) {
-            "Select a Plex station, audio playlist, or artist/album mix"
+            "Select a Plex or radio music source"
         }
         require(!draft.enabled || draft.stationKey.isNotEmpty()) { "Select a music source before enabling playback" }
         val body = JSONObject().put("enabled", draft.enabled).put("station_key", draft.stationKey).put("volume", draft.volume)
@@ -443,6 +487,14 @@ object SettingsRules {
                 days.put(day, source)
             }
             body.put("day_sources", days)
+        }
+        draft.radioStations?.let { stations ->
+            require(stations.size <= 50 && stations.map { it.id }.distinct().size == stations.size) { "Choose up to 50 unique radio stations" }
+            body.put("radio_stations", JSONArray().apply {
+                stations.forEach { station -> put(JSONObject().put("id", station.id).put("name", station.name)
+                    .put("url", station.url).put("favicon", station.favicon).put("country", station.country)
+                    .put("codec", station.codec).put("bitrate", station.bitrate)) }
+            })
         }
         return body
     }
@@ -470,7 +522,7 @@ object SettingsRules {
     fun mixKind(stationKey: String): String? = MIX_KEY.matchEntire(stationKey)?.groupValues?.get(1)
 
     fun validMusicSource(key: String) =
-        listOf(STATION_KEY, PLAYLIST_KEY, MIX_KEY, ADVERTISED_MIX_KEY).any { it.matches(key) }
+        listOf(STATION_KEY, PLAYLIST_KEY, MIX_KEY, ADVERTISED_MIX_KEY, RADIO_KEY).any { it.matches(key) }
 
     fun railPayload(draft: RailDraft): JSONObject {
         val refresh = draft.refreshSeconds.trim().toIntOrNull()

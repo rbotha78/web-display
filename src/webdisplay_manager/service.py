@@ -22,7 +22,7 @@ SETTINGS_PATHS = {
         "/api/status", "/api/network", "/api/plex/config", "/api/plex/music", "/api/plex/stations",
         "/api/plex/browse", "/api/plex/music/browse", "/api/plex/music/filters",
         "/api/raildata/config", "/api/weather/config", "/api/update/status", "/api/debug-keys",
-        "/api/music/sync", "/api/bluetooth",
+        "/api/music/sync", "/api/bluetooth", "/api/radio/search",
     },
     "PUT": {
         "/api/config", "/api/sleep", "/api/playlist", "/api/plex/config", "/api/plex/music",
@@ -382,6 +382,7 @@ class Manager:
         if (not allowed or parsed.scheme or parsed.netloc or parsed.fragment
                 or (parsed.query and (method != "GET" or parsed.path not in {
                     "/api/plex/browse", "/api/plex/music/browse", "/api/plex/music/filters",
+                    "/api/radio/search",
                 }))):
             raise ValueError("This operation is not available in manager configuration")
         if (method == "GET" and body is not None) or (method != "GET" and not isinstance(body, dict)):

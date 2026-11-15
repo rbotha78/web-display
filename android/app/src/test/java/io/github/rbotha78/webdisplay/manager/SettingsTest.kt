@@ -221,6 +221,45 @@ class SettingsTest {
         }
     }
 
+    @Test
+    fun radioParsesAndSerializesWithoutSearchTagsAndSupportsOldFirmware() {
+        val id = "12345678-1234-1234-1234-123456789abc"
+        val json = JSONObject().put("id", id).put("name", "Jazz").put("url", "https://example.com/stream")
+            .put("favicon", "").put("country", "GB").put("codec", "MP3").put("bitrate", 128).put("tags", "jazz")
+        val page = SettingsRules.parseRadioSearch(JSONObject().put("items", JSONArray().put(json)).put("offset", 0).put("more", true))
+        val config = musicJson().put("radio_stations", JSONArray().put(json)).put("status", JSONObject().put("source", "radio"))
+        val parsed = SettingsRules.parseMusic(config)
+        assertEquals("radio", parsed.status.source)
+        val draft = SettingsRules.musicDraft(parsed).copy(stationKey = "radio:$id")
+        val saved = SettingsRules.musicPayload(draft).getJSONArray("radio_stations").getJSONObject(0)
+        assertFalse(saved.has("tags"))
+        assertEquals(page.items.first().station, SettingsRules.parseMusic(config.put("radio_stations", JSONArray().put(saved))).radioStations!!.first())
+        assertNull(SettingsRules.parseMusic(musicJson()).radioStations)
+        assertFalse(SettingsRules.musicPayload(SettingsRules.musicDraft(SettingsRules.parseMusic(musicJson()))).has("radio_stations"))
+        assertEquals("/api/radio/search?name=New+Jazz&country=GB&offset=30", SettingsRules.radioSearchPath(" New Jazz ", " ", " GB ", 30))
+        assertEquals(1, SettingsRules.mergeRadioResults(page, page.copy(offset = 30)).items.size)
+    }
+
+    @Test
+    fun radioDraftAddRemoveAndLimit() {
+        val station = RadioStation("12345678-1234-1234-1234-123456789abc", "Jazz", "https://example.com", "", "GB", "AAC", 128)
+        val blank = MusicDraft(false, "", 50, radioStations = emptyList())
+        val added = SettingsRules.addRadioStation(blank, station)
+        val key = "radio:${station.id}"
+        assertEquals(key, added.stationKey)
+        assertEquals(added, SettingsRules.addRadioStation(added, station))
+        val scheduled = added.copy(enabled = true, daySources = added.daySources + ("monday" to key) + ("tuesday" to "/playlists/2/items"))
+        val removed = SettingsRules.removeRadioStation(scheduled, station.id)
+        assertFalse(removed.enabled)
+        assertEquals("", removed.stationKey)
+        assertEquals("", removed.daySources["monday"])
+        assertEquals("/playlists/2/items", removed.daySources["tuesday"])
+        val other = scheduled.copy(stationKey = "/playlists/1/items")
+        assertTrue(SettingsRules.removeRadioStation(other, station.id).enabled)
+        val full = blank.copy(radioStations = (1..50).map { station.copy(id = it.toString()) })
+        assertEquals(full, SettingsRules.addRadioStation(full, station))
+    }
+
     // ---------- Session behaviour ----------
 
     private class FakeBackend : SettingsBackend {

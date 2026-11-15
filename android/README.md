@@ -28,6 +28,12 @@ names are informational (not device identities). Unenrolled or unknown-state
 members cannot be cleared here; reconnect/refresh, enroll them, or clear their
 roles separately. A group with no known leader can only clear its known followers.
 
+Background music settings support Internet radio on firmware that reports radio
+stations. Search Radio Browser by station name or genre and optional country code,
+then add up to 50 stations and save the music settings. Radio and weekday radio
+sources work without Plex; live radio has no Like or Skip. Older firmware hides
+this section. Plex mix builders and smart playlists still require Plex.
+
 Build and validate with Java 17 and the Android SDK:
 
 ```sh

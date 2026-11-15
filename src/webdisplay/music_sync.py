@@ -205,6 +205,27 @@ class LeaderClient:
             return payload
         raise LeaderError("Cannot reach the leader display" + (f" ({errors[-1]})" if errors else ""))
 
+    def stream(self, path: str, timeout: float = 15):
+        """Open a long-lived GET (the group's radio audio); returns (connection, response)."""
+        errors = []
+        for host in list(self.hosts):
+            connection = _PinnedConnection(host, int(self.leader["port"]), str(self.leader["fingerprint"]), timeout)
+            try:
+                connection.request("GET", path, headers={"X-Music-Sync-Token": self.token})
+                response = connection.getresponse()
+            except LeaderError:
+                connection.close()
+                raise
+            except (OSError, http.client.HTTPException, ssl.SSLError) as error:
+                connection.close()
+                errors.append(f"{host}: {error}")
+                continue
+            if response.status != 200:
+                connection.close()
+                raise LeaderError(f"The leader returned HTTP {response.status}")
+            return connection, response
+        raise LeaderError("Cannot reach the leader display" + (f" ({errors[-1]})" if errors else ""))
+
 
 class ClockOffset:
     """Estimate leader-minus-local clock offset from request round trips (lowest RTT wins)."""

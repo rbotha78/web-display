@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { WEEKDAYS, type MusicBrowseItem, type MusicBrowseResult, type MusicConfig, type MusicStation,
-  type MusicSyncStatus, type Weekday } from "../api";
+  type MusicSyncStatus, type RadioSearchResult, type RadioStation, type Weekday } from "../api";
 import { useDeviceApi } from "../DeviceApiContext";
 import type { Notice } from "./Toast";
 import { SmartPlaylistBuilder } from "./SmartPlaylistBuilder";
@@ -31,6 +31,10 @@ export function MusicCard({ configured, notify, fail, playbackConfig }: {
   const [smartBuilder, setSmartBuilder] = useState(false);
   const [days, setDays] = useState<Record<Weekday, string> | null>(null);
   const [sync, setSync] = useState<MusicSyncStatus | null>(null);
+  const [radioStations, setRadioStations] = useState<RadioStation[] | null>(null);
+  const [radioTerms, setRadioTerms] = useState({ name: "", tag: "", country: "" });
+  const [radioResults, setRadioResults] = useState<RadioSearchResult | null>(null);
+  const [radioSearching, setRadioSearching] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -54,6 +58,7 @@ export function MusicCard({ configured, notify, fail, playbackConfig }: {
       setEnabled(value.enabled);
       setVolume(value.volume);
       setDays(value.day_sources ? { ...value.day_sources } : null);
+      setRadioStations(value.radio_stations ? [...value.radio_stations] : null);
       if (configured && value.station_key.startsWith("mix:")) {
         setLoadingSaved(true);
         api.musicBrowse({ key: value.station_key }).then((mix) => {
@@ -104,7 +109,7 @@ export function MusicCard({ configured, notify, fail, playbackConfig }: {
     setBusy(true);
     try {
       const saved = await api.saveMusicConfig({ enabled, station_key: station, volume,
-        ...(days ? { day_sources: days } : {}) });
+        ...(days ? { day_sources: days } : {}), ...(radioStations ? { radio_stations: radioStations } : {}) });
       setConfig(saved);
       notify(saved.enabled ? "Background music enabled." : "Background music disabled.", "success");
     } catch (error) {
@@ -131,7 +136,53 @@ export function MusicCard({ configured, notify, fail, playbackConfig }: {
     setStation(items.length ? `mix:${builder}:${items.map((item) => item.id).join(",")}` : "");
   }
 
+  async function searchRadio(offset = 0) {
+    setRadioSearching(true);
+    try {
+      const result = await api.radioSearch({ ...radioTerms, country: radioTerms.country.trim(), offset });
+      setRadioResults(offset && radioResults
+        ? { ...result, items: [...radioResults.items, ...result.items.filter(
+          (item) => !radioResults.items.some((current) => current.id === item.id))] }
+        : result);
+    } catch (error) {
+      fail(error);
+    } finally {
+      setRadioSearching(false);
+    }
+  }
+
+  function addRadio(item: RadioStation) {
+    if (!radioStations || radioStations.some((current) => current.id === item.id)) return;
+    const { tags: _tags, ...saved } = item;
+    setRadioStations([...radioStations, saved]);
+    if (!station) setStation(`radio:${item.id}`);
+  }
+
+  function removeRadio(item: RadioStation) {
+    const key = `radio:${item.id}`;
+    setRadioStations((radioStations ?? []).filter((current) => current.id !== item.id));
+    if (station === key) {
+      setStation("");
+      setEnabled(false);
+    }
+    if (days) {
+      setDays(Object.fromEntries(WEEKDAYS.map((day) => [day, days[day] === key ? "" : days[day]])) as
+        Record<Weekday, string>);
+    }
+  }
+
+  const radioOptions = (radioStations ?? []).map((item) =>
+    <option key={item.id} value={`radio:${item.id}`}>Radio: {item.name}</option>);
+  const knownSource = (key: string) => stations.some((item) => item.key === key) ||
+    (radioStations ?? []).some((item) => `radio:${item.id}` === key);
+  // Radio stations play without Plex; Plex sources need a connected server.
+  const playable = Boolean(station) && (configured || station.startsWith("radio:"));
+
   function sourceLabel(key: string) {
+    if (key.startsWith("radio:")) {
+      const item = (radioStations ?? []).find((current) => `radio:${current.id}` === key);
+      return item ? `Radio: ${item.name}` : "Saved radio station (removed)";
+    }
     if (key.startsWith("mix:")) {
       return `Custom ${key.split(":")[1]} mix (${key.split(":")[2].split(",").length} selections)`;
     }
@@ -160,7 +211,7 @@ export function MusicCard({ configured, notify, fail, playbackConfig }: {
 
   return <form className="card wide" onSubmit={save}>
     <h2>Background music</h2>
-    <p className="muted">Plex radio, music playlists and custom mixes play across scene changes,
+    <p className="muted">Internet radio, Plex radio, music playlists and custom mixes play across scene changes,
       pause for videos with audio, and resume afterwards. Choose a source and enable music to play it.</p>
     {syncText && <div className="music-sync-status">
       <p role="status">{syncText}</p>
@@ -171,7 +222,8 @@ export function MusicCard({ configured, notify, fail, playbackConfig }: {
       <button type="button" disabled={busy} onClick={leaveGroup}>Leave group</button>
     </div>}
     <label>Music source
-      <select value={station} disabled={!configured || busy || !config || loadingSaved} onChange={(event) => {
+      <select value={station} disabled={busy || !config || loadingSaved || (!configured && !radioStations?.length)}
+        onChange={(event) => {
         setStation(event.target.value);
         setBuilder("");
         setSmartBuilder(false);
@@ -180,8 +232,9 @@ export function MusicCard({ configured, notify, fail, playbackConfig }: {
         <option value="">Select a station or playlist</option>
         {station.startsWith("mix:") &&
           <option value={station}>Custom {station.split(":")[1]} mix ({station.split(":")[2].split(",").length} selections)</option>}
-        {station && !stations.some((item) => item.key === station) &&
-          !station.startsWith("mix:") && <option value={station}>Saved music source (currently unavailable)</option>}
+        {station && !knownSource(station) &&
+          !station.startsWith("mix:") && <option value={station}>{sourceLabel(station)}</option>}
+        {radioOptions}
         {stations.map((item) => <option key={item.key} value={item.key}>
           {item.library}: {item.title}{item.smart ? " (smart playlist)" : ""}
         </option>)}
@@ -248,7 +301,58 @@ export function MusicCard({ configured, notify, fail, playbackConfig }: {
     <p className="muted">Regular and smart playlists are listed from your Plex account. Saved Plexamp mixes appear
       when Plex exposes them as playlists or stations; app-only mixes must be saved as playlists first.
       Custom mixes shuffle your selected artists/albums, not sonic recommendations.</p>
-    {days && <fieldset className="weekday-sources" disabled={!configured || busy || !config}>
+    {radioStations && <fieldset className="radio-stations" disabled={busy || !config}>
+      <legend>Internet radio</legend>
+      <p className="muted">Search the free Radio Browser directory for MP3 and AAC stations, then add favourites
+        as music sources. Radio does not need Plex. Group displays play the leader's relayed stream in sync;
+        live radio cannot skip songs.</p>
+      {radioStations.length > 0 && <ul className="radio-list" aria-label="Saved radio stations">
+        {radioStations.map((item) => <li key={item.id}>
+          <span>{item.name}<small>{[item.country, `${item.codec}${item.bitrate ? ` ${item.bitrate} kbps` : ""}`]
+            .filter(Boolean).join(" · ")}</small></span>
+          <button type="button" aria-label={`Remove ${item.name}`} onClick={() => removeRadio(item)}>Remove</button>
+        </li>)}
+      </ul>}
+      <div className="radio-search" onKeyDown={(event) => {
+        if (event.key === "Enter" && (event.target as HTMLElement).tagName === "INPUT") {
+          event.preventDefault();
+          void searchRadio();
+        }
+      }}>
+        <label>Station name
+          <input value={radioTerms.name} maxLength={100}
+            onChange={(event) => setRadioTerms({ ...radioTerms, name: event.target.value })} />
+        </label>
+        <label>Genre
+          <input value={radioTerms.tag} maxLength={100} placeholder="e.g. jazz"
+            onChange={(event) => setRadioTerms({ ...radioTerms, tag: event.target.value })} />
+        </label>
+        <label>Country code
+          <input value={radioTerms.country} maxLength={2} placeholder="e.g. GB"
+            onChange={(event) => setRadioTerms({ ...radioTerms, country: event.target.value })} />
+        </label>
+      </div>
+      <button type="button" disabled={radioSearching || (!radioTerms.name.trim() && !radioTerms.tag.trim())}
+        onClick={() => void searchRadio()}>Search radio</button>
+      {radioSearching && <p role="status">Searching radio stations...</p>}
+      {radioResults && <ul className="radio-list" aria-label="Radio search results">
+        {radioResults.items.map((item) => {
+          const saved = radioStations.some((current) => current.id === item.id);
+          return <li key={item.id}>
+            <span>{item.name}<small>{[item.country, `${item.codec}${item.bitrate ? ` ${item.bitrate} kbps` : ""}`,
+              item.tags].filter(Boolean).join(" · ")}</small></span>
+            <button type="button" disabled={saved || radioStations.length >= 50}
+              aria-label={saved ? `${item.name} added` : `Add ${item.name}`}
+              onClick={() => addRadio(item)}>{saved ? "Added" : "Add"}</button>
+          </li>;
+        })}
+        {!radioResults.items.length && <li>No supported stations found.</li>}
+      </ul>}
+      {radioResults?.more && <button type="button" disabled={radioSearching}
+        onClick={() => void searchRadio(radioResults.offset + 30)}>More stations</button>}
+      <p className="muted">Save music settings to keep station changes.</p>
+    </fieldset>}
+    {days && <fieldset className="weekday-sources" disabled={busy || !config}>
       <legend>Weekday sources</legend>
       <p className="muted">Optionally play a different source on specific days; other days use the music source
         above. Days change at midnight on the display, after the current song finishes.</p>
@@ -256,8 +360,9 @@ export function MusicCard({ configured, notify, fail, playbackConfig }: {
         {dayName(day)}{config?.active_day === day ? " (today)" : ""}
         <select value={days[day]} onChange={(event) => setDays({ ...days, [day]: event.target.value })}>
           <option value="">Use default source</option>
-          {days[day] && !stations.some((item) => item.key === days[day]) &&
+          {days[day] && !knownSource(days[day]) &&
             <option value={days[day]}>{sourceLabel(days[day])}</option>}
+          {radioOptions}
           {stations.map((item) => <option key={item.key} value={item.key}>
             {item.library}: {item.title}{item.smart ? " (smart playlist)" : ""}
           </option>)}
@@ -266,7 +371,7 @@ export function MusicCard({ configured, notify, fail, playbackConfig }: {
       {config?.active_day && config.active_station_key && <p className="muted">
         Today ({dayName(config.active_day)}) uses the saved source: {sourceLabel(config.active_station_key)}</p>}
     </fieldset>}
-    <label><input type="checkbox" checked={enabled} disabled={busy || (!enabled && (!configured || !station))}
+    <label><input type="checkbox" checked={enabled} disabled={busy || (!enabled && !playable)}
       onChange={(event) => setEnabled(event.target.checked)} />Enable background music</label>
     <label>Music volume
       <input aria-label="Music volume" type="range" min={0} max={100} step={1} value={volume}
@@ -275,8 +380,8 @@ export function MusicCard({ configured, notify, fail, playbackConfig }: {
     </label>
     {config && <p role="status">Music: {config.status.state}{config.status.title ? ` — ${config.status.title}` : ""}</p>}
     {config?.status.error && <p role="alert">{config.status.error}</p>}
-    {!configured && <p className="muted">Connect Plex above to discover music sources.</p>}
-    <button className="primary" disabled={busy || !config || (enabled && (!configured || !station))}>
+    {!configured && <p className="muted">Connect Plex above to discover Plex music sources.</p>}
+    <button className="primary" disabled={busy || !config || (enabled && !playable)}>
       Save music settings
     </button>
   </form>;

@@ -41,7 +41,8 @@ from .network import (
     AP_CHECKS, DEFAULT_AP_CHECK, default_route_interface, internet_status, validate_ap_check, website_status,
 )
 from .plex import RATING_KEY, PlexClient, PlexPlaybackProxy, validate_server_url, validate_token
-from .music import MusicRelay, active_source, validate_music
+from .music import MusicRelay, active_source, plex_sources, validate_music
+from . import radio
 from . import music_sync
 from .raildata import REFRESH_INTERVAL, RailDataWorker, validate_api_key, validate_refresh_interval
 from .weather import WeatherWorker, validate_weather_config
@@ -516,7 +517,7 @@ class Application:
                 settings["enabled"] = action == "play"
                 if action == "play":
                     settings = validate_music(settings)
-                    self.plex_client().validate_music_source(settings["station_key"])
+                    self._validate_music_source(settings, settings["station_key"])
                 self.config.update(music=settings)
                 config = self.config.load()
             else:
@@ -601,19 +602,28 @@ class Application:
             self._publish_sleep(config)
             return {**config["sleep"], **sleep_status(config["sleep"], config["sleep_wake_until"])}
 
+    def _validate_music_source(self, settings: dict[str, object], key: str) -> None:
+        # validate_music already confirmed that radio sources are saved stations.
+        if key in plex_sources(settings):
+            self.plex_client().validate_music_source(key)
+
     def save_music_config(self, value: object) -> dict[str, object]:
         with self.publish_lock:
             current = self.config.load()["music"]
-            if isinstance(value, dict) and "day_sources" not in value:
-                # Older managers omit weekday sources; keep the saved schedule.
-                value = {**value, "day_sources": current["day_sources"]}
+            if isinstance(value, dict):
+                # Older managers omit weekday sources and radio stations; keep the saved values.
+                value = {"day_sources": current["day_sources"], "radio_stations": current["radio_stations"], **value}
             settings = validate_music(value)
             if settings["station_key"] and (settings["enabled"] or
                     settings["station_key"] != current["station_key"]):
-                self.plex_client().validate_music_source(settings["station_key"])
+                self._validate_music_source(settings, settings["station_key"])
             for day, source in settings["day_sources"].items():
                 if source and source != current["day_sources"][day] and source != settings["station_key"]:
-                    self.plex_client().validate_music_source(source)
+                    self._validate_music_source(settings, source)
+            known = {station["id"] for station in current["radio_stations"]}
+            added = [station["id"] for station in settings["radio_stations"] if station["id"] not in known]
+            if added:
+                threading.Thread(target=lambda: [radio.register_click(item) for item in added], daemon=True).start()
             self.config.update(music=settings)
             config = self.config.load()
             self._publish_music(config)
@@ -715,10 +725,11 @@ class Application:
         if token_input:
             token = validate_token(token_input)
         elif clear_token:
+            music = current["music"]
             self.config.update(
                 plex_server_url="",
                 plex_token="",
-                music={**current["music"], "enabled": False},
+                music={**music, "enabled": music["enabled"] and not plex_sources(music)},
                 plex_default_bitrate_kbps=default_bitrate,
                 playlist_revision=secrets.token_hex(16),
             )
@@ -1162,6 +1173,33 @@ def make_handler(app: Application) -> type[BaseHTTPRequestHandler]:
                 return
             self._json(HTTPStatus.OK, result)
 
+        def _music_sync_radio(self, session_id: str, offset: int) -> None:
+            client = self.client_address[0]
+            if not app.throttle.allowed(client):
+                self._json(HTTPStatus.TOO_MANY_REQUESTS, {"error": "try again later"})
+                return
+            sync = app.config.load()["music_sync"]
+            if sync["role"] != "leader" or not music_sync.token_matches(
+                    self.headers.get("X-Music-Sync-Token", ""), str(sync["token_hash"])):
+                app.throttle.failure(client)
+                self._json(HTTPStatus.FORBIDDEN, {"error": "This display is not leading that music group"})
+                return
+            try:
+                content_type, chunks = app.music.follower_radio(session_id, offset)
+            except LookupError as error:
+                self._json(HTTPStatus.NOT_FOUND, {"error": str(error)})
+                return
+            self.close_connection = True
+            try:
+                self.send_response(HTTPStatus.OK)
+                self.send_header("Content-Type", content_type)
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                for chunk in chunks:
+                    self.wfile.write(chunk)
+            except OSError:
+                pass
+
         def do_GET(self) -> None:
             if self.path == "/health":
                 self._json(HTTPStatus.OK, {"status": "ok", "paired": app.paired(), "version": app.updater.running_version()})
@@ -1232,6 +1270,24 @@ def make_handler(app: Application) -> type[BaseHTTPRequestHandler]:
             if request_path.path == "/api/music/sync" and not request_path.query:
                 if self._require_session():
                     self._json(HTTPStatus.OK, app.music_sync_status())
+                return
+            radio_relay = re.fullmatch(r"/api/music/sync/radio/([A-Za-z0-9_-]{22})/(\d{1,7})", self.path)
+            if radio_relay:
+                self._music_sync_radio(radio_relay[1], int(radio_relay[2]))
+                return
+            if request_path.path == "/api/radio/search":
+                if not self._require_session():
+                    return
+                try:
+                    terms = radio.search_query(parse_qs(request_path.query, keep_blank_values=True))
+                except ValueError as error:
+                    self._json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
+                    return
+                try:
+                    self._json(HTTPStatus.OK, radio.search(terms))
+                except (OSError, ValueError) as error:
+                    LOG.warning("Radio search failed: %s", error)
+                    self._json(HTTPStatus.BAD_GATEWAY, {"error": "Radio Browser is unavailable; try again later"})
                 return
             if request_path.path == "/api/bluetooth" and not request_path.query:
                 if self._require_session():

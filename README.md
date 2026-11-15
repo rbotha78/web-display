@@ -3,8 +3,11 @@
 A 32-bit Raspberry Pi OS appliance for Raspberry Pi 2 and Raspberry Pi 3,
 with Chromium on HDMI, authenticated HTTPS administration, Wi-Fi provisioning,
 signed application updates and PC and Android display managers.
-Release **[v0.5.22](https://github.com/rbotha78/web-display/releases/tag/v0.5.22)**
-makes the automatic setup AP treat the display as offline only when its default
+Release **[v0.5.23](https://github.com/rbotha78/web-display/releases/tag/v0.5.23)**
+adds **internet radio** from the Radio Browser directory as a background-music
+source (no Plex needed), relayed in sync to music-group followers, shows the Now
+playing scene only while music plays, and reports sleeping music groups correctly.
+v0.5.22 made the automatic setup AP treat the display as offline only when its default
 gateway is unreachable (an internet-probe mode remains selectable), and reloads the
 Pi 3 built-in Wi-Fi driver when its firmware fails to load at boot. v0.5.21 added a **Now playing** carousel scene (song, artist, album, Plex cover, next
 song and clock), floating music-group players in both managers, the saved Wi-Fi
@@ -19,7 +22,8 @@ to **Carousel** through the **Administration** menu and back.
 The obsolete experimental/browser-relaunch warning has been removed; normal
 carousel transitions retain Chromium rather than relaunching it.
 Both administration screens have a floating audio player pinned to the bottom
-with **Play/Pause/Resume**, **Stop** and **Skip** controls for background music.
+with **Play/Pause/Resume**, **Stop** and **Skip** controls for background music
+(Skip and Like are hidden for live internet radio).
 It shows the current track title with its artist underneath.
 
 The original Pi Zero and Zero W (ARMv6) are not supported: current Chromium on
@@ -29,7 +33,8 @@ Raspberry Pi OS Trixie cannot run on them. This is separate from Wi-Fi setup.
 
 The carousel supports websites, streamed/Plex video, clock/date/notice dashboards,
 live National Rail departure boards, OpenWeather and now-playing music scenes. Plex radio stations,
-audio playlists and artist/album shuffle mixes can play in the background across
+audio playlists, artist/album shuffle mixes and **internet radio** stations (from the
+Radio Browser directory, no Plex needed) can play in the background across
 scene changes, pausing for videos with audio.
 Display scenes and their outer safe-area border use a black background.
 Background music has a permanent, compact now-playing card floating in the
@@ -352,7 +357,8 @@ Time Travel Radio, or Random Album Radio), an audio playlist, or a custom
 artist/album mix, choose volume, and explicitly enable
 playback. Music defaults **off**, including on existing installations; selecting
 a source alone does not enable it. Settings are private and independent of the
-carousel playlist. Removing Plex credentials disables music.
+carousel playlist. Removing Plex credentials disables music only when a Plex
+source (main or weekday) is selected.
 
 Regular and **smart playlists** are listed for the configured Plex token's user.
 Playlist rules and order remain managed in Plex; each new playback queue evaluates
@@ -368,6 +374,40 @@ day's source starts. Saving a change to today's source restarts music
 immediately. The device page and both managers can edit weekday sources; custom
 artist/album mixes are built for the main source, but a weekday mix saved
 through the API is preserved and shown.
+
+#### Internet radio
+
+**Global settings -> Background music -> Internet radio** searches the free
+[Radio Browser](https://www.radio-browser.info/) directory by station name, genre
+and optional two-letter country code (30 results per page, most popular first;
+**More stations** loads the next page). **Add** saves up to 50 favourite stations
+on the display; they appear as **Radio: <name>** in the music source and weekday
+source pickers. Save music settings to keep additions and removals. Radio works
+without Plex. The device API is `GET /api/radio/search?name=&tag=&country=&offset=`
+(session or API key); stations are saved in `radio_stations` of
+`PUT /api/plex/music`, and sources use `radio:<station id>`.
+
+Only MP3 and AAC/AAC+ (ADTS) streams are listed: those split into fixed-length
+frames, which group sync relies on. HLS, Ogg, Opus and FLAC stations are hidden,
+and some directory entries are simply offline; playback then reports
+"<station> is unavailable" and retries. Streams on loopback, link-local or
+multicast addresses are refused; `.m3u`/`.pls` playlists and redirects are followed.
+The song title comes from the station's ICY metadata ("Artist - Title") and the
+station logo is the cover in players and the Now playing scene. Live radio has no
+**Skip** or **Like**; pausing a single display reconnects at the live edge when
+resumed. The display keeps 90 seconds of the station and plays up to 30 seconds
+behind live (as much as the station sends immediately on connecting), so brief
+station or Wi-Fi stalls do not interrupt the audio.
+
+In a **music sync group** playing radio, only the leader connects to the station.
+It starts the group once at least 15 seconds are buffered (usually at once, as
+most stations send a burst on connecting), anchors it up to 30 seconds behind
+live, and relays the same audio frames to followers over the pinned group HTTPS connection, so every display
+plays identical audio on the group timeline (followers need no internet access
+to the station). Followers prefetch up to the leader's live edge, so a follower's
+Wi-Fi may stall for that long without a dropout. If the station stalls for longer than the buffer, the group
+re-anchors and briefly restarts. Pausing the group closes the station
+connection; resuming starts afresh at the live edge.
 
 **Music sync groups** play the same song at the same position on several displays.
 Create a group in the PC or Android manager: choose a leader and one or more

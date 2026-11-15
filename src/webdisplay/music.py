@@ -15,6 +15,8 @@ from pathlib import Path
 from typing import Callable
 
 from .plex import MIX_KEY, PLAYLIST_KEY, PlexClient, RATING_KEY, valid_music_source
+from . import radio
+from .radio import RadioBuffer, radio_key, split_title
 from .sleep import DAYS, SleepRuntime
 from . import music_sync
 from .music_sync import ClockOffset, LeaderClient, LeaderError
@@ -24,6 +26,15 @@ ART_KEY = re.compile(r"/library/metadata/[0-9]+/(?:thumb|art)/[0-9]+\Z")
 ART_SIZE = 600
 MAX_ART_BYTES = 2 * 1024 * 1024
 ART_TYPES = {"image/jpeg", "image/png", "image/webp"}
+RADIO_SESSION = re.compile(r"[A-Za-z0-9_-]{16,64}")
+# Playback trails a station's live edge by up to this much (whatever the station's
+# connect burst provides): the slack absorbs station and Wi-Fi stalls.
+RADIO_BEHIND = 30.0
+# Groups start only once this much is buffered: followers can prefetch only up to the
+# leader's live edge, so this is their minimum protection against Wi-Fi stalls.
+RADIO_GROUP_MIN_BEHIND = 15.0
+RADIO_START_TIMEOUT = 20.0
+RADIO_IDLE_CLOSE = 60.0
 
 
 
@@ -37,7 +48,11 @@ def track_art(track) -> str:
     return next((value for name in ("parentThumb", "thumb", "grandparentThumb")
                  if ART_KEY.fullmatch(value := track.get(name, ""))), "")
 
-class EmptyMusicSourceError(ValueError):
+class MusicSourceError(ValueError):
+    """A user-facing problem with the selected music source."""
+
+
+class EmptyMusicSourceError(MusicSourceError):
     pass
 
 
@@ -45,10 +60,16 @@ def validate_music(value: object) -> dict[str, object]:
     if not isinstance(value, dict):
         raise ValueError("Music settings must be an object")
     enabled, station, volume = value.get("enabled", False), value.get("station_key", ""), value.get("volume", 30)
+    stations = radio.validate_stations(value.get("radio_stations", []))
+    saved = {item["id"] for item in stations}
+
+    def valid_source(key: object) -> bool:
+        return isinstance(key, str) and (valid_music_source(key) or radio_key(key) in saved)
+
     if not isinstance(enabled, bool):
         raise ValueError("Music enabled must be true or false")
-    if not isinstance(station, str) or (station and not valid_music_source(station)):
-        raise ValueError("Select a Plex station, audio playlist, or artist/album mix")
+    if not isinstance(station, str) or (station and not valid_source(station)):
+        raise ValueError("Select a Plex station, audio playlist, artist/album mix or saved radio station")
     if enabled and not station:
         raise ValueError("Select a music source before enabling playback")
     if isinstance(volume, bool) or not isinstance(volume, int) or not 0 <= volume <= 100:
@@ -59,10 +80,22 @@ def validate_music(value: object) -> dict[str, object]:
     day_sources = {}
     for day in DAYS:
         source = days.get(day, "")
-        if not isinstance(source, str) or (source and not valid_music_source(source)):
+        if not isinstance(source, str) or (source and not valid_source(source)):
             raise ValueError(f"Select a valid music source for {day.capitalize()}")
         day_sources[day] = source
-    return {"enabled": enabled, "station_key": station, "volume": volume, "day_sources": day_sources}
+    return {"enabled": enabled, "station_key": station, "volume": volume, "day_sources": day_sources,
+            "radio_stations": stations}
+
+
+def radio_station(settings: dict[str, object], key: str) -> dict[str, object] | None:
+    station_id = radio_key(key)
+    return next((item for item in settings.get("radio_stations", []) if item["id"] == station_id), None)
+
+
+def plex_sources(settings: dict[str, object]) -> list[str]:
+    """Configured sources that need Plex (radio stations do not)."""
+    keys = [settings["station_key"], *settings["day_sources"].values()]
+    return [key for key in dict.fromkeys(keys) if key and radio_key(key) is None]
 
 
 def active_source(settings: dict[str, object], now: datetime | None = None) -> tuple[str, str]:
@@ -109,6 +142,16 @@ class MusicRelay:
         self.sync_retry_at = 0.0
         self.local_listening = (False, 0.0)
         self.link_generation = 0
+        self.radio_factory: Callable[[str], RadioBuffer] = RadioBuffer
+        self.radio: RadioBuffer | None = None
+        self.radio_station: dict[str, object] | None = None
+        self.radio_session: dict[str, object] | None = None
+        self.radio_start = 0
+        self.radio_title = ""
+        self.radio_readers = 0
+        self.radio_idle_since = time.monotonic()
+        self.radio_wait_until = 0.0
+        self.art_cache: tuple[str, bytes, str] | None = None
         owner = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -139,7 +182,7 @@ class MusicRelay:
                     value = json.loads(self.rfile.read(length))
                     self.reply(200, owner.control(value))
                 except (ValueError, OSError, http.client.HTTPException) as error:
-                    message = str(error) if isinstance(error, EmptyMusicSourceError) else (
+                    message = str(error) if isinstance(error, MusicSourceError) else (
                         "Music playback unavailable; check Plex connection."
                     )
                     with owner.lock:
@@ -153,6 +196,13 @@ class MusicRelay:
                     return
                 if self.path.startswith(f"/music/{owner.capability}/art/"):
                     self.send_art()
+                    return
+                source = owner._radio_stream(self.path)
+                if source is False:
+                    self.reply(404, {})
+                    return
+                if source is not None:
+                    owner._serve_radio(self, source)
                     return
                 with owner.lock:
                     client, track = owner.client, owner.track
@@ -194,6 +244,22 @@ class MusicRelay:
                     self.close_connection = True
 
             def send_art(self):
+                favicon = owner._radio_art_url(self.path)
+                if favicon:
+                    image = owner._radio_art(favicon)
+                    if image is None:
+                        self.reply(404, {})
+                        return
+                    try:
+                        self.send_response(200)
+                        self.send_header("Content-Type", image[1])
+                        self.send_header("Content-Length", str(len(image[0])))
+                        self.send_header("Cache-Control", "no-store")
+                        self.end_headers()
+                        self.wfile.write(image[0])
+                    except OSError:
+                        self.close_connection = True
+                    return
                 with owner.lock:
                     client, track = owner.client, owner.track
                     thumb = track_art(track) if track is not None and owner.stream_key and (
@@ -239,6 +305,8 @@ class MusicRelay:
         while not self.shutdown.wait(0.5):
             if self.sync["role"] == "leader":
                 self._leader_tick()
+            else:
+                self._reap_radio()
             sleeping = self.sleeping()
             if sleeping:
                 # Close relay sockets even if a Plex queue/timeline request holds the queue lock.
@@ -307,6 +375,8 @@ class MusicRelay:
                     raise ValueError("Music is sleeping; wake the display before resuming")
                 self.user_paused = False
             elif action == "skip":
+                if self._active_radio() is not None:
+                    raise ValueError("Live radio cannot skip songs")
                 if self.sleeping() or self.track is None:
                     raise ValueError("No current song is available to skip")
                 self.skip_request = {
@@ -361,6 +431,10 @@ class MusicRelay:
 
     def _stop(self):
         self._close_streams()
+        if self.radio is not None:
+            self.radio.close()
+        self.radio = self.radio_station = self.radio_session = None
+        self.radio_title = ""
         try:
             self._timeline("stopped", 0)
         except (ValueError, OSError, http.client.HTTPException):
@@ -451,29 +525,197 @@ class MusicRelay:
                 self.status.update(state="error", error="Audio playback interrupted; retrying automatically.")
                 self._stop()
                 return {}
-            if self.queue is None:
-                self._create_queue()
-                if self.sleeping():
+            station = self._active_radio()
+            if station is None:
+                return self._plex_control(value)
+            buffer = self._ensure_radio(station)
+        if value["action"] in {"current", "next"} and not buffer.wait_ready(1.0, RADIO_START_TIMEOUT):
+            with self.lock:
+                if self.radio is buffer:
                     self._stop()
-                    raise ValueError("Music sleeping")
-            track_id = self.track.get("playQueueItemID")
-            if value["action"] == "next" and value.get("track_id") == track_id:
-                self._advance()
-            elif value["action"] == "timeline" and value.get("track_id") == track_id:
+            raise MusicSourceError(f"{station['name']} is unavailable" + (f": {buffer.error}" if buffer.error else ""))
+        with self.lock:
+            if self.radio is not buffer or self.sleeping():
+                raise ValueError("Music source changed")
+            if value["action"] == "timeline" and value.get("track_id") == self.stream_key:
                 position, state = value.get("time", 0), value.get("state")
                 if (isinstance(position, bool) or not isinstance(position, int) or
                         not 0 <= position <= 86400000 or state not in {"playing", "paused"}):
                     raise ValueError("Invalid music timeline")
-                self._timeline(state, position)
+                self.radio_title = buffer.title_at(self.radio_start + int(position / 1000 / buffer.frame_duration))
                 self.status["state"] = state
                 self.status["error"] = ""
+            title, artist = split_title(self.radio_title) if self.radio_title else (station["name"], "")
+            self.status.update(title=title, artist=artist)
+            return {"track_id": self.stream_key, "url": self.url + "/stream/" + self.stream_key, "live": True,
+                    **self._radio_details(station)}
+
+    def _plex_control(self, value):
+        if self.queue is None:
+            self._create_queue()
             if self.sleeping():
                 self._stop()
                 raise ValueError("Music sleeping")
-            return {"track_id": self.track.get("playQueueItemID"),
-                    "url": self.url + "/stream/" + self.stream_key,
-                    "title": self.track.get("title", "Music"),
-                    "artist": track_artist(self.track), **self._track_details()}
+        track_id = self.track.get("playQueueItemID")
+        if value["action"] == "next" and value.get("track_id") == track_id:
+            self._advance()
+        elif value["action"] == "timeline" and value.get("track_id") == track_id:
+            position, state = value.get("time", 0), value.get("state")
+            if (isinstance(position, bool) or not isinstance(position, int) or
+                    not 0 <= position <= 86400000 or state not in {"playing", "paused"}):
+                raise ValueError("Invalid music timeline")
+            self._timeline(state, position)
+            self.status["state"] = state
+            self.status["error"] = ""
+        if self.sleeping():
+            self._stop()
+            raise ValueError("Music sleeping")
+        return {"track_id": self.track.get("playQueueItemID"),
+                "url": self.url + "/stream/" + self.stream_key,
+                "title": self.track.get("title", "Music"),
+                "artist": track_artist(self.track), **self._track_details()}
+
+    # ----- Internet radio ----------------------------------------------------------------
+
+    def _active_radio(self):
+        """The saved radio station this display (or the group it leads) plays now, if any."""
+        if self.sync["role"] == "follower":
+            return None
+        return radio_station(self.settings, active_source(self.settings, self.clock())[1])
+
+    def _ensure_radio(self, station):
+        """Start (or after a failure, restart) ingesting ``station``; returns its buffer."""
+        current = self.radio
+        if current is None or self.radio_station != station or current.ended:
+            self._stop()
+            self.radio_station = dict(station)
+            self.radio = self.radio_factory(str(station["url"]))
+            self.radio_title, self.radio_start = "", 0
+            self.stream_key = secrets.token_urlsafe(24)
+            self.radio_idle_since = time.monotonic()
+        return self.radio
+
+    def _radio_details(self, station):
+        title, artist = split_title(self.radio_title) if self.radio_title else (str(station["name"]), "")
+        details = {"title": title, "artist": artist}
+        if self.radio_title:
+            details["album"] = station["name"]
+        if station.get("favicon"):
+            details["art_url"] = self.url + "/art/" + self.stream_key
+        return details
+
+    def _reap_radio(self):
+        """Stop ingesting a single display's station once nothing has listened for a while."""
+        with self.lock:
+            if (self.sync["role"] == "off" and self.radio is not None and self.radio_readers <= 0
+                    and time.monotonic() - self.radio_idle_since > RADIO_IDLE_CLOSE):
+                self.radio.close()
+                self.radio = None
+
+    def _radio_stream(self, path):
+        """Resolve a relay radio stream path: None if not radio, False if stale, else a source."""
+        prefix = f"/music/{self.capability}/stream/"
+        if not path.startswith(prefix):
+            return None
+        parts = path[len(prefix):].split("/")
+        with self.lock:
+            offset_ok = len(parts) == 2 and parts[0] == self.stream_key and parts[1].isdigit() and len(parts[1]) <= 9
+            if self.sync["role"] == "follower":
+                if self.radio_session is None:
+                    return None
+                if not offset_ok or self.leader_client is None:
+                    return False
+                return ("leader", self.leader_client, self.radio_session["id"], int(parts[1]), self.stream_key)
+            buffer = self.radio
+            if buffer is None:
+                return None
+            if self.sync["role"] == "leader":
+                if self.radio_session is None or not offset_ok:
+                    return False
+                start = int(self.radio_session["anchor"]) + int(parts[1])
+            else:
+                if parts != [self.stream_key] or self.sleeping() or not self.stream_enabled():
+                    return False
+                start = self.radio_start = buffer.live_index(RADIO_BEHIND)
+            self.radio_readers += 1
+            return ("buffer", buffer, start, self.stream_key)
+
+    def _serve_radio(self, handler, source):
+        handler.close_connection = True
+        if source[0] == "buffer":
+            _, buffer, start, key = source
+            try:
+                handler.send_response(200)
+                handler.send_header("Content-Type", buffer.content_type)
+                handler.send_header("Cache-Control", "no-store")
+                handler.end_headers()
+                for chunk in buffer.read(start, lambda: self.shutdown.is_set() or self.radio is not buffer
+                                         or self.stream_key != key or self.sleeping()):
+                    handler.wfile.write(chunk)
+            except OSError:
+                pass
+            finally:
+                with self.lock:
+                    self.radio_readers -= 1
+                    self.radio_idle_since = time.monotonic()
+            return
+        _, client, session_id, offset, key = source
+        try:
+            connection, response = client.stream(f"/api/music/sync/radio/{session_id}/{offset}")
+        except (OSError, ValueError, http.client.HTTPException):
+            handler.reply(502, {})
+            return
+        try:
+            with self.lock:
+                if self.stream_key != key:
+                    handler.reply(404, {})
+                    return
+                with self.streams_lock:
+                    self.streams.add(response)
+            handler.send_response(200)
+            handler.send_header("Content-Type", response.getheader("Content-Type") or "audio/mpeg")
+            handler.send_header("Cache-Control", "no-store")
+            handler.end_headers()
+            while not self.shutdown.is_set() and self.stream_key == key and (chunk := response.read(16384)):
+                handler.wfile.write(chunk)
+        except (OSError, http.client.HTTPException, ValueError):
+            pass
+        finally:
+            with self.streams_lock:
+                self.streams.discard(response)
+            connection.close()
+
+    def follower_radio(self, session_id, offset):
+        """Leader side: the group's radio audio from ``offset`` frames past the session anchor."""
+        with self.lock:
+            session, buffer = self.radio_session, self.radio
+            if (self.sync["role"] != "leader" or session is None or buffer is None
+                    or session["id"] != session_id):
+                raise LookupError("That radio session has ended")
+            start = int(session["anchor"]) + offset
+            if start < buffer.first:
+                raise LookupError("That radio session has ended")
+        return buffer.content_type, buffer.read(start, lambda: self.shutdown.is_set() or self.radio is not buffer
+                                                or (self.radio_session or {}).get("id") != session_id)
+
+    def _radio_art_url(self, path):
+        with self.lock:
+            if not self.stream_key or path != f"/music/{self.capability}/art/{self.stream_key}":
+                return ""
+            if self.sync["role"] == "follower":
+                return str((self.radio_session or {}).get("favicon", ""))
+            return str((self.radio_station or {}).get("favicon", "")) if self.radio is not None else ""
+
+    def _radio_art(self, url):
+        cached = self.art_cache
+        if cached and cached[0] == url:
+            return cached[1], cached[2]
+        try:
+            body, content_type = radio.fetch_image(url)
+        except (OSError, ValueError, http.client.HTTPException):
+            return None
+        self.art_cache = (url, body, content_type)
+        return body, content_type
 
     def get_status(self):
         with self.lock:
@@ -483,6 +725,8 @@ class MusicRelay:
                 return {"state": "sleeping", "title": "", "artist": "", "error": ""}
             status = dict(self.status)
             status["paused_by_user"] = self.user_paused
+            if self._active_radio() is not None:
+                status["source"] = "radio"
             if self.track is not None:
                 status["rating_key"] = self.track.get("ratingKey")
                 status["liked"] = float(self.track.get("userRating", "0")) == 10
@@ -493,7 +737,8 @@ class MusicRelay:
     # ----- Music sync groups -------------------------------------------------------------
 
     def _new_group(self, previous=None):
-        if previous is not None and getattr(self, "queue", None) is not None:
+        if previous is not None and (getattr(self, "queue", None) is not None
+                                     or getattr(self, "radio_station", None) is not None):
             return previous
         return {"started_at": None, "paused_at": None, "user_paused": False, "idle": False,
                 "timeline_at": 0.0}
@@ -558,7 +803,7 @@ class MusicRelay:
             except (ValueError, OSError, http.client.HTTPException) as error:
                 self._stop()
                 self.group = self._new_group()
-                self.status.update(state="error", error=str(error) if isinstance(error, EmptyMusicSourceError)
+                self.status.update(state="error", error=str(error) if isinstance(error, MusicSourceError)
                                    else "Music playback unavailable; check Plex connection.")
                 self.sync_retry_at = now + 15
 
@@ -571,6 +816,13 @@ class MusicRelay:
             return
         active = any(listening and now - seen <= music_sync.LISTENER_TIMEOUT
                      for listening, seen in self.listeners.values())
+        station = self._active_radio()
+        if station is not None:
+            self._radio_leader_step(now, station, active)
+            return
+        if self.radio is not None or self.radio_session is not None:
+            self._stop()
+            self.group = self._new_group()
         if self.queue is None:
             if not active:
                 return
@@ -598,6 +850,49 @@ class MusicRelay:
             self._safe_timeline("playing", int(max(0.0, now - group["started_at"]) * 1000))
             group["timeline_at"] = now + 10
 
+    def _radio_leader_step(self, now, station, active):
+        if self.queue is not None or (self.radio_station is not None and self.radio_station != station):
+            # The weekday source changed (or switched from Plex); start the new station afresh.
+            self._stop()
+            self.group = self._new_group()
+        self._set_frozen(now, idle=not active)
+        if self._frozen():
+            # Nobody listening or paused: stop downloading; resuming starts a fresh session.
+            if self.radio is not None:
+                self.radio.close()
+                self.radio = None
+            return
+        buffer = self.radio
+        if buffer is None or buffer.ended:
+            if buffer is not None and buffer.error:
+                raise MusicSourceError(f"{station['name']} is unavailable: {buffer.error}")
+            self._stop()
+            self.radio_station = dict(station)
+            self.radio = buffer = self.radio_factory(str(station["url"]))
+            self.radio_wait_until = now + RADIO_START_TIMEOUT + RADIO_GROUP_MIN_BEHIND
+            self.status.update(state="waiting", error="")
+        session = self.radio_session
+        if session is not None and self.group["started_at"] is None:
+            session = self.radio_session = None
+        if session is not None:
+            playhead = int(session["anchor"]) + int(max(0.0, now - self.group["started_at"]) / buffer.frame_duration)
+            # Re-anchor if the station delivered too slowly (or the playhead left the buffer).
+            if not buffer.first <= playhead <= buffer.head - int(0.3 / buffer.frame_duration):
+                session = self.radio_session = None
+            else:
+                self.radio_title = buffer.title_at(playhead)
+        if session is None:
+            if buffer.buffered() < RADIO_GROUP_MIN_BEHIND:
+                if now > self.radio_wait_until:
+                    raise MusicSourceError(f"{station['name']} did not start; check the station")
+                return
+            self.radio_session = {"id": secrets.token_urlsafe(16), "anchor": buffer.live_index(RADIO_BEHIND),
+                                  "frame_duration": buffer.frame_duration}
+            self.stream_key = secrets.token_urlsafe(24)
+            self.radio_title = buffer.title_at(int(self.radio_session["anchor"]))
+            self.group.update(started_at=now + music_sync.START_LEAD, paused_at=None, timeline_at=0.0)
+            self.status.update(state="playing", error="")
+
     def _group_command(self, action):
         now = music_sync.now()
         if action == "pause":
@@ -605,6 +900,8 @@ class MusicRelay:
         elif action == "resume":
             self._set_frozen(now, user=False)
         elif action == "skip":
+            if self._active_radio() is not None:
+                raise ValueError("Live radio cannot skip songs")
             if self.track is None or self.queue is None:
                 raise ValueError("No current song is available to skip")
             try:
@@ -618,7 +915,8 @@ class MusicRelay:
             raise ValueError("Invalid music playback action")
 
     def _leader_state(self, now):
-        group, track = self.group, self.track
+        group, station = self.group, self._active_radio()
+        track = self.track if station is None else self.radio_session
         if not self.settings["enabled"]:
             state = "stopped"
         elif track is None or group["started_at"] is None:
@@ -631,7 +929,12 @@ class MusicRelay:
             state = "playing"
         result = {"state": state, "server_time": now, "machine": self.machine,
                   "error": self.status.get("error", "") if state == "error" else ""}
-        if state in {"playing", "paused", "idle"}:
+        if state in {"playing", "paused", "idle"} and station is not None:
+            title, artist = split_title(self.radio_title) if self.radio_title else (station["name"], "")
+            result.update(radio_session=track["id"], frame_duration=track["frame_duration"], title=title,
+                          artist=artist, station={"name": station["name"], "favicon": station["favicon"]},
+                          duration=0.0, started_at=group["started_at"], position=self._position(now))
+        elif state in {"playing", "paused", "idle"}:
             result.update(rating_key=track.get("ratingKey"), title=track.get("title", "Music"),
                           artist=track_artist(track),
                           duration=self._duration(), started_at=group["started_at"],
@@ -696,13 +999,23 @@ class MusicRelay:
                 if state.get("rating_key") and (self.track is None
                                                 or self.track.get("ratingKey") != state["rating_key"]):
                     state = {"state": "waiting", "error": state.get("error", "")}
+            if state.get("radio_session") and (self.radio_session is None
+                                               or self.radio_session["id"] != state["radio_session"]):
+                state = {"state": "waiting", "error": state.get("error", "")}
             state.pop("server_time", None)
             state.pop("machine", None)
+            station = state.pop("station", None)
             state["now"] = now
             if state.get("rating_key") and self.track is not None:
                 state["track_id"] = self.stream_key
                 state["url"] = self.url + "/stream/" + self.stream_key
                 state.update(self._track_details())
+            elif state.get("radio_session"):
+                state.update(track_id=self.stream_key, url=self.url + "/stream/" + self.stream_key, live=True)
+                if state.get("artist") and station:
+                    state["album"] = station["name"]
+                if station and station.get("favicon"):
+                    state["art_url"] = self.url + "/art/" + self.stream_key
             return state
 
     def _group_status(self):
@@ -719,6 +1032,8 @@ class MusicRelay:
         if state.get("rating_key"):
             status["rating_key"] = state["rating_key"]
             status["liked"] = bool(state.get("liked"))
+        if state.get("radio_session") or self._active_radio() is not None:
+            status["source"] = "radio"
         return status
 
     def _link(self, generation):
@@ -754,6 +1069,15 @@ class MusicRelay:
                 return
             self.offset.add(sent, payload.get("server_time"), received)
             self.remote, self.remote_at, self.sync_error = remote, received, ""
+            if remote.get("radio_session"):
+                if self.radio_session is None or self.radio_session["id"] != remote["radio_session"]:
+                    self._close_streams()
+                    self.track = None
+                    self.radio_session = {"id": remote["radio_session"], **remote["station"]}
+                    self.stream_key = secrets.token_urlsafe(24)
+            elif self.radio_session is not None:
+                self._close_streams()
+                self.radio_session, self.stream_key = None, ""
             if remote.get("rating_key") and (self.track is None
                                              or self.track.get("ratingKey") != remote["rating_key"]):
                 self._follow_track(remote["rating_key"], remote["machine"])
@@ -768,7 +1092,20 @@ class MusicRelay:
             raise LeaderError("The leader sent an invalid music state")
         remote = {"state": state, "machine": str(payload.get("machine", ""))[:128],
                   "error": str(payload.get("error", ""))[:200]}
-        if state in {"playing", "paused", "idle"}:
+        if state in {"playing", "paused", "idle"} and "radio_session" in payload:
+            numbers = [payload.get(name) for name in ("frame_duration", "started_at", "position", "server_time")]
+            station = payload.get("station")
+            if (not isinstance(payload["radio_session"], str) or not RADIO_SESSION.fullmatch(payload["radio_session"])
+                    or any(isinstance(n, bool) or not isinstance(n, (int, float)) for n in numbers)
+                    or not 0.001 <= payload["frame_duration"] <= 0.2 or not isinstance(station, dict)
+                    or not isinstance(station.get("name"), str)
+                    or not radio.valid_url(station.get("favicon"), empty=True)):
+                raise LeaderError("The leader sent an invalid music state")
+            remote.update(radio_session=payload["radio_session"], frame_duration=float(payload["frame_duration"]),
+                          title=str(payload.get("title", ""))[:200], artist=str(payload.get("artist", ""))[:200],
+                          duration=0.0, started_at=float(payload["started_at"]), position=float(payload["position"]),
+                          station={"name": station["name"][:200], "favicon": station["favicon"]})
+        elif state in {"playing", "paused", "idle"}:
             numbers = [payload.get(name) for name in ("duration", "started_at", "position", "server_time")]
             if (not isinstance(payload.get("rating_key"), str) or not RATING_KEY.fullmatch(payload["rating_key"])
                     or any(isinstance(n, bool) or not isinstance(n, (int, float)) for n in numbers)):
