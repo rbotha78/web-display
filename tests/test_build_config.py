@@ -310,6 +310,14 @@ class BuildCountryTests(unittest.TestCase):
             config = rootfs / "etc/modprobe.d/web-display-regdom.conf"
             self.assertEqual(config.read_text(), "options cfg80211 ieee80211_regdom=US\n")
             self.assertEqual(config.stat().st_mode & 0o777, 0o644)
+            pending = rootfs / "var/lib/web-display-network/setup-pending"
+            self.assertTrue(pending.is_file())
+            self.assertEqual(pending.stat().st_mode & 0o777, 0o600)
+            unit = Path(
+                "image/stage-web-display/01-install/files/web-display-network.service"
+            ).read_text()
+            self.assertIn("StateDirectory=web-display-network", unit)
+            self.assertNotIn("setup-pending", Path("tools/push-to-device.sh").read_text())
 
 
 if __name__ == "__main__":

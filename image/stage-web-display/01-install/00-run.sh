@@ -8,6 +8,10 @@ while read -r mode source destination; do
 	install -D -m "${mode}" "files/${source}" "${ROOTFS_DIR}${destination}"
 done < files/install-manifest
 
+# Only fresh images request provisioning; development pushes must not re-enable it.
+install -d -m 0700 "${ROOTFS_DIR}/var/lib/web-display-network"
+install -m 0600 /dev/null "${ROOTFS_DIR}/var/lib/web-display-network/setup-pending"
+
 # Keep the country in the file managed by wifi-action, not a higher-priority boot option.
 install -d -m 0755 "${ROOTFS_DIR}/etc/modprobe.d"
 printf 'options cfg80211 ieee80211_regdom=%s\n' "${WPA_COUNTRY}" \

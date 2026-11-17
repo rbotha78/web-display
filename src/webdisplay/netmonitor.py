@@ -4,8 +4,9 @@ Policy:
 - "Offline" follows the "ap_check" setting: "gateway" (default) pings each default
   gateway (accepting a fresh ARP reply when ICMP is blocked); "internet" uses TCP probes
   to several public endpoints. Neither relies on link or association alone.
-- Automatic AP start is opt-in (the "auto_ap" setting, disabled by default).
-- The AP starts only after OUTAGE_GRACE seconds of continuous outage.
+- Fresh images request a first-boot AP until a network is configured or connected.
+- Later automatic AP start is opt-in ("auto_ap", disabled by default).
+- The AP starts after FIRST_BOOT_GRACE or OUTAGE_GRACE seconds offline.
 - Every AP session gets a new random password (credential rotation).
 - While the AP is up, the saved Wi-Fi network is retried every RETRY_INTERVAL seconds;
   if the retry fails the AP is restored with a new password.
@@ -37,7 +38,9 @@ AP_KEYFILE = Path("/run/NetworkManager/system-connections") / f"{AP_ID}.nmconnec
 AP_INFO = Path("/run/web-display/setup-ap.json")
 LOCK_PATH = Path("/run/web-display/network.lock")
 CONFIG_PATH = Path("/var/lib/web-display/config.json")
+FIRST_BOOT_AP = Path("/var/lib/web-display-network/setup-pending")
 AP_ADDRESS = "10.42.0.1"
+FIRST_BOOT_GRACE = 30
 OUTAGE_GRACE = 120
 RETRY_INTERVAL = 600
 CLIENT_RETRY_INTERVAL = 60
@@ -378,13 +381,18 @@ class Supervisor:
                 self.restore_client()
         if online is None:
             online = connected(self.ap_check())
+        initial_setup = FIRST_BOOT_AP.exists()
+        if initial_setup and (online or CLIENT_KEYFILE.exists()):
+            FIRST_BOOT_AP.unlink()
+            initial_setup = False
+            LOG.info("Initial network setup completed; automatic AP now follows the saved setting")
         if online:
             self.offline_since = None
             if self.ap_active:
                 self.stop_ap()
                 self.restore_client()
             return
-        if not self.auto_ap():
+        if not initial_setup and not self.auto_ap():
             self.offline_since = None
             if self.ap_active:
                 LOG.info("Automatic setup AP was disabled; stopping it")
@@ -394,16 +402,17 @@ class Supervisor:
         if self.offline_since is None:
             self.offline_since = now
         if self.ap_active:
-            if now - self.last_retry >= RETRY_INTERVAL:
+            if not initial_setup and now - self.last_retry >= RETRY_INTERVAL:
                 if not self.retry_client():
                     self.start_ap()
                 else:
                     self.offline_since = None
             return
-        if now - self.offline_since >= OUTAGE_GRACE:
+        grace = FIRST_BOOT_GRACE if initial_setup else OUTAGE_GRACE
+        if now - self.offline_since >= grace:
             if not self.start_ap():
                 # Avoid hammering NetworkManager when AP cannot start.
-                self.offline_since = now - OUTAGE_GRACE + 60
+                self.offline_since = now - grace + 60
 
 
 def locked_tick(supervisor: Supervisor) -> None:

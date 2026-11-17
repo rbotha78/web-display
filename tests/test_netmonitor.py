@@ -18,6 +18,14 @@ class FakeClock:
 
 class SupervisorTests(unittest.TestCase):
     def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.root = Path(directory.name)
+        self.pending = self.root / "setup-pending"
+        for name, path in (("FIRST_BOOT_AP", self.pending), ("CLIENT_KEYFILE", self.root / "client")):
+            patcher = patch.object(netmonitor, name, path)
+            patcher.start()
+            self.addCleanup(patcher.stop)
         self.clock = FakeClock()
         self.supervisor = Supervisor(self.clock, auto_ap=lambda: True)
         self.events = []
@@ -44,6 +52,78 @@ class SupervisorTests(unittest.TestCase):
         self.clock.now += OUTAGE_GRACE * 10
         self.supervisor.tick(online=False)
         self.assertEqual(self.events, [])
+
+    def test_fresh_image_starts_secured_setup_without_enabling_automatic_ap(self):
+        self.pending.touch()
+        automatic = Mock(return_value=False)
+        self.supervisor.auto_ap = automatic
+        self.supervisor.tick(online=False)
+        self.clock.now += netmonitor.FIRST_BOOT_GRACE - 1
+        self.supervisor.tick(online=False)
+        self.assertEqual(self.events, [])
+        self.clock.now += 1
+        self.supervisor.tick(online=False)
+        self.assertEqual(self.events, ["start"])
+        self.clock.now += RETRY_INTERVAL
+        self.supervisor.tick(online=False)
+        self.assertEqual(self.events, ["start"])
+        self.assertTrue(self.pending.exists())
+        automatic.assert_not_called()
+
+    def test_initial_setup_ends_on_network_or_saved_wifi_and_stays_finished(self):
+        for online, saved in ((True, False), (False, True)):
+            with self.subTest(online=online, saved=saved):
+                self.events.clear()
+                self.supervisor.auto_ap = lambda: False
+                self.supervisor.offline_since = None
+                self.pending.touch()
+                self.supervisor.tick(online=False)
+                self.clock.now += netmonitor.FIRST_BOOT_GRACE
+                self.supervisor.tick(online=False)
+                if saved:
+                    netmonitor.CLIENT_KEYFILE.touch()
+                self.supervisor.tick(online=online)
+                self.assertFalse(self.pending.exists())
+                self.assertEqual(self.events, ["start", "stop", "restore"])
+                self.supervisor = Supervisor(self.clock, auto_ap=lambda: False)
+                self.supervisor.ap_is_up = lambda: True
+                self.supervisor.start_ap = Mock()
+                self.supervisor.tick(online=False)
+                self.clock.now += OUTAGE_GRACE * 2
+                self.supervisor.tick(online=False)
+                self.supervisor.start_ap.assert_not_called()
+                self.supervisor.start_ap = lambda: self._start()
+                self.supervisor.stop_ap = lambda: self._stop()
+                self.supervisor.restore_client = lambda: self.events.append("restore")
+                netmonitor.CLIENT_KEYFILE.unlink(missing_ok=True)
+
+    def test_fresh_setup_start_failure_retries_after_backoff(self):
+        self.pending.touch()
+        self.supervisor.auto_ap = lambda: False
+        self.start_result = False
+        self.supervisor.tick(online=False)
+        self.clock.now += netmonitor.FIRST_BOOT_GRACE
+        self.supervisor.tick(online=False)
+        self.clock.now += 59
+        self.supervisor.tick(online=False)
+        self.assertEqual(self.events, ["start"])
+        self.clock.now += 1
+        self.supervisor.tick(online=False)
+        self.assertEqual(self.events, ["start", "start"])
+
+    def test_initial_setup_request_survives_supervisor_restart(self):
+        self.pending.touch()
+        self.supervisor.auto_ap = lambda: False
+        self.supervisor.tick(online=False)
+        self.clock.now += 10
+        self.supervisor = Supervisor(self.clock, auto_ap=lambda: False)
+        self.supervisor.ap_is_up = lambda: True
+        self.supervisor.start_ap = lambda: self._start()
+        self.supervisor.tick(online=False)
+        self.clock.now += netmonitor.FIRST_BOOT_GRACE
+        self.supervisor.tick(online=False)
+        self.assertEqual(self.events, ["start"])
+        self.assertTrue(self.pending.exists())
 
     def test_retries_saved_client_without_ap_even_when_ethernet_is_online(self):
         self.supervisor.ap_is_up = lambda: False

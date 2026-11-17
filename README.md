@@ -31,7 +31,9 @@ Raspberry Pi OS Trixie cannot run on them. This is separate from Wi-Fi setup.
 The Pi Zero 2 W is ARMv7-capable, but its 512 MB RAM leaves little headroom and
 operation is not hardware-validated. The kiosk suppresses Chromium's low-memory
 launch confirmation so setup can start without a keyboard; this does not prevent
-memory exhaustion on demanding pages.
+memory exhaustion on demanding pages. Fresh images request a secured first-boot
+setup AP when offline, including on the Zero 2 W; its built-in AP is experimental
+and still needs hardware validation.
 
 ## Display features
 
@@ -676,7 +678,22 @@ blocks ping, so a working local network keeps the display connected even without
 internet; **Internet unreachable** (`internet`) instead requires a TCP connection to
 1.1.1.1, 8.8.8.8 or 9.9.9.9 on port 443. No default route always counts as offline.
 The status pages and offline overlay still report internet and site reachability
-separately. Automatic AP start is **disabled by default**; enable it with the
+separately. **Fresh-image provisioning** is separate from outage recovery: if a
+new image has no saved Wi-Fi network and remains offline for 30 seconds, it starts
+the secured setup AP without a keyboard or Ethernet. The display shows its SSID,
+password, Wi-Fi QR code and `https://10.42.0.1:8443/`. Connect a phone or computer,
+pair using the on-screen code, then save the home Wi-Fi settings. The initial AP
+stays available during pairing; it does not cycle credentials every 10 minutes
+while waiting for configuration. A failed Wi-Fi attempt restores the AP with new
+credentials, so check the screen and reconnect.
+
+The one-time provisioning request is cleared once a network is reachable or a
+Wi-Fi client profile has been saved successfully. It survives reboot until then;
+afterwards, ordinary outages do not bring the AP back unless automatic recovery
+is enabled. Existing installations and development pushes do not opt into this
+first-boot mode; it is initialized only by a newly built image.
+
+Automatic AP **outage recovery** is **disabled by default**; enable it with the
 "Start the setup access point automatically" checkbox in the administration page
 (the `auto_ap` setting, also available via `PUT /api/config`). Disabling it stops a
 running automatic AP. When enabled, after 120 seconds of continuous outage, and only
@@ -701,8 +718,8 @@ minutes apart. Wi-Fi routes use metric 600; the standard
 Ethernet route metric is 100, so Ethernet remains preferred when both links are active.
 On older images without a preset country, it must first be set while an
 administration route (such as Ethernet) exists. New images remove that country
-prerequisite, but do not preconfigure home Wi-Fi credentials or enable automatic
-AP mode: a usable provisioning route is still required. This is an image-build
+prerequisite and request the one-time setup AP, but do not preconfigure home
+Wi-Fi credentials or enable automatic AP outage recovery. This is an image-build
 change; signed updates and development pushes do not configure an existing
 device's Wi-Fi country. Test manually with `sudo python3 -m webdisplay.netmonitor start-ap` and `stop-ap`
 (stop `web-display-network` first, or it will remove the AP while Ethernet is online).
@@ -717,8 +734,11 @@ The Pi 3's secured AP is not yet usable; do not use an open AP as a workaround.
 ## Flash and first use
 
 1. Write the generated `.img.gz` (development) or `.img.xz` (release) to an SD card with Raspberry Pi Imager or
-   `bmaptool`, insert it in the Pi, attach HDMI and Ethernet, then power on.
-2. The fallback screen shows the DHCP administration address and a one-time
+   `bmaptool`, insert it in the Pi, attach HDMI and optionally Ethernet, then power on.
+2. With Ethernet, the fallback screen shows the DHCP administration address.
+   Without a network, allow about 30 seconds after the network service starts
+   for the first-boot `WebDisplay-XXXX` AP; join it using the on-screen password or
+   Wi-Fi QR code, then open `https://10.42.0.1:8443/`. The screen also shows a one-time
    six-digit pairing code. No Linux console login or shared password is enabled.
 3. Open the displayed `https://...:8443/` address. Verify the certificate
    fingerprint against the attached screen or local console before trusting it:
@@ -738,7 +758,9 @@ The Pi 3's secured AP is not yet usable; do not use an open AP as a workaround.
    ```
 
 5. Enter the on-screen pairing code and establish an administrator password of
-   at least 12 characters. Configure an HTTP or HTTPS display URL.
+   at least 12 characters. When using the setup AP, configure home Wi-Fi in Global
+   settings, then reconnect your phone/computer to that network and open the
+   display's new address. Configure an HTTP or HTTPS display URL.
 
 The certificate covers `web-display.local`, `web-display`, and localhost. It
 does not cover a dynamic DHCP IP address, so use the `.local` hostname after
