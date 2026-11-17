@@ -28,6 +28,10 @@ It shows the current track title with its artist underneath.
 
 The original Pi Zero and Zero W (ARMv6) are not supported: current Chromium on
 Raspberry Pi OS Trixie cannot run on them. This is separate from Wi-Fi setup.
+The Pi Zero 2 W is ARMv7-capable, but its 512 MB RAM leaves little headroom and
+operation is not hardware-validated. The kiosk suppresses Chromium's low-memory
+launch confirmation so setup can start without a keyboard; this does not prevent
+memory exhaustion on demanding pages.
 
 ## Display features
 
@@ -164,7 +168,8 @@ Raspbian packages are fetched from the HTTPS mirrorservice mirror by default,
 rather than the geographically redirected Oxford backend that has failed during
 builds. Override it with `RASPBIAN_MIRROR=https://... ./build-image.sh` if needed.
 Changing the mirror invalidates the cached development base and triggers a full
-base rebuild.
+base rebuild. Each build reapplies the mirror setting from the pinned pi-gen
+sources, so repeated builds do not need a clean checkout.
 Newly built images set the Wi-Fi regulatory country to **GB** during image
 creation, so first-boot Wi-Fi is not blocked waiting for an administrator to
 choose a country over Ethernet. Set `WPA_COUNTRY=US ./build-image.sh`, for example,

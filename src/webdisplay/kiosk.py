@@ -217,6 +217,7 @@ def launch(
     arguments = [
         browser,
         "--kiosk",
+        "--no-memcheck",
         "--no-first-run",
         "--disable-translate",
         "--disable-sync",

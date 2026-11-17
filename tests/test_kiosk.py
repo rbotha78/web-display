@@ -4,7 +4,20 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-from webdisplay.kiosk import DisplayRecovery, clear_stale_profile_locks, fallback_html, offline_html, main
+from webdisplay.kiosk import DisplayRecovery, clear_stale_profile_locks, fallback_html, offline_html, main, launch
+
+
+class BrowserLaunchTests(unittest.TestCase):
+    def test_low_memory_warning_is_disabled_with_and_without_control_pipe(self):
+        with patch("webdisplay.kiosk.clear_stale_profile_locks"), \
+             patch("webdisplay.kiosk.screen_size", return_value=None), \
+             patch("webdisplay.kiosk.subprocess.Popen") as popen:
+            for control in (None, (10, 11)):
+                with self.subTest(control=control):
+                    launch("/usr/bin/chromium", "http://127.0.0.1/setup", control)
+                    command = popen.call_args.args[0]
+                    self.assertIn("--no-memcheck", command)
+                    self.assertEqual(command[-1], "http://127.0.0.1/setup")
 
 
 class DisplayRecoveryTests(unittest.TestCase):

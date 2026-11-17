@@ -24,6 +24,34 @@ class BuildConfigTests(unittest.TestCase):
         self.assertIn("stage0/00-configure-apt/files/raspbian.sources", build_script)
         self.assertIn('BASE_ID="${PI_GEN_COMMIT}:${RASPBIAN_MIRROR}:${WPA_COUNTRY}"', build_script)
 
+    def test_mirror_patch_can_repeat_and_change_mirrors(self):
+        script = Path("build-image.sh").read_text(encoding="utf-8")
+        patch = script.split('<<\'PY\'\n', 1)[1].split("\nPY\n", 1)[0]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            subprocess.run(["git", "init", "-q", str(root)], check=True)
+            paths = ("stage0/prerun.sh", "stage0/00-configure-apt/files/raspbian.sources")
+            original = "mirror=http://raspbian.raspberrypi.com/raspbian/\n"
+            for name in paths:
+                path = root / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(original)
+            subprocess.run(["git", "-C", str(root), "add", "."], check=True)
+            subprocess.run(
+                ["git", "-C", str(root), "-c", "user.name=Test",
+                 "-c", "user.email=test@example.test", "-c", "commit.gpgsign=false",
+                 "commit", "-qm", "Fixture"],
+                check=True,
+            )
+            for mirror in ("https://first.example", "https://first.example", "https://second.example"):
+                result = subprocess.run(
+                    ["python3", "-", str(root), mirror], input=patch,
+                    capture_output=True, text=True,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                for name in paths:
+                    self.assertEqual((root / name).read_text(), f"mirror={mirror}/\n")
+
     def test_install_manifest_is_complete_and_shared(self):
         files = Path("image/stage-web-display/01-install/files")
         entries = [
@@ -194,7 +222,9 @@ class BuildCountryTests(unittest.TestCase):
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text("http://raspbian.raspberrypi.com/raspbian/\n", encoding="ascii")
         for path, content in (
-            (root / "bin/git", "#!/bin/sh\nexit 0\n"),
+            (root / "bin/git",
+             '#!/bin/sh\nif [ "$3" = show ]; then\n'
+             "  printf 'http://raspbian.raspberrypi.com/raspbian/\\n'\nfi\nexit 0\n"),
             (root / "bin/docker", "#!/bin/sh\nexit 0\n"),
             (pi_gen / "build-docker.sh", "#!/bin/sh\nmkdir -p deploy\n"),
         ):

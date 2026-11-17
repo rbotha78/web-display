@@ -33,6 +33,7 @@ git -C "${PI_GEN_DIR}" clean -ffdqx
 cp -a "${ROOT}/image/stage-web-display" "${PI_GEN_DIR}/stage-web-display"
 python3 - "${PI_GEN_DIR}" "${RASPBIAN_MIRROR}" <<'PY'
 from pathlib import Path
+import subprocess
 import sys
 
 pi_gen = Path(sys.argv[1])
@@ -43,7 +44,10 @@ files = (
     pi_gen / "stage0/00-configure-apt/files/raspbian.sources",
 )
 for path in files:
-    content = path.read_text(encoding="utf-8")
+    content = subprocess.check_output(
+        ["git", "-C", str(pi_gen), "show", f"HEAD:{path.relative_to(pi_gen).as_posix()}"],
+        text=True,
+    )
     if default not in content:
         raise SystemExit(f"Expected default Raspbian mirror not found in {path}")
     path.write_text(content.replace(default, mirror + "/"), encoding="utf-8")
