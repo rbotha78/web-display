@@ -422,6 +422,8 @@ station logo is the cover in players and the Now playing scene. Live radio has n
 resumed. The display keeps 90 seconds of the station and plays up to 30 seconds
 behind live (as much as the station sends immediately on connecting), so brief
 station or Wi-Fi stalls do not interrupt the audio.
+If the station connection remains open but stops delivering frames for a minute,
+the leader automatically closes it and reconnects the radio buffer.
 
 In a **music sync group** playing radio, only the leader connects to the station.
 It starts the group once at least 15 seconds are buffered (usually at once, as
@@ -735,6 +737,9 @@ Audio output is owned by the administration service's embedded MPV player. The
 service has the `audio` supplementary group, allowing it to open wired ALSA
 outputs and BlueALSA PCM paths even though playback itself runs without desktop
 session privileges.
+Pi 3 3.5 mm headphone output is forced to 48 kHz 16-bit PCM. This avoids the
+legacy `bcm2835 Headphones` card receiving floating-point 44.1 kHz audio while
+the HDMI device is available.
 
 Connecting to home Wi-Fi explicitly deactivates the setup AP before changing the
 radio to client mode. The helper is allowed time to roll back a failed attempt

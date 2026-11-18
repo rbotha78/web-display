@@ -14,6 +14,7 @@ import re
 import socket
 import ssl
 import threading
+import time
 import urllib.parse
 from collections import deque
 from typing import Callable, Iterator
@@ -427,6 +428,7 @@ class RadioBuffer:
         self.titles: list[tuple[int, str]] = []
         self.error = ""
         self.ended = self.closed = False
+        self.last_frame_at = time.monotonic()
         self.connection = None
         self.parser = FrameParser()
         self.thread = threading.Thread(target=self._run, daemon=True)
@@ -444,6 +446,10 @@ class RadioBuffer:
     def buffered(self) -> float:
         with self.cond:
             return len(self.frames) * self.frame_duration
+
+    def stalled(self, seconds: float) -> bool:
+        with self.cond:
+            return not self.closed and not self.ended and time.monotonic() - self.last_frame_at >= seconds
 
     def _run(self):
         parser = self.parser
@@ -467,6 +473,8 @@ class RadioBuffer:
                         elif abs(duration - self.frame_duration) > 1e-9:
                             raise OSError("The radio stream changed format")
                         self.frames.append(data)
+                    if frames:
+                        self.last_frame_at = time.monotonic()
                     excess = len(self.frames) - int(self.keep / self.frame_duration) if self.frame_duration else 0
                     for _ in range(max(0, excess)):
                         self.frames.popleft()

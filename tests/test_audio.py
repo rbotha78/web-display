@@ -2,11 +2,17 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from webdisplay.audio import DEFAULT_AUDIO_OUTPUT, audio_outputs, validate_audio_output
+from webdisplay.audio import DEFAULT_AUDIO_OUTPUT, audio_outputs, mpv_audio_options, validate_audio_output
 from webdisplay.app import ConfigStore
 
 
 class AudioTests(unittest.TestCase):
+    def test_legacy_headphone_output_uses_48khz_16bit(self):
+        output = "alsa/plughw:CARD=Headphones,DEV=0"
+        self.assertEqual(mpv_audio_options(output), [
+            "--audio-format=s16", "--audio-samplerate=48000",
+        ])
+        self.assertEqual(mpv_audio_options(DEFAULT_AUDIO_OUTPUT), [])
     def test_discovery_uses_stable_ids_and_excludes_capture_only_devices(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

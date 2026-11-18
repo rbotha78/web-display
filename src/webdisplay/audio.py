@@ -14,6 +14,13 @@ def validate_audio_output(value: object) -> str:
     return value
 
 
+def mpv_audio_options(output: str) -> list[str]:
+    """Return output-specific MPV formatting for legacy Pi audio cards."""
+    if re.fullmatch(r"alsa/plughw:CARD=Headphones,DEV=0", output):
+        return ["--audio-format=s16", "--audio-samplerate=48000"]
+    return []
+
+
 def audio_outputs(root: Path = Path("/proc/asound")) -> list[dict[str, str]]:
     if not root.exists():
         return []

@@ -159,6 +159,10 @@ class BufferTests(unittest.TestCase):
         self.assertEqual(len(buffer.frames), int(1.0 / buffer.frame_duration))
         self.assertEqual(list(buffer.read(0)), [])
 
+        with buffer.cond:
+            buffer.last_frame_at = 0
+        self.assertTrue(buffer.stalled(1))
+
         def refuse(url):
             raise OSError("HTTP 404")
 
@@ -176,6 +180,10 @@ class FakeBuffer:
         self.ended = self.closed = False
         self.error = ""
         self.content_type = "audio/mpeg"
+        self.is_stalled = False
+
+    def stalled(self, seconds):
+        return self.is_stalled
 
     def wait_ready(self, seconds, timeout):
         return not self.closed
@@ -257,6 +265,19 @@ class RelayTests(unittest.TestCase):
             state = relay.control({"action": "sync", "listening": True})
             self.assertEqual(state["state"], "playing")
             self.assertEqual(relay.radio_session["anchor"], 0)
+
+    def test_leader_reopens_radio_buffer_after_frame_delivery_stalls(self):
+        sync = {"role": "leader", "group_id": GROUP, "token_hash": music_sync.token_hash(TOKEN)}
+        relay = self.relay(sync)
+        playing = relay.control({"action": "sync", "listening": True})
+        self.assertEqual(playing["state"], "playing")
+        first_session = relay.radio_session["id"]
+        relay.radio.is_stalled = True
+        reconnected = relay.control({"action": "sync", "listening": True})
+        self.assertEqual(reconnected["state"], "playing")
+        self.assertIsNot(relay.radio, None)
+        self.assertFalse(relay.radio.is_stalled)
+        self.assertNotEqual(relay.radio_session["id"], first_session)
 
     def test_leader_pause_survives_settings_publication_and_resume_reconnects(self):
         clock = [1_000_000.0]

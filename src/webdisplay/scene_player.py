@@ -31,7 +31,7 @@ from .hls import MAX_VIDEO_BITRATE, resolve_video_url
 from .browser import BrowserError, PersistentBrowser, Tab
 from .scene_windows import SceneWindows
 from .display import DEFAULT_SAFE_AREA_PERCENT
-from .audio import DEFAULT_AUDIO_OUTPUT, audio_outputs
+from .audio import DEFAULT_AUDIO_OUTPUT, audio_outputs, mpv_audio_options
 from .bluetooth import is_bluetooth_output
 from .raildata import board_matches
 
@@ -483,6 +483,7 @@ class SceneRenderer:
             "--no-terminal", f"--wid={self.windows.video_id()}",
             "--vo=gpu", "--gpu-context=x11egl", "--hwdec=v4l2m2m",
             "--ao=alsa", f"--audio-device={self.audio_output}",
+            *mpv_audio_options(self.audio_output),
             *audio_options, "--idle=yes", "--force-window=immediate",
             "--pause=yes", "--keep-open=always",
             f"--hls-bitrate={self._video_bitrate()}",

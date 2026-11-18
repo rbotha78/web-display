@@ -35,6 +35,7 @@ RADIO_BEHIND = 30.0
 RADIO_GROUP_MIN_BEHIND = 15.0
 RADIO_START_TIMEOUT = 20.0
 RADIO_IDLE_CLOSE = 60.0
+RADIO_BUFFER_STALL = 60.0
 
 
 
@@ -863,7 +864,7 @@ class MusicRelay:
                 self.radio = None
             return
         buffer = self.radio
-        if buffer is None or buffer.ended:
+        if buffer is None or buffer.ended or buffer.stalled(RADIO_BUFFER_STALL):
             if buffer is not None and buffer.error:
                 raise MusicSourceError(f"{station['name']} is unavailable: {buffer.error}")
             self._stop()

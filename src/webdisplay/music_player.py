@@ -14,7 +14,7 @@ from urllib.parse import urlsplit
 
 from .scene_player import RendererStopError, stop_process
 from . import bluetooth
-from .audio import DEFAULT_AUDIO_OUTPUT, audio_outputs, validate_audio_output
+from .audio import DEFAULT_AUDIO_OUTPUT, audio_outputs, mpv_audio_options, validate_audio_output
 from .sleep import SleepRuntime
 
 LOG = logging.getLogger(__name__)
@@ -213,6 +213,7 @@ class MusicPlayer:
         self.process = subprocess.Popen([
             self.mpv, "--no-config", "--no-terminal", "--no-video", "--idle=yes",
             "--ao=alsa", f"--audio-device={self.audio_output}", "--audio-pitch-correction=no",
+            *mpv_audio_options(self.audio_output),
             "--pause=yes", "--volume=0", f"--input-ipc-server={self.ipc_path}",
             # Never seek backwards; a long radio session must not retain played audio.
             "--demuxer-max-back-bytes=4MiB",
