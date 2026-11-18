@@ -8,6 +8,7 @@ Requires=web-display-certificate.service
 Type=simple
 User=webdisplay
 Group=web-display
+SupplementaryGroups=audio
 UMask=0027
 StateDirectory=web-display
 StateDirectoryMode=0750

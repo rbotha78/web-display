@@ -183,6 +183,12 @@ class BuildConfigTests(unittest.TestCase):
         self.assertIn("-nocursor", unit)
         self.assertIn("SupplementaryGroups=audio video input render", unit)
 
+    def test_administration_unit_grants_audio_for_embedded_mpv(self):
+        unit = Path(
+            "image/stage-web-display/01-install/files/web-display.service"
+        ).read_text(encoding="utf-8")
+        self.assertIn("SupplementaryGroups=audio", unit)
+
 
     def test_build_script_has_fast_development_path_only(self):
         script = Path("build-image.sh").read_text(encoding="utf-8")

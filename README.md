@@ -728,6 +728,11 @@ mobile-data switching. If the notification does not appear, open
 `http://10.42.0.1/` manually. No trusted-certificate DHCP captive-portal API is
 advertised; detection uses HTTP probes.
 
+Audio output is owned by the administration service's embedded MPV player. The
+service has the `audio` supplementary group, allowing it to open wired ALSA
+outputs and BlueALSA PCM paths even though playback itself runs without desktop
+session privileges.
+
 Connecting to home Wi-Fi explicitly deactivates the setup AP before changing the
 radio to client mode. The helper is allowed time to roll back a failed attempt
 and restore the AP, including when NetworkManager times out. The last connection
