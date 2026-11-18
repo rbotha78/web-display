@@ -783,7 +783,7 @@ class Application:
             input=json.dumps(request),
             capture_output=True,
             text=True,
-            timeout=60,
+            timeout=180 if request.get("operation") == "connect" else 60,
             check=False,
         )
         try:

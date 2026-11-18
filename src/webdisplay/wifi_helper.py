@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import fcntl
 import json
+import logging
 import os
 import re
 import subprocess
@@ -16,6 +17,22 @@ KEYFILE = Path("/etc/NetworkManager/system-connections") / f"{CONNECTION_ID}.nmc
 LOCK_PATH = Path("/run/web-display/network.lock")
 COUNTRY_PATTERN = re.compile(r"^[A-Z]{2}$")
 MODPROBE_CONFIG = Path("/etc/modprobe.d/web-display-regdom.conf")
+CONNECTION_ERROR = Path("/run/web-display/wifi-connect-error.json")
+LOG = logging.getLogger("web-display-wifi")
+
+
+def connection_error() -> str:
+    try:
+        data = json.loads(CONNECTION_ERROR.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return ""
+    except (OSError, ValueError) as error:
+        LOG.warning("Could not read the last Wi-Fi connection result: %s", error)
+        return "The last Wi-Fi connection result is unavailable."
+    if not isinstance(data, dict) or not isinstance(data.get("error"), str):
+        LOG.warning("Invalid saved Wi-Fi connection result")
+        return "The last Wi-Fi connection result is unavailable."
+    return data["error"]
 
 
 def validate_country(value: object) -> str:
@@ -133,13 +150,17 @@ def status() -> dict[str, object]:
             )
     blocked = bool(re.search(r"(Soft|Hard) blocked: yes", run(["rfkill", "list", "wifi"]).stdout))
     saved = KEYFILE.exists()
-    return {
+    result = {
         "country": current_country(),
         "wifi_blocked": blocked,
         "devices": devices,
         "saved_network": saved,
         "saved_ssid": saved_ssid() if saved else "",
     }
+    error = connection_error()
+    if error:
+        result["error"] = error
+    return result
 
 
 def saved_ssid() -> str:
@@ -149,31 +170,45 @@ def saved_ssid() -> str:
     return result.stdout.rstrip("\n").replace("\\:", ":").replace("\\\\", "\\")
 
 
-def connect(ssid: str, psk: str) -> None:
-    device = wifi_device()
-    if device is None:
-        raise RuntimeError("No Wi-Fi adapter was found")
-    previous = KEYFILE.read_bytes() if KEYFILE.exists() else None
+def write_keyfile(content: bytes) -> None:
     KEYFILE.parent.mkdir(parents=True, exist_ok=True)
     descriptor, temporary = tempfile.mkstemp(dir=KEYFILE.parent, prefix=".wd-")
     try:
-        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-            handle.write(render_keyfile(ssid, psk, device))
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(content)
         os.chmod(temporary, 0o600)
         os.replace(temporary, KEYFILE)
     finally:
         if os.path.exists(temporary):
             os.unlink(temporary)
+
+
+def connect(ssid: str, psk: str) -> None:
+    device = wifi_device()
+    if device is None:
+        raise RuntimeError("No Wi-Fi adapter was found")
+    previous = KEYFILE.read_bytes() if KEYFILE.exists() else None
+    write_keyfile(render_keyfile(ssid, psk, device).encode("utf-8"))
     run(["nmcli", "connection", "reload"])
-    result = run(["nmcli", "--wait", "30", "connection", "up", CONNECTION_ID, "ifname", device], 45)
-    if result.returncode != 0:
+    try:
+        result = run(["nmcli", "--wait", "30", "connection", "up", CONNECTION_ID, "ifname", device], 45)
+        failed = result.returncode != 0
+        if failed:
+            LOG.warning("NetworkManager could not activate the Wi-Fi client: %s", result.stderr.strip())
+            reason = result.stderr.strip().splitlines()[0][:200] if result.stderr.strip() else "activation failed"
+    except subprocess.TimeoutExpired:
+        failed = True
+        reason = "NetworkManager activation timed out"
+        LOG.warning("NetworkManager timed out activating the Wi-Fi client")
+    if failed:
         run(["nmcli", "connection", "delete", CONNECTION_ID])
+        KEYFILE.unlink(missing_ok=True)
         if previous is not None:
-            KEYFILE.write_bytes(previous)
-            os.chmod(KEYFILE, 0o600)
+            write_keyfile(previous)
             run(["nmcli", "connection", "reload"])
             run(["nmcli", "connection", "up", CONNECTION_ID, "ifname", device], 45)
-        raise RuntimeError("Could not connect to the Wi-Fi network")
+        raise RuntimeError(f"Could not connect to the Wi-Fi network: {reason}. "
+                           "Check the password and router security settings. The Zero 2 W needs a 2.4 GHz network.")
 
 
 def forget() -> None:
@@ -195,17 +230,27 @@ def handle(request: dict[str, object]) -> dict[str, object]:
         psk = validate_psk(request.get("password"))
         with LOCK_PATH.open("a+") as lock:
             fcntl.flock(lock, fcntl.LOCK_EX)
-            from .netmonitor import AP_INFO, Supervisor
+            from .netmonitor import AP_ID, AP_INFO, Supervisor, write_private
 
             ap_was_active = AP_INFO.exists()
             try:
+                if ap_was_active:
+                    result = run(["nmcli", "--wait", "10", "connection", "down", AP_ID], 15)
+                    if result.returncode != 0:
+                        raise RuntimeError("Could not stop the setup AP before connecting to Wi-Fi")
                 connect(ssid, psk)
-            except RuntimeError:
+            except (RuntimeError, subprocess.TimeoutExpired) as error:
+                message = str(error) if isinstance(error, RuntimeError) else "Wi-Fi connection attempt timed out."
+                write_private(CONNECTION_ERROR, json.dumps({"error": message}) + "\n", 0o640,
+                              group="web-display")
                 if ap_was_active and not Supervisor().start_ap():
                     raise RuntimeError(
                         "Wi-Fi connection failed and the setup access point could not be restored"
                     ) from None
-                raise
+                raise RuntimeError(message) from error
+            CONNECTION_ERROR.unlink(missing_ok=True)
+            if ap_was_active:
+                Supervisor().remove_ap_profile()
         return {"connected": True}
     if operation == "forget":
         with LOCK_PATH.open("a+") as lock:

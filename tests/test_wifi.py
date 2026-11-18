@@ -1,4 +1,6 @@
 import unittest
+import json
+import subprocess
 import tempfile
 from pathlib import Path
 from unittest.mock import Mock, patch
@@ -47,6 +49,8 @@ class ValidationTests(unittest.TestCase):
             with (
                 patch.object(wifi_helper, "LOCK_PATH", root / "network.lock"),
                 patch("webdisplay.netmonitor.AP_INFO", ap_info),
+                patch.object(wifi_helper, "run", return_value=Mock(returncode=0)),
+                patch("webdisplay.netmonitor.write_private") as write,
                 patch.object(wifi_helper, "connect", side_effect=RuntimeError("no connection")),
                 patch("webdisplay.netmonitor.Supervisor.start_ap", return_value=True) as start_ap,
             ):
@@ -55,6 +59,58 @@ class ValidationTests(unittest.TestCase):
                         {"operation": "connect", "ssid": "Unavailable", "password": "password123"}
                     )
             start_ap.assert_called_once()
+            self.assertEqual(json.loads(write.call_args.args[1]), {"error": "no connection"})
+
+    def test_successful_client_connect_stops_ap_first_and_clears_stale_state(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            ap_info = root / "ap.json"
+            ap_info.write_text("{}")
+            error_file = root / "error.json"
+            error_file.write_text('{"error":"previous failure"}')
+            events = []
+            with (
+                patch.object(wifi_helper, "LOCK_PATH", root / "lock"),
+                patch.object(wifi_helper, "CONNECTION_ERROR", error_file),
+                patch("webdisplay.netmonitor.AP_INFO", ap_info),
+                patch.object(wifi_helper, "run",
+                             side_effect=lambda *args: events.append("down") or Mock(returncode=0)),
+                patch.object(wifi_helper, "connect", side_effect=lambda *args: events.append("connect")),
+                patch("webdisplay.netmonitor.Supervisor.remove_ap_profile") as remove,
+            ):
+                self.assertEqual(wifi_helper.handle(
+                    {"operation": "connect", "ssid": "Home", "password": "password123"}
+                ), {"connected": True})
+            self.assertEqual(events, ["down", "connect"])
+            self.assertFalse(error_file.exists())
+            remove.assert_called_once_with()
+
+    def test_timed_out_client_activation_rolls_back_profile(self):
+        for previous in (None, b"previous profile"):
+            with self.subTest(previous=previous), tempfile.TemporaryDirectory() as directory:
+                keyfile = Path(directory) / "wifi.nmconnection"
+                if previous is not None:
+                    keyfile.write_bytes(previous)
+                def run(command, *args):
+                    if "--wait" in command:
+                        raise subprocess.TimeoutExpired(command, 45)
+                    return Mock(returncode=0, stdout="", stderr="")
+                with patch.object(wifi_helper, "KEYFILE", keyfile), \
+                     patch.object(wifi_helper, "wifi_device", return_value="wlan0"), \
+                     patch.object(wifi_helper, "run", side_effect=run):
+                    with self.assertRaisesRegex(RuntimeError, "Could not connect"):
+                        wifi_helper.connect("New", "password123")
+                self.assertEqual(keyfile.read_bytes() if keyfile.exists() else None, previous)
+                if previous is not None:
+                    self.assertEqual(keyfile.stat().st_mode & 0o777, 0o600)
+
+    def test_connection_error_remains_available_after_rejoining_ap(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "error.json"
+            with patch.object(wifi_helper, "CONNECTION_ERROR", path):
+                self.assertEqual(wifi_helper.connection_error(), "")
+                path.write_text('{"error":"Authentication failed"}')
+                self.assertEqual(wifi_helper.connection_error(), "Authentication failed")
 
     @patch.object(wifi_helper, "run")
     def test_scan_parses_escaped_ssids_and_dedupes(self, run):

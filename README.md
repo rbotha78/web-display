@@ -29,11 +29,12 @@ It shows the current track title with its artist underneath.
 The original Pi Zero and Zero W (ARMv6) are not supported: current Chromium on
 Raspberry Pi OS Trixie cannot run on them. This is separate from Wi-Fi setup.
 The Pi Zero 2 W is ARMv7-capable, but its 512 MB RAM leaves little headroom and
-operation is not hardware-validated. The kiosk suppresses Chromium's low-memory
+general operation is not hardware-validated. The kiosk suppresses Chromium's low-memory
 launch confirmation so setup can start without a keyboard; this does not prevent
 memory exhaustion on demanding pages. Fresh images request a secured first-boot
-setup AP when offline, including on the Zero 2 W; its built-in AP is experimental
-and still needs hardware validation.
+setup AP when offline. Joining the Zero 2 W's secured built-in AP has been
+user-tested, as has WPA2 client provisioning to a phone hotspot. Home-router
+compatibility remains limited; see the Wi-Fi hardware observations below.
 
 ## Display features
 
@@ -255,6 +256,19 @@ or is connected without an active mode, it enables the preferred mode and
 reapplies the VC4 colour-matrix reset. The active renderer is then restarted at
 the recovered resolution (carousel playback restarts at its first enabled
 scene). No reboot is required; normal connected playback is left untouched.
+
+If the boot picture appears but HDMI loses signal when KMS takes over, check
+the display's power/input and cable first. Automatic recovery cannot enable a
+connector that Linux continuously reports as disconnected. On a tested Zero
+2 W, overriding hotplug detection exposed a valid EDID and restored output.
+For this confirmed detection failure only, back up
+`/boot/firmware/cmdline.txt`, append `video=HDMI-A-1:D` to its existing **single
+line** without removing other boot arguments, and reboot. This forces connector
+presence while still selecting the mode from EDID; it keeps KMS, GPU acceleration
+and the colour-matrix reset. The Zero successfully rebooted with Xorg at
+1920x1080 after applying it. This is a per-device boot workaround, not an image
+default or a signed application update; remove the argument to restore automatic
+hotplug detection.
 
 ### Experimental carousel
 
@@ -684,8 +698,60 @@ the secured setup AP without a keyboard or Ethernet. The display shows its SSID,
 password, Wi-Fi QR code and `https://10.42.0.1:8443/`. Connect a phone or computer,
 pair using the on-screen code, then save the home Wi-Fi settings. The initial AP
 stays available during pairing; it does not cycle credentials every 10 minutes
-while waiting for configuration. A failed Wi-Fi attempt restores the AP with new
-credentials, so check the screen and reconnect.
+while waiting for configuration. A failed Wi-Fi attempt restores the AP with the
+same SSID and password, so a phone or laptop can reconnect using its saved network.
+
+The setup SSID is `WebDisplay-XXXX`, where `XXXX` is the last four hexadecimal
+characters of the Pi's hardware serial number (uppercase). It does not change
+when switching Wi-Fi adapters or reflashing the same Pi. On systems without a
+Pi serial number, the Linux machine ID is used instead. Each device generates
+its own random 12-character password once and saves it root-only in
+`/var/lib/web-display-network/setup-ap-password`. The same credentials are used
+after failed provisioning, automatic client retries, service restarts and
+reboots, allowing subsequent setup without a screen or QR code. There is no
+shared password and the password cannot be calculated from the SSID or serial.
+Existing installations switch to the stable name on their next AP start and
+need to be joined once. Reflashing clears the saved password, so the first
+connection after a reflash needs the new credentials; deleting the password
+file as root also generates a new password on the next AP start.
+
+The AP supplies captive-portal DNS and an HTTP discovery page at
+`http://10.42.0.1/`, redirecting common Android, Apple and Windows connectivity
+checks there. Phones may offer a **Sign in to Wi-Fi network** notification.
+The landing page links to HTTPS administration; pairing codes, passwords and
+other administration requests are never accepted over HTTP. Verify the TLS
+fingerprint on the display before continuing, and open the secure address in a
+normal browser if the phone's captive-portal window cannot handle its self-signed
+certificate. Captive discovery cannot force a phone to stay connected: choose
+**Stay connected / Use without internet**, or temporarily disable automatic
+mobile-data switching. If the notification does not appear, open
+`http://10.42.0.1/` manually. No trusted-certificate DHCP captive-portal API is
+advertised; detection uses HTTP probes.
+
+Connecting to home Wi-Fi explicitly deactivates the setup AP before changing the
+radio to client mode. The helper is allowed time to roll back a failed attempt
+and restore the AP, including when NetworkManager times out. The last connection
+failure is shown on HDMI and in the Wi-Fi card in administration and both
+managers after reconnecting; a restored AP means that setup failed, not that
+the `auto_ap` preference was enabled. A successful connection removes stale AP
+metadata and the saved error. The Zero 2 W requires a **2.4 GHz** home network;
+association/authentication timeouts can also indicate router security or password
+problems. Persistent AP credentials, captive-portal configuration and helper
+sandbox permissions require base compatibility 2: older installations need a
+new image or a development deployment, not just a signed application bundle.
+
+**Zero 2 W Wi-Fi hardware observations:** a tested BCM43430/2 with firmware
+`9.88.4.77` and Debian `wpasupplicant` `2:2.10-24` connected to a WPA2 phone
+hotspot with CCMP for both pairwise and group traffic. On MikroTik RouterOS
+7.25.1, the original Raspberry Pi `wpasupplicant` `2:2.10-24+rpt3` reconnected
+successfully in both 802.11g and 802.11n modes with WPA2/CCMP; the 802.11n
+connection negotiated a 72.2 Mbit/s link rate. Re-enabling WPA3 on the working
+802.11n setup reproduced authentication failures; disabling WPA3 restored the
+WPA2 connection. Use a WPA2/CCMP-only SSID for this tested configuration.
+FT/802.11r remained disabled in the working baseline. Compatibility with the
+original 802.11ax/40 MHz radio settings remains unconfirmed.
+Neither TKIP nor a package downgrade or hold is required. Do not weaken the
+image's security defaults.
 
 The one-time provisioning request is cleared once a network is reachable or a
 Wi-Fi client profile has been saved successfully. It survives reboot until then;
@@ -698,16 +764,16 @@ Automatic AP **outage recovery** is **disabled by default**; enable it with the
 (the `auto_ap` setting, also available via `PUT /api/config`). Disabling it stops a
 running automatic AP. When enabled, after 120 seconds of continuous outage, and only
 if the Wi-Fi country is set and the adapter supports AP mode, it starts a WPA2 (CCMP) access point named
-`WebDisplay-XXXX` with a freshly generated 12-character password (rotated every time
-the AP starts). WPA2-PSK/CCMP is used with protected management frames explicitly
+`WebDisplay-XXXX` with its persistent per-device password.
+WPA2-PSK/CCMP is used with protected management frames explicitly
 disabled because the Pi 3's built-in Wi-Fi fails to initialize the AP otherwise.
 This does not disable WPA2 data encryption. The SSID, password and administration
 address (`https://10.42.0.1:8443/`)
 are shown on the display's fallback page. While the AP is up the saved Wi-Fi network is
-retried every 10 minutes; if that fails the AP returns with new credentials. The AP stops
+retried every 10 minutes; if that fails the AP returns with the same credentials. The AP stops
 as soon as the selected check passes again and the saved client network is restored.
 If a client connection attempt fails while the setup AP is active, the saved client
-profile is rolled back and the setup AP is immediately restored with rotated credentials.
+profile is rolled back and the setup AP is immediately restored with the same credentials.
 The saved Wi-Fi profile retries indefinitely, and the supervisor reactivates it every
 60 seconds if it is inactive and no setup AP is running, even when Ethernet is online or
 automatic AP is disabled. On supervisor restart, any stale setup AP is removed and the

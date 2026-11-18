@@ -91,6 +91,8 @@ def fallback_html(
             f"<p>Network: <strong>{html.escape(setup_ap['ssid'])}</strong></p>"
             f"<p>Password: <strong>{html.escape(setup_ap['password'])}</strong></p>"
         )
+        if isinstance(setup_ap.get("error"), str) and setup_ap["error"]:
+            ap_section += f"<p>{html.escape(setup_ap['error'])}</p>"
         qr = wifi_qr_svg(setup_ap["ssid"], setup_ap["password"])
         if qr:
             qr_section = f'<aside><div class="qr">{qr}</div><p>Scan to join</p></aside>'

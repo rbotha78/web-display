@@ -7,9 +7,9 @@ Policy:
 - Fresh images request a first-boot AP until a network is configured or connected.
 - Later automatic AP start is opt-in ("auto_ap", disabled by default).
 - The AP starts after FIRST_BOOT_GRACE or OUTAGE_GRACE seconds offline.
-- Every AP session gets a new random password (credential rotation).
+- The AP uses a hardware-derived SSID and a persistent, random per-device password.
 - While the AP is up, the saved Wi-Fi network is retried every RETRY_INTERVAL seconds;
-  if the retry fails the AP is restored with a new password.
+  if the retry fails the AP is restored with the same credentials.
 - The AP stops as soon as the display is connected again.
 """
 
@@ -28,9 +28,10 @@ import tempfile
 import time
 from pathlib import Path
 
+from .captive import Portal
 from .network import AP_CHECKS, DEFAULT_AP_CHECK, gateway_status, internet_status
 from .wifi_helper import KEYFILE as CLIENT_KEYFILE
-from .wifi_helper import current_country, run, wifi_device
+from .wifi_helper import connection_error, current_country, run, validate_psk, wifi_device
 
 LOG = logging.getLogger("web-display-network")
 AP_ID = "web-display-setup"
@@ -39,6 +40,9 @@ AP_INFO = Path("/run/web-display/setup-ap.json")
 LOCK_PATH = Path("/run/web-display/network.lock")
 CONFIG_PATH = Path("/var/lib/web-display/config.json")
 FIRST_BOOT_AP = Path("/var/lib/web-display-network/setup-pending")
+AP_PASSWORD = Path("/var/lib/web-display-network/setup-ap-password")
+BOARD_SERIAL = Path("/proc/device-tree/serial-number")
+MACHINE_ID = Path("/etc/machine-id")
 AP_ADDRESS = "10.42.0.1"
 FIRST_BOOT_GRACE = 30
 OUTAGE_GRACE = 120
@@ -59,8 +63,31 @@ def new_password(length: int = 12) -> str:
     return "".join(secrets.choice(PASSWORD_ALPHABET) for _ in range(length))
 
 
-def new_ssid() -> str:
-    return f"WebDisplay-{secrets.token_hex(2).upper()}"
+def setup_ssid() -> str:
+    try:
+        identifier = BOARD_SERIAL.read_text(encoding="ascii").strip("\x00 \r\n")
+    except FileNotFoundError:
+        LOG.warning("Board serial unavailable; using the machine ID for the setup AP name")
+        identifier = MACHINE_ID.read_text(encoding="ascii").strip()
+    if (len(identifier) not in (16, 32)
+            or not re.fullmatch(r"[0-9a-fA-F]+", identifier)
+            or int(identifier, 16) == 0):
+        raise ValueError("Invalid device identifier for the setup AP")
+    return f"WebDisplay-{identifier[-4:].upper()}"
+
+
+def ap_credentials() -> tuple[str, str]:
+    ssid = setup_ssid()
+    try:
+        password = AP_PASSWORD.read_text(encoding="ascii").removesuffix("\n")
+    except FileNotFoundError:
+        password = new_password()
+        AP_PASSWORD.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        write_private(AP_PASSWORD, password + "\n", 0o600)
+    if not password:
+        raise ValueError("Saved setup AP password is empty")
+    validate_psk(password)
+    return ssid, password
 
 
 def render_ap_keyfile(ssid: str, password: str, interface: str) -> str:
@@ -240,6 +267,14 @@ class Supervisor:
         self.radio_missing_since: float | None = None
         self.radio_reloads = 0
         self.last_radio_reload = -ADAPTER_RESET_COOLDOWN
+        self.portal: Portal | None = None
+
+    def ensure_portal(self) -> None:
+        if self.portal is None:
+            try:
+                self.portal = Portal(AP_ADDRESS)
+            except OSError as error:
+                LOG.warning("Setup captive portal could not start: %s; use HTTPS administration directly", error)
 
     def recover_missing_radio(self) -> None:
         """The Pi 3 chip sometimes fails its boot firmware download and never appears."""
@@ -281,7 +316,7 @@ class Supervisor:
             LOG.warning("Wi-Fi country is not set; cannot start setup AP")
             return False
         run(["rfkill", "unblock", "wifi"])
-        ssid, password = new_ssid(), new_password()
+        ssid, password = ap_credentials()
         run(["nmcli", "connection", "down", "web-display-wifi"])
         write_private(AP_KEYFILE, render_ap_keyfile(ssid, password, device), 0o600)
         run(["nmcli", "connection", "reload"])
@@ -296,7 +331,8 @@ class Supervisor:
             return False
         write_private(
             AP_INFO,
-            json.dumps({"ssid": ssid, "password": password, "address": AP_ADDRESS}) + "\n",
+            json.dumps({"ssid": ssid, "password": password, "address": AP_ADDRESS,
+                        "error": connection_error()}) + "\n",
             0o640,
             group="web-display",
         )
@@ -312,6 +348,9 @@ class Supervisor:
         AP_INFO.unlink(missing_ok=True)
 
     def stop_ap(self) -> None:
+        if self.portal is not None:
+            self.portal.close()
+            self.portal = None
         self.remove_ap_profile()
         self.ap_active = False
         LOG.info("Setup AP stopped")
@@ -367,11 +406,16 @@ class Supervisor:
 
     def tick(self, online: bool | None = None) -> None:
         now = self.clock()
-        if self.ap_active and not self.ap_is_up():
+        ap_up = self.ap_is_up()
+        if self.ap_active and not ap_up:
             LOG.info("Setup AP was displaced by another connection")
             self.stop_ap()
             self.restore_client()
             self.last_client_retry = now
+        elif not self.ap_active and ap_up and AP_INFO.exists():
+            # A failed provisioning helper can restore the AP between supervisor ticks.
+            self.ap_active = True
+            self.last_retry = now
         if (
             not self.ap_active
             and now - self.last_client_retry >= CLIENT_RETRY_INTERVAL
@@ -407,12 +451,16 @@ class Supervisor:
                     self.start_ap()
                 else:
                     self.offline_since = None
+            if self.ap_active:
+                self.ensure_portal()
             return
         grace = FIRST_BOOT_GRACE if initial_setup else OUTAGE_GRACE
         if now - self.offline_since >= grace:
             if not self.start_ap():
                 # Avoid hammering NetworkManager when AP cannot start.
                 self.offline_since = now - grace + 60
+            else:
+                self.ensure_portal()
 
 
 def locked_tick(supervisor: Supervisor) -> None:

@@ -26,6 +26,12 @@ class SupervisorTests(unittest.TestCase):
             patcher = patch.object(netmonitor, name, path)
             patcher.start()
             self.addCleanup(patcher.stop)
+        patcher = patch.object(netmonitor, "Portal")
+        self.portal = patcher.start()
+        self.addCleanup(patcher.stop)
+        patcher = patch.object(netmonitor, "AP_INFO", self.root / "ap.json")
+        patcher.start()
+        self.addCleanup(patcher.stop)
         self.clock = FakeClock()
         self.supervisor = Supervisor(self.clock, auto_ap=lambda: True)
         self.events = []
@@ -124,6 +130,17 @@ class SupervisorTests(unittest.TestCase):
         self.supervisor.tick(online=False)
         self.assertEqual(self.events, ["start"])
         self.assertTrue(self.pending.exists())
+
+    def test_restored_initial_ap_is_adopted_without_rotating_credentials(self):
+        self.pending.touch()
+        netmonitor.AP_INFO.write_text("{}")
+        self.supervisor.auto_ap = lambda: False
+        self.supervisor.tick(online=False)
+        self.clock.now += RETRY_INTERVAL
+        self.supervisor.tick(online=False)
+        self.assertTrue(self.supervisor.ap_active)
+        self.assertEqual(self.events, [])
+        self.portal.assert_called_once_with(netmonitor.AP_ADDRESS)
 
     def test_retries_saved_client_without_ap_even_when_ethernet_is_online(self):
         self.supervisor.ap_is_up = lambda: False
@@ -249,7 +266,15 @@ class SupervisorTests(unittest.TestCase):
 
 
 class ApConfigTests(unittest.TestCase):
-    def test_passwords_rotate_and_are_wpa2_length(self):
+    def test_stopping_ap_closes_the_captive_portal(self):
+        supervisor = Supervisor()
+        portal = supervisor.portal = Mock()
+        with patch.object(supervisor, "remove_ap_profile"):
+            supervisor.stop_ap()
+        portal.close.assert_called_once_with()
+        self.assertIsNone(supervisor.portal)
+
+    def test_generated_passwords_are_distinct_and_wpa2_length(self):
         passwords = {netmonitor.new_password() for _ in range(20)}
         self.assertEqual(len(passwords), 20)
         self.assertTrue(all(len(p) == 12 for p in passwords))
@@ -277,7 +302,8 @@ class FallbackTests(unittest.TestCase):
             root = Path(directory)
             info = root / "ap.json"
             info.write_text(
-                json.dumps({"ssid": "WebDisplay-AB12", "password": "pw<>", "address": "10.42.0.1"})
+                json.dumps({"ssid": "WebDisplay-AB12", "password": "pw<>", "address": "10.42.0.1",
+                            "error": "Association failed <check router>"})
             )
             with patch.object(kiosk, "local_addresses", return_value=["192.168.0.5"]):
                 page = kiosk.fallback_html(root / "none", root / "none", 8443, info)
@@ -285,6 +311,7 @@ class FallbackTests(unittest.TestCase):
         self.assertIn("WebDisplay-AB12", page)
         self.assertIn("pw&lt;&gt;", page)
         self.assertIn("https://10.42.0.1:8443/", page)
+        self.assertIn("Association failed &lt;check router&gt;", page)
         self.assertNotIn("WebDisplay-AB12", plain)
         self.assertNotIn('class="qr"', plain)
 
@@ -305,6 +332,82 @@ class FallbackTests(unittest.TestCase):
         self.assertNotIn("http://", page.replace("http://www.w3.org/2000/svg", ""))
 
 
+class ApCredentialTests(unittest.TestCase):
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.root = Path(directory.name)
+        self.serial = self.root / "serial"
+        self.serial.write_text("00000000aabbccdd\x00", encoding="ascii")
+        self.machine_id = self.root / "machine-id"
+        self.machine_id.write_text("0123456789abcdef0123456789abcdef\n")
+        self.password = self.root / "state" / "setup-ap-password"
+        for name, path in (("BOARD_SERIAL", self.serial), ("MACHINE_ID", self.machine_id),
+                           ("AP_PASSWORD", self.password)):
+            patcher = patch.object(netmonitor, name, path)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def test_ssid_uses_board_serial_instead_of_machine_id(self):
+        self.assertEqual(netmonitor.setup_ssid(), "WebDisplay-CCDD")
+        self.machine_id.write_text("f" * 32)
+        self.assertEqual(netmonitor.setup_ssid(), "WebDisplay-CCDD")
+
+    def test_missing_board_serial_uses_machine_id_and_invalid_identity_is_rejected(self):
+        self.serial.unlink()
+        with self.assertLogs(netmonitor.LOG, level="WARNING"):
+            self.assertEqual(netmonitor.setup_ssid(), "WebDisplay-CDEF")
+        self.serial.write_text("0000000000000000")
+        with self.assertRaisesRegex(ValueError, "identifier"):
+            netmonitor.setup_ssid()
+
+    def test_password_is_persisted_privately_and_not_regenerated(self):
+        with patch.object(netmonitor, "new_password", wraps=netmonitor.new_password) as generate:
+            first = netmonitor.ap_credentials()
+            second = netmonitor.ap_credentials()
+        self.assertEqual(first, second)
+        self.assertEqual(first[0], "WebDisplay-CCDD")
+        self.assertEqual(self.password.read_text(), first[1] + "\n")
+        self.assertEqual(self.password.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(self.password.parent.stat().st_mode & 0o777, 0o700)
+        generate.assert_called_once_with()
+
+    def test_invalid_saved_password_fails_instead_of_changing_credentials(self):
+        self.password.parent.mkdir()
+        for content in ("", "short\n", "a" * 64, "invalid\npassword\n"):
+            with self.subTest(content=content):
+                self.password.write_text(content)
+                with patch.object(netmonitor, "new_password") as generate:
+                    with self.assertRaises(ValueError):
+                        netmonitor.ap_credentials()
+                generate.assert_not_called()
+                self.assertEqual(self.password.read_text(), content)
+
+    def test_stopping_and_restarting_ap_on_another_adapter_keeps_credentials(self):
+        info = self.root / "ap.json"
+        keyfile = self.root / "ap.nmconnection"
+        with (
+            patch.object(netmonitor, "ap_device", side_effect=["wlan0", "wlan1"]),
+            patch.object(netmonitor, "current_country", return_value="GB"),
+            patch.object(netmonitor, "connection_error", return_value=""),
+            patch.object(netmonitor, "run", return_value=Mock(returncode=0)),
+            patch.object(netmonitor, "AP_KEYFILE", keyfile),
+            patch.object(netmonitor, "AP_INFO", info),
+            patch("grp.getgrnam", return_value=Mock(gr_gid=123)),
+            patch.object(netmonitor.os, "chown"),
+        ):
+            supervisor = Supervisor()
+            self.assertTrue(supervisor.start_ap())
+            first = json.loads(info.read_text())
+            supervisor.stop_ap()
+            self.assertFalse(info.exists())
+            self.assertTrue(self.password.exists())
+            self.assertTrue(Supervisor().start_ap())
+            self.assertEqual(json.loads(info.read_text()), first)
+            self.assertIn("interface-name=wlan1", keyfile.read_text())
+            self.assertIn(f"psk={first['password']}", keyfile.read_text())
+
+
 class StartFailureTests(unittest.TestCase):
     def test_failed_ap_start_restores_saved_client(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -312,6 +415,8 @@ class StartFailureTests(unittest.TestCase):
             with (
                 patch.object(netmonitor, "ap_device", return_value="wlan0"),
                 patch.object(netmonitor, "current_country", return_value="GB"),
+                patch.object(netmonitor, "ap_credentials",
+                             return_value=("WebDisplay-CCDD", "abcdefgh2345")),
                 patch.object(netmonitor, "run") as run,
                 patch.object(netmonitor, "AP_KEYFILE", root / "ap.nmconnection"),
                 patch.object(netmonitor, "AP_INFO", root / "ap.json"),
