@@ -3,8 +3,11 @@
 A 32-bit Raspberry Pi OS appliance for Raspberry Pi 2 and Raspberry Pi 3,
 with Chromium on HDMI, authenticated HTTPS administration, Wi-Fi provisioning,
 signed application updates and PC and Android display managers.
-Release **[v0.5.23](https://github.com/rbotha78/web-display/releases/tag/v0.5.23)**
-adds **internet radio** from the Radio Browser directory as a background-music
+Release **[v0.5.24](https://github.com/rbotha78/web-display/releases/tag/v0.5.24)**
+adds stable hardware-derived setup AP names and passwords for recovery from any
+phone or computer, captive-portal discovery, more reliable Wi-Fi provisioning
+rollback and correct MPV access to wired and Bluetooth audio. v0.5.23 added
+**internet radio** from the Radio Browser directory as a background-music
 source (no Plex needed), relayed in sync to music-group followers, shows the Now
 playing scene only while music plays, and reports sleeping music groups correctly.
 v0.5.22 made the automatic setup AP treat the display as offline only when its default
