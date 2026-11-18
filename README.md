@@ -3,10 +3,13 @@
 A 32-bit Raspberry Pi OS appliance for Raspberry Pi 2 and Raspberry Pi 3,
 with Chromium on HDMI, authenticated HTTPS administration, Wi-Fi provisioning,
 signed application updates and PC and Android display managers.
-Release **[v0.5.24](https://github.com/rbotha78/web-display/releases/tag/v0.5.24)**
-adds stable hardware-derived setup AP names and passwords for recovery from any
-phone or computer, captive-portal discovery, more reliable Wi-Fi provisioning
-rollback and correct MPV access to wired and Bluetooth audio. v0.5.23 added
+Release **[v0.5.25](https://github.com/rbotha78/web-display/releases/tag/v0.5.25)**
+adds automatic recovery from stalled internet-radio relay buffers and correct
+48 kHz 16-bit playback through the Pi 3 3.5 mm headphone output. It also adds
+the confirmed Pi Zero 2 W WPA3/SAE compatibility boot workaround.
+v0.5.24 added stable hardware-derived setup AP names and passwords for recovery
+from any phone or computer, captive-portal discovery and more reliable Wi-Fi
+provisioning rollback. v0.5.23 added
 **internet radio** from the Radio Browser directory as a background-music
 source (no Plex needed), relayed in sync to music-group followers, shows the Now
 playing scene only while music plays, and reports sleeping music groups correctly.
@@ -758,11 +761,17 @@ new image or a development deployment, not just a signed application bundle.
 hotspot with CCMP for both pairwise and group traffic. On MikroTik RouterOS
 7.25.1, the original Raspberry Pi `wpasupplicant` `2:2.10-24+rpt3` reconnected
 successfully in both 802.11g and 802.11n modes with WPA2/CCMP; the 802.11n
-connection negotiated a 72.2 Mbit/s link rate. Re-enabling WPA3 on the working
-802.11n setup reproduced authentication failures; disabling WPA3 restored the
-WPA2 connection. Use a WPA2/CCMP-only SSID for this tested configuration.
-FT/802.11r remained disabled in the working baseline. Compatibility with the
-original 802.11ax/40 MHz radio settings remains unconfirmed.
+connection negotiated a 72.2 Mbit/s link rate. FT/802.11r remained disabled in
+the working baseline. Compatibility with the original 802.11ax/40 MHz radio
+settings remains unconfirmed.
+
+On a tested Zero 2 W, WPA3 authentication failed while `brcmfmac` advertised
+`SAE_EXT`. Adding `brcmfmac.feature_disable=0x2282000` to the existing single-line
+`/boot/firmware/cmdline.txt` prevented that advertisement and allowed WPA3 to
+be re-enabled on the AP. This is a Zero 2 W boot workaround, not a global
+default or a signed application update. Preserve the existing arguments and
+reboot after editing the line. If the workaround is removed, WPA3 compatibility
+is not established for that boot configuration.
 Neither TKIP nor a package downgrade or hold is required. Do not weaken the
 image's security defaults.
 
