@@ -4,6 +4,7 @@ __pycache__/
 *.py[cod]
 
 ui/node_modules/
+cyd/.pio/
 
 android/.gradle/
 android/.kotlin/
