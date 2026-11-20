@@ -13,6 +13,49 @@ vitals or deployment instructions.
 
 ## Current Repository And Release
 
+### ESP32-2432S028R companion (2026-11-20)
+
+- New `cyd/` PlatformIO project targets the attached standard ESP32-2432S028R
+  board with LovyanGFX, ArduinoJson and min-SPIFFS OTA-capable partitions.
+- The attached remote device is PlatformIO Remote `HomePC:COM5`, CH340
+  `USB VID:PID=1A86:7523`. Build, upload and monitor operations must use
+  `pio remote -a HomePC`; the board is ESP32-D0WD-V3 revision 3.1 with 4 MB
+  flash, 320 KB RAM, 40 MHz crystal and no PSRAM.
+- Implemented captive-portal Wi-Fi provisioning, Pi certificate fingerprint
+  display/confirmation/pinning, pairing-code or password enrollment, dedicated
+  API-key minting, NVS persistence, factory-reset boot gesture, reconnect
+  backoff, native dashboard/weather/train/music views and touch controls for
+  carousel pause/resume/next and music play/pause/resume/stop/skip.
+- `/api/remote-view` now exposes sanitized `carousel_paused` and background
+  now-playing metadata even outside the music scene. Focused Python remote-view
+  tests and UI typechecking pass.
+- Current CYD release firmware uses 59% of a 1.966 MB app partition (about
+  1.16 MB). Both `cyd` and explicit-development `cyd-dev` builds compile. The
+  latter alone enables HTTP selection; release firmware rejects it.
+- Physical validation completed on the attached board: serial upload/hash,
+  reboot, 320x240 LovyanGFX output initialization, no-PSRAM detection, NVS boot
+  persistence and setup-AP startup at `WebDisplay-CYD-bfb4`. The final 0.2.0
+  release firmware was uploaded and hash-verified through `HomePC:COM5`, then
+  booted to that setup AP. The user completed certificate comparison and
+  dedicated-key enrollment against Pi 3, and the CYD retained that enrollment
+  across firmware uploads. This board requires display rotation 3, VSPI XPT2046,
+  ADC limits 200-3900, touch rotation offset 2 and Y inversion. With those
+  settings, the train view renders upright and all five physical buttons map
+  correctly: carousel pause/resume, next, music play/pause, stop and skip.
+  The attached network did not resolve the saved `.local` name reliably after
+  reboot, so the validated enrollment uses the current Pi 3 address
+  `192.168.0.251:8443`; mDNS service lookup remains present as a fallback.
+- The Pi-side companion contract was pushed to the confirmed development Pi 2
+  (`192.168.0.249`), Pi 3 (`192.168.0.251`) and Pi Zero 2 W
+  (`192.168.0.246`) on 2026-11-20 with `--restart-kiosk` and pinned SSH/SCP.
+  All services are active and report `/health`; their deployed
+  `remote_view.py` hash matches the repository and each live kiosk snapshot
+  contains `carousel_paused` plus background `music`.
+- Not yet accepted on hardware: all weather/dashboard/music rendered scene
+  variants, reconnect/endurance, heap under repeated train payloads and OTA.
+  OTA delivery is not implemented; current firmware updates use the attached
+  USB/serial path.
+
 - Unreleased image-build change: `WPA_COUNTRY` defaults to `GB`, is validated
   before build side effects, is passed through pi-gen and participates in the
   development-base cache identity. Manual image workflows expose `wifi_country`;

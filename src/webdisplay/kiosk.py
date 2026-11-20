@@ -415,7 +415,7 @@ def main() -> None:
                 train_path=target_path.with_name("train-board.json"),
                 weather_path=target_path.with_name("weather.json"),
                 music=music.now_playing(),
-            ))
+            ) | {"carousel_paused": bool(renderer and renderer.paused)})
         except (OSError, ValueError):
             LOG.exception("Could not publish remote view")
             remote_path.unlink(missing_ok=True)

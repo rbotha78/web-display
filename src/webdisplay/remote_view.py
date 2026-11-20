@@ -186,6 +186,7 @@ def snapshot(mode: str, scene: object, sleep: dict, message: str = "", *,
     now = datetime.now().astimezone()
     result = {
         "available": True, "mode": mode, "updated": time.time(),
+        "carousel_paused": False,
         "device_time": now.isoformat(timespec="seconds"), "timezone": now.tzname() or "",
         "scene": active, "train": None, "weather": None, "music": None, "message": message,
         "sleep": {key: sleep.get(key) for key in ("sleeping", "scheduled_sleep", "wake_until")},
@@ -199,7 +200,7 @@ def snapshot(mode: str, scene: object, sleep: dict, message: str = "", *,
                 result["train"] = sanitize_train(board)
         except (OSError, ValueError):
             pass
-    if active and active["kind"] == "music":
+    if music is not None:
         result["music"] = sanitize_music(music or {})
     if active and (active["kind"] in ("weather", "train") or active.get("show_weather")):
         try:
@@ -250,9 +251,12 @@ def load(path: Path | None = None) -> dict:
     ):
         raise ValueError("Invalid remote view wake deadline")
     result = _fields(value, ("device_time", "timezone", "message"))
-    result.update(available=True, mode=mode, updated=updated, scene=active, sleep=sleep, train=None, weather=None,
-                  music=None)
-    if active and active["kind"] == "music" and isinstance(value.get("music"), dict):
+    carousel_paused = value.get("carousel_paused", False)
+    if type(carousel_paused) is not bool:
+        raise ValueError("Invalid carousel pause state")
+    result.update(available=True, mode=mode, updated=updated, carousel_paused=carousel_paused,
+                  scene=active, sleep=sleep, train=None, weather=None, music=None)
+    if isinstance(value.get("music"), dict):
         result["music"] = sanitize_music(value["music"])
     if active and active["kind"] == "train" and value.get("train") is not None:
         board = sanitize_train(value["train"])

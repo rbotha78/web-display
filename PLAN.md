@@ -1,5 +1,21 @@
 # Raspberry Pi Web Display
 
+## ESP32-2432S028R Companion (Approved 2026-11-20)
+
+- Implement a PlatformIO/LovyanGFX companion, not an ESP32 copy of the Linux
+  renderer. The Pi retains Chromium, mpv, credentials, providers and playback.
+- The first implementation provides captive-portal provisioning, SHA-256
+  certificate pinning, bearer-key enrollment, dashboard/weather/train/music
+  remote views and carousel/music touch controls.
+- Release firmware is pinned HTTPS. A separate development-only `cyd-dev`
+  environment permits explicitly selected HTTP.
+- ESP32 UI, networking and enrollment remain under `cyd/`; Pi-side changes are
+  limited to the sanitized remote-view contract.
+- USB/serial is the accepted development delivery path. Native signed OTA
+  remains future scope; the partition layout reserves room for it.
+- Physical touch, enrollment, reconnect and endurance acceptance remain open
+  until checked on the attached board and a real Pi.
+
 ## Goal
 
 Produce a bootable appliance image that displays a configurable web page on an

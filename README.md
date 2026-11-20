@@ -20,6 +20,27 @@ song and clock), floating music-group players in both managers, the saved Wi-Fi
 SSID on settings and device cards, and drift correction for music sync groups
 without mid-song pauses. Fresh images preset the Wi-Fi country. v0.5.20 added
 Bluetooth speakers, which require its newer base image.
+
+## ESP32-2432S028R companion display
+
+The repository now contains an isolated PlatformIO/LovyanGFX firmware project
+under `cyd/` for the ESP32-2432S028R Cheap Yellow Display. It is a companion,
+not a replacement renderer: the Raspberry Pi continues to own Chromium, mpv,
+provider credentials, playlist timing and media playback. The CYD shows the
+sanitized active remote view (dashboard, weather, train and now-playing music)
+and provides five touch controls for carousel and background-music transport.
+
+First boot starts a password-protected captive portal on the CYD. Enrollment
+confirms the Pi's SHA-256 certificate fingerprint, obtains a dedicated bearer
+API key and stores that key plus Wi-Fi credentials in ESP32 NVS; the Pi
+administrator password is not retained. Normal firmware requires
+fingerprint-pinned HTTPS. A separate `cyd-dev` build can select HTTP for
+controlled development only.
+
+The CYD receives `carousel_paused` and background-music text through the
+sanitized `/api/remote-view` payload. It never receives provider tokens, Plex
+playback capabilities or private configuration. Firmware, wiring and remote
+PlatformIO instructions are in [`cyd/README.md`](cyd/README.md).
 Saving settings retains the saved values when confirmation notifications appear,
 without reloading stale configuration into the editor.
 Administration opens on **Global settings** (display defaults, sleep, provider credentials,

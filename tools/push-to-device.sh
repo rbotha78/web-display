@@ -12,12 +12,13 @@ if [[ $# -ne 1 ]]; then
 	exit 2
 fi
 target="$1"
+ssh_options=(-o StrictHostKeyChecking=yes -o BatchMode=yes)
 root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 files="${root}/image/stage-web-display/01-install/files"
 stage="/tmp/web-display-push"
 
-ssh "${target}" "rm -rf ${stage} && mkdir -p ${stage}"
-scp -q -r "${root}/src/webdisplay" "${target}:${stage}/webdisplay"
+ssh "${ssh_options[@]}" "${target}" "rm -rf ${stage} && mkdir -p ${stage}"
+scp "${ssh_options[@]}" -q -r "${root}/src/webdisplay" "${target}:${stage}/webdisplay"
 manifest="${files}/install-manifest"
 sources=()
 install_commands=""
@@ -30,9 +31,10 @@ while read -r mode source destination; do
 		sudoers+="visudo -cf ${stage}/${source}"$'\n'
 	fi
 done <"${manifest}"
-scp -q "${sources[@]}" "${files}/debug-keys-action" "${files}/web-display-debug-sudoers" "${target}:${stage}/"
+scp "${ssh_options[@]}" -q "${sources[@]}" "${files}/debug-keys-action" \
+	"${files}/web-display-debug-sudoers" "${target}:${stage}/"
 
-ssh "${target}" "sudo sh -eu" <<EOF
+ssh "${ssh_options[@]}" "${target}" "sudo sh -eu" <<EOF
 rm -rf /usr/lib/python3/dist-packages/webdisplay
 cp -a ${stage}/webdisplay /usr/lib/python3/dist-packages/webdisplay
 ${sudoers}${install_commands}# The development SSH-key helper belongs only on devices that still have debug access enabled.

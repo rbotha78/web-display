@@ -178,6 +178,14 @@ HTTPS service and upstream headers, never in scene data or player URLs.
 - Keep API changes consistent across the device handler, `ui/src/api.ts`, and,
   when the manager exposes the operation, its Python client/service/server and
   `ui/src/manager/api.ts`. Device session mutations require `X-CSRF-Token`;
+
+  The `cyd/` PlatformIO project is an ESP32-2432S028R companion client, not a
+  replacement for the Linux renderer. It uses LovyanGFX, captive-portal pairing,
+  NVS-stored bearer credentials and a SHA-256-pinned HTTPS remote-view transport.
+  Keep provider tokens, Plex playback capability URLs and private Pi configuration
+  off the CYD contract. Normal CYD builds reject HTTP; only the separate `cyd-dev`
+  environment may enable it. Device operations for the attached board use
+  `pio remote -a HomePC`, not a local serial upload. Device session mutations require `X-CSRF-Token`;
   bearer API keys bypass CSRF but cannot create, list, or revoke keys. Keys are
   returned once and only their hashes are stored on-device.
 - Keep the PC and Android managers at feature parity. The PC manager reuses the

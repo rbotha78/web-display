@@ -4,6 +4,7 @@ import type { WeatherData } from "./components/WeatherDisplay";
 export interface RemoteView {
   available: true;
   mode: "carousel" | "single" | "recovery";
+  carousel_paused?: boolean;
   updated: number;
   heartbeat_age_seconds?: number;
   device_time: string;

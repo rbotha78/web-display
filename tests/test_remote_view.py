@@ -52,6 +52,14 @@ class RemoteViewTests(unittest.TestCase):
                                           "next_title": "Later"})
         self.assertNotIn("capability", self.path.read_text())
 
+    def test_background_music_remains_available_outside_music_scene(self):
+        music = {"state": "playing", "title": "Song", "artist": "Band"}
+        value = snapshot(
+            "single", {"id": "page", "kind": "web", "url": "https://example.test"},
+            SLEEP, music=music)
+        publish(self.path, value)
+        self.assertEqual(load(self.path)["music"], music)
+
     def test_single_recovery_sleep_and_notice_text(self):
         self.publish({"id": "single", "kind": "web", "url": "https://user:secret@site.example/page?token=x"},
                      "single", sleep={**SLEEP, "sleeping": True, "scheduled_sleep": True})
@@ -67,6 +75,13 @@ class RemoteViewTests(unittest.TestCase):
         self.assertEqual(value["message"], "Setup access point active")
         self.publish({"id": "notice", "kind": "dashboard", "text": "<script>text only</script>"}, "carousel")
         self.assertEqual(load(self.path)["scene"]["text"], "<script>text only</script>")
+
+    def test_carousel_pause_state_is_public_but_must_be_boolean(self):
+        self.publish(carousel_paused=True)
+        self.assertIs(load(self.path)["carousel_paused"], True)
+        self.publish(carousel_paused="true")
+        with self.assertRaises(ValueError):
+            load(self.path)
 
     def test_stale_stopped_restarted_and_malformed_runtime_are_unavailable(self):
         for changes in ({"updated": time.time() - 16}, {"updated": time.time() + 10},
