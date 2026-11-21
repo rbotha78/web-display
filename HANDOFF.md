@@ -102,6 +102,13 @@ vitals or deployment instructions.
 - CYD 0.2.15-0.2.16 round temperature to the nearest degree, preserve wind as
   tenths of km/h, use consistent text sizing in both widget lines and enlarge
   the widgets date. Physical checks confirmed temperature, wind, layout and date.
+- On 2026-11-20/21, Pi 3 temporarily stopped completing local or external HTTPS
+  requests on port 8443 while `web-display.service` remained active and listening.
+  Restarting the unit restored `/health` immediately. There was no service
+  restart count, OOM entry, coredump, segfault, Python traceback or fatal listener
+  log in the retained evidence, so this is documented as a listener stall, not a
+  confirmed HTTPS process crash. The CYD diagnosis should wait for health or
+  add watchdog behavior rather than infer a crash from request timeouts.
 - Not yet accepted on hardware: all weather/dashboard/music rendered scene
   variants, reconnect/endurance, heap under repeated train payloads and OTA.
   OTA delivery is not implemented; current firmware updates use the attached
