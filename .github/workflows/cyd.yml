@@ -44,7 +44,7 @@ jobs:
           import re
           from pathlib import Path
           text = Path("cyd/platformio.ini").read_text()
-          match = re.search(r'-DCYD_VERSION=\\\\"([^"]+)\\\\\"', text)
+          match = re.search(r'CYD_VERSION=\\"([^"\\]+)\\"', text)
           if not match:
               raise SystemExit("CYD_VERSION is missing from cyd/platformio.ini")
           print(match.group(1))
