@@ -1,5 +1,7 @@
 #include "RemoteView.h"
 
+#include <cmath>
+
 namespace {
 
 String errorFrom(const ApiResponse& response, const char* fallback) {
@@ -63,6 +65,8 @@ bool RemoteViewClient::fetch(
     next.scene_kind = text(document["scene"]["kind"], 20);
     next.scene_title = text(document["scene"]["title"], 80);
     next.scene_text = text(document["scene"]["text"], 180);
+    next.scene_layout = text(document["scene"]["layout"], 20);
+    next.show_weather = document["scene"]["show_weather"] | false;
   }
 
   if (!document["weather"].isNull()) {
@@ -71,9 +75,11 @@ bool RemoteViewClient::fetch(
     next.weather_location = text(weather["location"], 50);
     next.weather_description = text(weather["description"], 50);
     next.weather_error = text(weather["error"], 100);
-    next.weather_temperature = weather["temperature"] | 0;
+    next.weather_icon = text(weather["icon"], 10);
+    next.weather_temperature = static_cast<int>(
+        std::lround(static_cast<double>(weather["temperature"] | 0.0)));
     next.weather_humidity = weather["humidity"] | 0;
-    next.weather_wind_kmh = weather["wind_kmh"] | 0;
+    next.weather_wind_kmh = static_cast<float>(weather["wind_kmh"] | 0.0);
     next.weather_stale = weather["stale"] | false;
   }
 
@@ -92,6 +98,8 @@ bool RemoteViewClient::fetch(
       target.destination = text(row["destination"], 36);
       target.platform = text(row["platform"], 6);
       target.status = text(row["status"], 30);
+      target.estimated = text(row["estimated"], 30);
+      target.state = text(row["state"], 30);
       target.delayed = String(row["state"] | "") == "delayed";
       target.cancelled = row["cancelled"] | false;
     }

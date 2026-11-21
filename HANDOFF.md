@@ -65,6 +65,43 @@ vitals or deployment instructions.
   `cyd-dev`, attaches provenance and SHA-256 checksums to published releases,
   and uploads 14-day CI artifacts. The CYD's `CYD_VERSION` remains separate
   from the Raspberry Pi release tag.
+- CYD 0.2.2 fixes train status rendering by showing estimated/state fallbacks
+  for every departure and wrapping long status text across two lines. It also
+  uses a content signature to avoid redrawing unchanged scenes between
+  five-second remote-view polls and replaces the generic carousel header with
+  current music/radio title and artist.
+- CYD 0.2.3 widens train destination text and gives status
+  the remaining right-side column while retaining platform and word-aware wraps.
+- CYD 0.2.4 renders dashboard/widget layouts with clock/date, notice text and
+  optional weather from the existing sanitized remote-view payload.
+- CYD 0.2.5 hides the permanent header clock while the dashboard clock widget
+  is active, reduces the dashboard clock size, separates the date row, and
+  renders weather in a larger dedicated bottom strip.
+- CYD 0.2.6 restores a larger dashboard clock, constrains weather to a short
+  bottom strip and adds a serial `S` framebuffer dump for screenshot inspection.
+- CYD 0.2.7 uses 16-row serial framebuffer chunks so `S` captures all 320x240
+  pixels without exhausting ESP32 heap. Local usbip upload and PNG capture
+  confirmed a readable dashboard clock/date and dedicated lower control layout.
+- CYD 0.2.8 moved weather information into a dedicated two-line bottom strip
+  above the control headings and removed the duplicate music/radio title from
+  the top bar during the now-playing scene.
+- CYD 0.2.9 investigated the framebuffer crash and made screenshot storage
+  static. CYD 0.2.10 removed the crash-capable serial framebuffer diagnostic,
+  preserving the layout fixes in a stable normal firmware build.
+- CYD 0.2.11 embeds compact weather icons and gives the dashboard weather strip
+  a location/conditions line plus humidity/wind line with a 24-pixel icon.
+- CYD 0.2.12-0.2.14 increase weather readability and icon scale: widget icons
+  are 32 pixels and standalone weather icons are 48 pixels beside the
+  temperature/forecast area; locations are limited to fit the widget strip.
+- CYD 0.2.15 rounds Pi weather temperature values before display, prevents
+  widget location clipping and separates location/temperature/forecast from
+  humidity/wind text.
+- CYD 0.2.12 enlarges the widget weather strip, keeps location/conditions and
+  humidity/wind on separate lines, and renders the same embedded icon on both
+  widget and standalone weather scenes.
+- CYD 0.2.15-0.2.16 round temperature to the nearest degree, preserve wind as
+  tenths of km/h, use consistent text sizing in both widget lines and enlarge
+  the widgets date. Physical checks confirmed temperature, wind, layout and date.
 - Not yet accepted on hardware: all weather/dashboard/music rendered scene
   variants, reconnect/endurance, heap under repeated train payloads and OTA.
   OTA delivery is not implemented; current firmware updates use the attached

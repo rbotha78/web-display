@@ -16,11 +16,25 @@ Web Display; it does not render Chromium pages or play video/audio.
 - Touch controls for carousel pause/resume/next and music play/pause/resume,
   stop and skip.
 - Offline, stale-heartbeat and certificate-change states.
+- Train status uses each service's dedicated column and wraps long statuses
+  instead of truncating. Unchanged remote snapshots do not redraw the full
+  screen; only changed scene data or the minute clock refreshes the UI.
+- The top header shows the current music/radio track and artist instead of the
+  generic carousel label.
+- Dashboard/widget scenes show clock/date, notice text and optional weather
+  using the sanitized remote-view payload.
+- Weather widgets include compact embedded sun, cloud, rain, storm, snow and
+  mist icons without external assets or network requests.
+- Dashboard weather uses a dedicated bottom strip above the control headings,
+  with location/temperature/conditions and humidity/wind on separate lines.
+  The now-playing scene leaves the top title area clear because it is already
+  showing the track in its main scene.
 - NVS persistence, reconnect backoff and a physical reset flow.
 - Runtime landscape orientation selection persisted in NVS. A short BOOT press
   toggles 180-degree orientation; holding BOOT for five seconds resets enrollment.
 - DNS and `_web-display._tcp` mDNS endpoint resolution, with direct IPv4
   enrollment available on networks that block local name resolution.
+- Dashboard/widget scenes use clock/date, notice text and optional weather.
 
 The remote view contains sanitized public display state only. Plex capability
 URLs, provider tokens and the Pi private configuration are not copied to the
