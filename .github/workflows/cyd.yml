@@ -1,0 +1,114 @@
+name: CYD firmware
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - cyd/**
+      - .github/workflows/cyd.yml
+  pull_request:
+    paths:
+      - cyd/**
+      - .github/workflows/cyd.yml
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cyd-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install PlatformIO
+        run: python3 -m pip install --disable-pip-version-check platformio==6.1.18
+
+      - name: Read CYD firmware version
+        id: cyd
+        shell: bash
+        run: |
+          version="$(
+            python3 - <<'PY'
+          import re
+          from pathlib import Path
+          text = Path("cyd/platformio.ini").read_text()
+          match = re.search(r'-DCYD_VERSION=\\\\"([^"]+)\\\\\"', text)
+          if not match:
+              raise SystemExit("CYD_VERSION is missing from cyd/platformio.ini")
+          print(match.group(1))
+          PY
+          )"
+          test "$version" != ""
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+
+      - name: Build release firmware
+        working-directory: cyd
+        run: |
+          test -z "$(
+            sed -n '/^\[env:cyd\]/,/^\[env:cyd-dev\]/p' platformio.ini |
+              grep -o CYD_ALLOW_INSECURE_HTTP || true
+          )"
+          pio run -e cyd
+
+      - name: Assemble release assets
+        env:
+          CYD_VERSION: ${{ steps.cyd.outputs.version }}
+        shell: bash
+        run: |
+          mkdir -p cyd/dist
+          cp cyd/.pio/build/cyd/firmware.bin "cyd/dist/web-display-cyd-${CYD_VERSION}.bin"
+          cp cyd/.pio/build/cyd/bootloader.bin "cyd/dist/web-display-cyd-${CYD_VERSION}-bootloader.bin"
+          cp cyd/.pio/build/cyd/partitions.bin "cyd/dist/web-display-cyd-${CYD_VERSION}-partitions.bin"
+          cp cyd/.pio/build/cyd/firmware.elf "cyd/dist/web-display-cyd-${CYD_VERSION}.elf"
+          boot_app0="$(
+            find "${HOME}/.platformio/packages" \
+              -path '*/tools/partitions/boot_app0.bin' -print -quit
+          )"
+          test -n "${boot_app0}"
+          cp "${boot_app0}" \
+            "cyd/dist/web-display-cyd-${CYD_VERSION}-boot-app0.bin"
+          cd cyd/dist
+          sha256sum * | sort -k2 > "SHA256SUMS-cyd-${CYD_VERSION}"
+
+      - name: Attest CYD firmware provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            cyd/dist/*.bin
+            cyd/dist/*.elf
+
+      - name: Upload CYD firmware artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: web-display-cyd-${{ steps.cyd.outputs.version }}
+          path: cyd/dist/*
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+
+      - name: Attach CYD firmware to release
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name }}
+          CYD_VERSION: ${{ steps.cyd.outputs.version }}
+        run: |
+          gh release upload "${TAG}" \
+            cyd/dist/web-display-cyd-"${CYD_VERSION}".bin \
+            cyd/dist/web-display-cyd-"${CYD_VERSION}"-bootloader.bin \
+            cyd/dist/web-display-cyd-"${CYD_VERSION}"-partitions.bin \
+            cyd/dist/web-display-cyd-"${CYD_VERSION}"-boot-app0.bin \
+            cyd/dist/web-display-cyd-"${CYD_VERSION}".elf \
+            cyd/dist/SHA256SUMS-cyd-"${CYD_VERSION}" --clobber

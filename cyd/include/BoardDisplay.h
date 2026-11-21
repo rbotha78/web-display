@@ -18,7 +18,8 @@ class CydDisplay : public lgfx::LGFX_Device {
 
 class BoardDisplay {
  public:
-  void begin();
+  void begin(std::uint8_t orientation);
+  void setOrientation(std::uint8_t orientation);
   void loop();
   bool takeTouch(std::uint16_t& x, std::uint16_t& y);
 

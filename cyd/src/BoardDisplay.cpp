@@ -70,9 +70,9 @@ CydDisplay::CydDisplay() {
   }
 }
 
-void BoardDisplay::begin() {
+void BoardDisplay::begin(std::uint8_t orientation) {
   display_.begin();
-  display_.setRotation(3);
+  setOrientation(orientation);
   display_.setBrightness(220);
   display_.setTextWrap(false);
 
@@ -81,6 +81,10 @@ void BoardDisplay::begin() {
   boot_count_ = preferences.getLong("boots", 0) + 1;
   preferences.putLong("boots", boot_count_);
   preferences.end();
+}
+
+void BoardDisplay::setOrientation(std::uint8_t orientation) {
+  display_.setRotation(orientation == 1 ? 1 : 3);
 }
 
 void BoardDisplay::loop() {

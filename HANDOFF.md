@@ -38,10 +38,19 @@ vitals or deployment instructions.
   release firmware was uploaded and hash-verified through `HomePC:COM5`, then
   booted to that setup AP. The user completed certificate comparison and
   dedicated-key enrollment against Pi 3, and the CYD retained that enrollment
-  across firmware uploads. This board requires display rotation 3, VSPI XPT2046,
+  across firmware uploads. This board requires VSPI XPT2046,
   ADC limits 200-3900, touch rotation offset 2 and Y inversion. With those
   settings, the train view renders upright and all five physical buttons map
   correctly: carousel pause/resume, next, music play/pause, stop and skip.
+  Orientation is now persisted as rotation 1 or 3. New devices default to
+  rotation 1 (180 degrees from the originally validated orientation), the
+  provisioning portal offers both choices, and a short BOOT press toggles and
+  saves it while running; a five-second hold retains factory reset.
+  On 2026-11-21, 0.2.1 was physically checked on `HomePC:COM5`: rotation 1
+  starts upright in the requested flipped direction, one BOOT press produces
+  exactly one 180-degree change, touch remains mapped correctly in both
+  directions, and a one-time NVS migration leaves the attached device in the
+  flipped orientation without overriding later versioned selections.
   The attached network did not resolve the saved `.local` name reliably after
   reboot, so the validated enrollment uses the current Pi 3 address
   `192.168.0.251:8443`; mDNS service lookup remains present as a fallback.
@@ -51,6 +60,11 @@ vitals or deployment instructions.
   All services are active and report `/health`; their deployed
   `remote_view.py` hash matches the repository and each live kiosk snapshot
   contains `carousel_paused` plus background `music`.
+- GitHub Actions can build and release CYD assets through the dedicated
+  `.github/workflows/cyd.yml` workflow. It builds only `cyd`, excludes
+  `cyd-dev`, attaches provenance and SHA-256 checksums to published releases,
+  and uploads 14-day CI artifacts. The CYD's `CYD_VERSION` remains separate
+  from the Raspberry Pi release tag.
 - Not yet accepted on hardware: all weather/dashboard/music rendered scene
   variants, reconnect/endurance, heap under repeated train payloads and OTA.
   OTA delivery is not implemented; current firmware updates use the attached

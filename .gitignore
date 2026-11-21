@@ -5,6 +5,7 @@ __pycache__/
 
 ui/node_modules/
 cyd/.pio/
+cyd/dist/
 
 android/.gradle/
 android/.kotlin/

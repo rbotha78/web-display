@@ -11,6 +11,9 @@
   environment permits explicitly selected HTTP.
 - ESP32 UI, networking and enrollment remain under `cyd/`; Pi-side changes are
   limited to the sanitized remote-view contract.
+- Landscape orientation is persisted in NVS and can be selected during
+  provisioning or toggled 180 degrees with a short BOOT press. A five-second
+  hold remains the destructive enrollment reset gesture.
 - USB/serial is the accepted development delivery path. Native signed OTA
   remains future scope; the partition layout reserves room for it.
 - Physical touch, enrollment, reconnect and endurance acceptance remain open

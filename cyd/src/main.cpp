@@ -30,6 +30,9 @@ AppState state = AppState::kUnconfigured;
 std::uint32_t reconnect_at = 0;
 std::uint32_t heartbeat_at = 0;
 String poll_error;
+bool boot_pressed = false;
+std::uint32_t boot_pressed_at = 0;
+std::uint32_t last_orientation_change_at = 0;
 
 void checkFactoryReset() {
   pinMode(0, INPUT_PULLUP);
@@ -49,6 +52,43 @@ void checkFactoryReset() {
   }
 }
 bool has_snapshot = false;
+
+void handleOrientationButton() {
+  const bool pressed = digitalRead(0) == LOW;
+  if (pressed && !boot_pressed) {
+    boot_pressed = true;
+    boot_pressed_at = millis();
+    return;
+  }
+  if (pressed) {
+    if (millis() - boot_pressed_at >= 5000) {
+      config_store.clear();
+      display.showStatus("Factory reset", "CYD enrollment cleared", true);
+      delay(500);
+      ESP.restart();
+    }
+    return;
+  }
+  if (!boot_pressed) {
+    return;
+  }
+  boot_pressed = false;
+  if (millis() - boot_pressed_at < 100) {
+    return;
+  }
+  if (millis() - last_orientation_change_at < 500) {
+    return;
+  }
+  last_orientation_change_at = millis();
+  config.orientation = config.orientation == 1 ? 3 : 1;
+  if (!config_store.saveOrientation(config.orientation)) {
+    display.showStatus("Orientation", "Could not save rotation", false);
+    return;
+  }
+  display.setOrientation(config.orientation);
+  heartbeat_at = 0;
+  Serial.printf("Display orientation changed to %u\n", config.orientation);
+}
 
 bool connectSavedWifi() {
   if (WiFi.isConnected()) {
@@ -115,11 +155,13 @@ void setup() {
   Serial.begin(115200);
   delay(150);
   Serial.printf("\nWeb Display CYD %s\n", CYD_VERSION);
-  display.begin();
+  const bool enrolled = config_store.load(config);
+  display.begin(config.orientation);
+  pinMode(0, INPUT_PULLUP);
 
   checkFactoryReset();
   WiFi.persistent(false);
-  if (config_store.load(config)) {
+  if (enrolled) {
     state = AppState::kConnecting;
     Serial.printf("Stored enrollment found for %s:%u\n",
         config.pi_host.c_str(), config.pi_port);
@@ -132,6 +174,7 @@ void setup() {
 
 void loop() {
   display.loop();
+  handleOrientationButton();
 
   if (state == AppState::kUnconfigured) {
     provisioning.loop();

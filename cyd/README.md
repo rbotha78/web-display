@@ -17,6 +17,8 @@ Web Display; it does not render Chromium pages or play video/audio.
   stop and skip.
 - Offline, stale-heartbeat and certificate-change states.
 - NVS persistence, reconnect backoff and a physical reset flow.
+- Runtime landscape orientation selection persisted in NVS. A short BOOT press
+  toggles 180-degree orientation; holding BOOT for five seconds resets enrollment.
 - DNS and `_web-display._tcp` mDNS endpoint resolution, with direct IPv4
   enrollment available on networks that block local name resolution.
 
@@ -40,6 +42,17 @@ or deployment build.
 ```sh
 pio run -e cyd-dev
 ```
+
+## GitHub builds and releases
+
+The [`CYD firmware`](../../.github/workflows/cyd.yml) action builds only the
+release `cyd` environment for pull requests and pushes that change `cyd/`.
+It uploads firmware, bootloader, partition, boot-app and ELF artifacts as a
+14-day GitHub Actions artifact.
+
+Published GitHub Releases also receive versioned CYD assets and SHA-256
+checksums. The release tag tracks the Raspberry Pi/Web Display version;
+`CYD_VERSION` in `platformio.ini` is maintained independently.
 
 ## Remote hardware
 
@@ -69,9 +82,11 @@ scripted shell use a pseudo-terminal wrapper around the monitor command.
 7. The CYD creates a named API key, stores that key and Wi-Fi credentials in
    NVS, discards the password, and reconnects as a companion.
 
-Hold the board's BOOT button for five seconds during startup to clear the
-saved enrollment and return to provisioning. ESP32 NVS is not encrypted
-storage; physical flash compromise can expose the saved Wi-Fi and bearer key.
+Press the board's BOOT button briefly while the companion is running to flip
+the display and persist that orientation. Orientation can also be selected in
+the provisioning portal. Hold BOOT for five seconds to clear the saved
+enrollment and return to provisioning. ESP32 NVS is not encrypted storage;
+physical flash compromise can expose the saved Wi-Fi and bearer key.
 
 ## Current limitations
 
