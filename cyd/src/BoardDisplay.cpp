@@ -100,13 +100,17 @@ void BoardDisplay::loop() {
   }
 }
 
-bool BoardDisplay::takeTouch(std::uint16_t& x, std::uint16_t& y) {
+bool BoardDisplay::pollTouch(std::uint16_t& x, std::uint16_t& y) {
   if (!display_.getTouch(&x, &y)) {
     touch_latched_ = false;
     return false;
   }
   y = display_.height() - 1 - y;
-  if (touch_latched_ || millis() - last_taken_ms_ < 300) {
+  return true;
+}
+
+bool BoardDisplay::takeTouch(std::uint16_t& x, std::uint16_t& y) {
+  if (!pollTouch(x, y) || touch_latched_ || millis() - last_taken_ms_ < 300) {
     return false;
   }
   touch_latched_ = true;

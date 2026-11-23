@@ -51,6 +51,16 @@ struct RemoteViewSnapshot {
   String message;
 };
 
+struct ControlResult {
+  bool ok = false;
+  bool carousel_paused = false;
+  bool has_carousel_paused = false;
+  String music_state;
+  String music_title;
+  String music_artist;
+  String music_next;
+};
+
 class RemoteViewClient {
  public:
   bool fetch(
@@ -59,8 +69,10 @@ class RemoteViewClient {
       String& error);
 
   bool controlCarousel(
-      const CompanionConfig& config, const String& action, String& error);
+      const CompanionConfig& config, const String& action,
+      ControlResult& result, String& error);
   bool controlMusic(
-      const CompanionConfig& config, const String& action, String& error);
+      const CompanionConfig& config, const String& action,
+      ControlResult& result, String& error);
 };
 

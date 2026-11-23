@@ -62,6 +62,22 @@ jobs:
           )"
           pio run -e cyd
 
+      - name: Sign CYD OTA manifest
+        env:
+          UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
+          CYD_VERSION: ${{ steps.cyd.outputs.version }}
+        run: |
+          if [ "${{ github.event_name }}" = "release" ] && [ -z "${UPDATE_SIGNING_KEY:-}" ]; then
+            echo "::error::UPDATE_SIGNING_KEY is required for CYD release manifests"
+            exit 1
+          fi
+          if [ -n "${UPDATE_SIGNING_KEY:-}" ]; then
+            python3 tools/make_cyd_firmware.py \
+              --payload cyd/.pio/build/cyd/firmware.bin \
+              --output-dir cyd/dist-signed \
+              --version "${CYD_VERSION}"
+          fi
+
       - name: Assemble release assets
         env:
           CYD_VERSION: ${{ steps.cyd.outputs.version }}
@@ -72,6 +88,12 @@ jobs:
           cp cyd/.pio/build/cyd/bootloader.bin "cyd/dist/web-display-cyd-${CYD_VERSION}-bootloader.bin"
           cp cyd/.pio/build/cyd/partitions.bin "cyd/dist/web-display-cyd-${CYD_VERSION}-partitions.bin"
           cp cyd/.pio/build/cyd/firmware.elf "cyd/dist/web-display-cyd-${CYD_VERSION}.elf"
+          if [ -f "cyd/dist-signed/web-display-cyd-${CYD_VERSION}.manifest.json" ]; then
+            cp "cyd/dist-signed/web-display-cyd-${CYD_VERSION}.manifest.json" \
+              "cyd/dist/web-display-cyd-${CYD_VERSION}.manifest.json"
+            cp "cyd/dist-signed/web-display-cyd-${CYD_VERSION}.manifest.sig" \
+              "cyd/dist/web-display-cyd-${CYD_VERSION}.manifest.sig"
+          fi
           boot_app0="$(
             find "${HOME}/.platformio/packages" \
               -path '*/tools/partitions/boot_app0.bin' -print -quit
@@ -111,4 +133,6 @@ jobs:
             cyd/dist/web-display-cyd-"${CYD_VERSION}"-partitions.bin \
             cyd/dist/web-display-cyd-"${CYD_VERSION}"-boot-app0.bin \
             cyd/dist/web-display-cyd-"${CYD_VERSION}".elf \
+            cyd/dist/web-display-cyd-"${CYD_VERSION}".manifest.json \
+            cyd/dist/web-display-cyd-"${CYD_VERSION}".manifest.sig \
             cyd/dist/SHA256SUMS-cyd-"${CYD_VERSION}" --clobber

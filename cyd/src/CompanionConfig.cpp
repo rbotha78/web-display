@@ -26,6 +26,7 @@ bool CompanionConfigStore::load(CompanionConfig& config) const {
   config.fingerprint = preferences.getString("fingerprint", "");
   config.api_key = preferences.getString("api_key", "");
   config.use_https = preferences.getBool("https", true);
+  config.ota_auto = preferences.getBool("ota_auto", false);
   preferences.end();
   return config.wifi_ssid.length() && config.pi_host.length()
       && (!config.use_https || config.fingerprint.length()) && config.api_key.length();
@@ -50,6 +51,7 @@ bool CompanionConfigStore::save(const CompanionConfig& config) const {
   ok = preferences.putString("fingerprint", config.fingerprint) > 0 && ok;
   ok = preferences.putString("api_key", config.api_key) > 0 && ok;
   ok = preferences.putBool("https", config.use_https) > 0 && ok;
+  ok = preferences.putBool("ota_auto", config.ota_auto) > 0 && ok;
   preferences.end();
   return ok;
 }
@@ -75,6 +77,7 @@ void CompanionConfigStore::clear() const {
     preferences.remove("fingerprint");
     preferences.remove("api_key");
     preferences.remove("https");
+    preferences.remove("ota_auto");
     preferences.remove("orientation");
     preferences.remove("orientation_version");
     preferences.end();

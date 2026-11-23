@@ -106,6 +106,8 @@ void Provisioning::handleRoot() {
       "<option value='1'>USB on right (flipped)</option>"
       "<option value='3'>USB on left (original)</option>"
       "</select></label>"
+      "<label><input name='ota_auto' type='checkbox' value='yes'>"
+      " Automatically install verified CYD OTA firmware updates</label>"
       "<label>Pi hostname or IPv4 address<input name='host' "
       "placeholder='web-display-pi2.local' required></label>"
       "<label>HTTPS port<input name='port' type='number' min='1' max='65535' "
@@ -119,6 +121,7 @@ void Provisioning::handleRoot() {
 
 void Provisioning::handleProbe() {
   pending_.orientation = server_.arg("orientation").toInt() == 3 ? 3 : 1;
+  pending_.ota_auto = server_.arg("ota_auto") == "yes";
   display_.setOrientation(pending_.orientation);
   pending_.wifi_ssid = server_.arg("ssid");
   pending_.wifi_password = server_.arg("wifi_password");
@@ -229,6 +232,7 @@ void Provisioning::handleEnroll() {
 
   enrolled_.wifi_ssid = pending_.wifi_ssid;
   enrolled_.orientation = pending_.orientation;
+  enrolled_.ota_auto = pending_.ota_auto;
   enrolled_.wifi_password = pending_.wifi_password;
   enrolled_.pi_host = pending_.pi_host;
   enrolled_.pi_port = pending_.pi_port;

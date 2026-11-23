@@ -292,10 +292,30 @@ void CompanionUi::renderControls(const RemoteViewSnapshot& view, bool enabled) {
   const std::uint16_t colors[] = {TFT_BLUE, TFT_BLUE, TFT_GREEN, TFT_RED, TFT_PURPLE};
   for (std::size_t index = 0; index < 5; ++index) {
     const std::int16_t x = static_cast<std::int16_t>(index * width);
-    lcd.fillRect(x + 1, 190, width - 2, 50, enabled ? colors[index] : TFT_DARKGREY);
-    lcd.setTextColor(TFT_WHITE, enabled ? colors[index] : TFT_DARKGREY);
+    std::uint16_t color = enabled ? colors[index] : TFT_DARKGREY;
+    if (feedback_zone_ == static_cast<std::int8_t>(index) && feedback_ == TouchFeedback::kPressed) {
+      color = TFT_WHITE;
+    } else if (feedback_zone_ == static_cast<std::int8_t>(index) && feedback_ == TouchFeedback::kWaiting) {
+      color = 0xFFE0;
+    } else if (feedback_zone_ == static_cast<std::int8_t>(index) && feedback_ == TouchFeedback::kSuccess) {
+      color = 0x07E0;
+    } else if (feedback_zone_ == static_cast<std::int8_t>(index) && feedback_ == TouchFeedback::kFailure) {
+      color = TFT_RED;
+    }
+    lcd.fillRect(x + 1, 190, width - 2, 50, color);
+    lcd.drawRect(x, 190, width, 50, TFT_WHITE);
+    lcd.setTextColor(
+        feedback_zone_ == static_cast<std::int8_t>(index) && feedback_ == TouchFeedback::kPressed
+            ? TFT_BLACK : TFT_WHITE,
+        color);
     lcd.setTextSize(1);
-    lcd.drawCentreString(labels[index], x + width / 2, 211);
+    String label = labels[index];
+    if (feedback_zone_ == static_cast<std::int8_t>(index)) {
+      if (feedback_ == TouchFeedback::kWaiting) label = "WAIT";
+      if (feedback_ == TouchFeedback::kSuccess) label = "OK";
+      if (feedback_ == TouchFeedback::kFailure) label = "FAIL";
+    }
+    lcd.drawCentreString(label, x + width / 2, 211);
   }
   lcd.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
   lcd.drawString("SCENE", 2, 180);
@@ -307,22 +327,101 @@ TouchAction CompanionUi::takeAction(
     const RemoteViewSnapshot& view, bool connected) {
   std::uint16_t x = 0;
   std::uint16_t y = 0;
-  if (!connected || view.stale || view.sleeping
-      || !display_.takeTouch(x, y) || y < 190) {
+  const bool touched = display_.pollTouch(x, y);
+
+  if (feedback_ != TouchFeedback::kNone
+      && millis() >= feedback_until_) {
+    feedback_ = TouchFeedback::kNone;
+    feedback_zone_ = -1;
+    renderControls(view, connected && !view.stale && !view.sleeping);
+  }
+
+  if (!connected || view.stale || view.sleeping) {
+    if (!touched) {
+      pressed_zone_ = -1;
+    }
     return TouchAction::kNone;
   }
-  const std::uint8_t zone = x / 64;
-  if (zone < 2 && view.mode != "carousel") {
+
+  if (!touched) {
+    if (pressed_zone_ >= 0) {
+      const std::int8_t released_zone = pressed_zone_;
+      const bool armed = pressed_armed_;
+      pressed_zone_ = -1;
+      pressed_since_ = 0;
+      pressed_armed_ = false;
+      if (!armed || millis() - last_action_ms_ < 250) {
+        feedback_zone_ = -1;
+        feedback_ = TouchFeedback::kNone;
+        return TouchAction::kNone;
+      }
+      if (released_zone < 2 && view.mode != "carousel") {
+        return TouchAction::kNone;
+      }
+      last_action_ms_ = millis();
+      feedback_zone_ = released_zone;
+      feedback_ = TouchFeedback::kWaiting;
+      feedback_until_ = millis() + 1500;
+      renderControls(view, true);
+      switch (released_zone) {
+        case 0: return TouchAction::kCarouselPause;
+        case 1: return TouchAction::kCarouselNext;
+        case 2: return TouchAction::kMusicToggle;
+        case 3: return TouchAction::kMusicStop;
+        case 4: return TouchAction::kMusicSkip;
+        default: return TouchAction::kNone;
+      }
+    }
     return TouchAction::kNone;
   }
-  switch (zone) {
-    case 0: return TouchAction::kCarouselPause;
-    case 1: return TouchAction::kCarouselNext;
-    case 2: return TouchAction::kMusicToggle;
-    case 3: return TouchAction::kMusicStop;
-    case 4: return TouchAction::kMusicSkip;
-    default: return TouchAction::kNone;
+
+  if (y < 190 || y >= 240 || x >= 320) {
+    pressed_zone_ = -1;
+    pressed_since_ = 0;
+    pressed_armed_ = false;
+    return TouchAction::kNone;
   }
+
+  const std::int8_t zone = static_cast<std::int8_t>(x / 64);
+  if (pressed_zone_ != zone) {
+    pressed_zone_ = zone;
+    pressed_since_ = millis();
+    pressed_armed_ = false;
+    feedback_zone_ = zone;
+    feedback_ = TouchFeedback::kPressed;
+    feedback_until_ = millis() + 1500;
+    renderControls(view, true);
+  }
+  if (!pressed_armed_
+      && pressed_since_ != 0
+      && millis() - pressed_since_ >= 40) {
+    pressed_armed_ = true;
+  }
+  return TouchAction::kNone;
+}
+
+void CompanionUi::showActionResult(
+    TouchAction action,
+    bool success,
+    const RemoteViewSnapshot& view,
+    bool enabled) {
+  std::int8_t zone = -1;
+  switch (action) {
+    case TouchAction::kCarouselPause: zone = 0; break;
+    case TouchAction::kCarouselNext: zone = 1; break;
+    case TouchAction::kMusicToggle: zone = 2; break;
+    case TouchAction::kMusicStop: zone = 3; break;
+    case TouchAction::kMusicSkip: zone = 4; break;
+    default: break;
+  }
+  feedback_zone_ = zone;
+  feedback_ = success ? TouchFeedback::kSuccess : TouchFeedback::kFailure;
+  feedback_until_ = millis() + 900;
+  renderControls(view, enabled);
+}
+
+void CompanionUi::invalidate() {
+  last_signature_ = "";
 }
 
 String CompanionUi::clockText(const String& device_time) const {

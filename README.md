@@ -41,6 +41,13 @@ The CYD receives `carousel_paused` and background-music text through the
 sanitized `/api/remote-view` payload. It never receives provider tokens, Plex
 playback capabilities or private configuration. Firmware, wiring and remote
 PlatformIO instructions are in [`cyd/README.md`](cyd/README.md).
+CYD OTA updates use a signed manifest and streamed firmware download through
+the Pi. The CYD verifies the manifest signature and payload SHA-256 before
+writing the inactive OTA app partition and requires remote-health confirmation
+after reboot. If confirmation expires, it explicitly reselects the previous
+running partition before restart. The signed swap and partition rollback paths
+have been exercised on the development board; OTA remains opt-in and USB/serial
+is still used for development flashing.
 Saving settings retains the saved values when confirmation notifications appear,
 without reloading stale configuration into the editor.
 Administration opens on **Global settings** (display defaults, sleep, provider credentials,

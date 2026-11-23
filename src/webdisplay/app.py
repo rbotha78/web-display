@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import contextlib
 import hashlib
 import hmac
@@ -463,7 +464,7 @@ class Application:
                 mode=0o640,
             )
 
-    def control_carousel(self, value: dict) -> dict[str, bool]:
+    def control_carousel(self, value: dict) -> dict[str, object]:
         if set(value) != {"action"} or value["action"] not in ("pause", "resume", "next"):
             raise ValueError("Choose pause, resume or next")
         with self.publish_lock:
@@ -479,7 +480,14 @@ class Application:
                 json.dumps(control) + "\n", mode=0o640,
             )
             self.carousel_control = control
-        return {"ok": True}
+        return {
+            "ok": True,
+            "carousel": {
+                "paused": control["paused"],
+                "next": control["next"],
+                "generation": control["generation"],
+            },
+        }
 
     def close(self) -> None:
         self.raildata_worker.close()
@@ -959,6 +967,78 @@ class Application:
         with releases.open_download(str(latest["url"])) as download:
             return self.install_update(download, int(latest["size"]))  # type: ignore[call-overload]
 
+    def cyd_firmware_status(self, version: str) -> dict[str, object]:
+        latest = releases.latest_cyd_firmware()
+        if not latest:
+            return {"available": False, "latest": None, "current": version}
+        latest_version = str(latest["version"])
+        try:
+            available = parse_version(latest_version) > parse_version(version)
+        except UpdateError:
+            available = False
+        bin_asset = latest["bin"]
+        return {
+            "available": available,
+            "current": version,
+            "latest": {
+                "version": latest_version,
+                "size": int(bin_asset["size"]),
+            },
+        }
+
+    def cyd_firmware_manifest(self) -> dict[str, str]:
+        latest = releases.latest_cyd_firmware()
+        if not latest:
+            raise UpdateError("No CYD firmware release is available")
+        manifest_asset = latest["manifest"]
+        signature_asset = latest["signature"]
+        with releases.open_download(str(manifest_asset["url"])) as download:
+            manifest = download.read(int(manifest_asset["size"]) + 1)
+        if len(manifest) != int(manifest_asset["size"]) or len(manifest) > releases.MAX_CYD_MANIFEST_BYTES:
+            raise UpdateError("CYD firmware manifest is missing or invalid")
+        with releases.open_download(str(signature_asset["url"])) as download:
+            signature = download.read(65)
+        if len(signature) != 64:
+            raise UpdateError("CYD firmware signature is missing or invalid")
+        try:
+            json.loads(manifest)
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            raise UpdateError("CYD firmware manifest is invalid") from None
+        return {
+            "manifest": base64.b64encode(manifest).decode("ascii"),
+            "signature": base64.b64encode(signature).decode("ascii"),
+        }
+
+    def open_cyd_firmware(self, version: str, sha256: str) -> tuple[BinaryIO, int]:
+        if not isinstance(sha256, str) or len(sha256) != 64:
+            raise UpdateError("Invalid CYD firmware digest")
+        try:
+            int(sha256, 16)
+        except ValueError:
+            raise UpdateError("Invalid CYD firmware digest") from None
+        latest = releases.latest_cyd_firmware()
+        if not latest or str(latest["version"]) != version:
+            raise UpdateError("CYD firmware version is not available")
+        manifest_asset = latest["manifest"]
+        signature_asset = latest["signature"]
+        with releases.open_download(str(manifest_asset["url"])) as download:
+            manifest_bytes = download.read(int(manifest_asset["size"]) + 1)
+        if len(manifest_bytes) != int(manifest_asset["size"]):
+            raise UpdateError("CYD firmware manifest is missing")
+        try:
+            manifest = json.loads(manifest_bytes)
+        except json.JSONDecodeError:
+            raise UpdateError("CYD firmware manifest is invalid") from None
+        if not isinstance(manifest, dict) or manifest.get("sha256") != sha256.lower():
+            raise UpdateError("CYD firmware digest is not in the manifest")
+        if manifest.get("version") != version or manifest.get("payload") != f"web-display-cyd-{version}.bin":
+            raise UpdateError("CYD firmware manifest does not match the requested version")
+        bin_asset = latest["bin"]
+        if int(bin_asset["size"]) != int(manifest["size"]):
+            raise UpdateError("CYD firmware size is not in the manifest")
+        download = releases.open_download(str(bin_asset["url"]))
+        return download, int(bin_asset["size"])
+
     def install_update(self, source: BinaryIO, limit: int = MAX_BUNDLE_BYTES) -> dict[str, object]:
         """Stream a bundle to the root updater, which performs all verification."""
         if self.update_helper is None:
@@ -1399,10 +1479,20 @@ def make_handler(app: Application) -> type[BaseHTTPRequestHandler]:
                 from .remote_view import load
                 try:
                     self._json(HTTPStatus.OK, load())
-                except (OSError, ValueError, TypeError, KeyError):
+                except FileNotFoundError:
                     self._json(HTTPStatus.SERVICE_UNAVAILABLE, {
-                        "error": "Remote view unavailable: kiosk runtime is missing, invalid or stale",
+                        "error": "Remote view unavailable: kiosk runtime is missing",
                     })
+                except (OSError, ValueError, TypeError, KeyError) as error:
+                    detail = str(error).strip()
+                    if detail:
+                        self._json(HTTPStatus.SERVICE_UNAVAILABLE, {
+                            "error": f"Remote view unavailable: {detail}",
+                        })
+                    else:
+                        self._json(HTTPStatus.SERVICE_UNAVAILABLE, {
+                            "error": "Remote view unavailable: kiosk runtime is invalid or stale",
+                        })
                 return
             if self.path == "/api/status":
                 if not self._require_session():
@@ -1425,6 +1515,59 @@ def make_handler(app: Application) -> type[BaseHTTPRequestHandler]:
                 if not self._require_session():
                     return
                 self._json(HTTPStatus.OK, app.update_status())
+                return
+            request_path = urlsplit(self.path)
+            if request_path.path == "/api/cyd/firmware/status":
+                if not self._require_session():
+                    return
+                query = parse_qs(request_path.query, keep_blank_values=True)
+                version_values = query.get("version")
+                version = version_values[0] if len(version_values) == 1 else ""
+                if not isinstance(version, str):
+                    self._json(HTTPStatus.BAD_REQUEST, {"error": "Invalid CYD firmware version"})
+                    return
+                try:
+                    self._json(HTTPStatus.OK, app.cyd_firmware_status(version))
+                except UpdateError as error:
+                    self._json(HTTPStatus.BAD_GATEWAY, {"error": str(error)})
+                return
+            if request_path.path == "/api/cyd/firmware/manifest":
+                if not self._require_session():
+                    return
+                try:
+                    self._json(HTTPStatus.OK, app.cyd_firmware_manifest())
+                except UpdateError as error:
+                    self._json(HTTPStatus.BAD_GATEWAY, {"error": str(error)})
+                return
+            if request_path.path == "/api/cyd/firmware/download":
+                if not self._require_session():
+                    return
+                query = parse_qs(request_path.query, keep_blank_values=True)
+                versions = query.get("version")
+                digests = query.get("sha256")
+                version = versions[0] if len(versions) == 1 else ""
+                sha256 = digests[0].lower() if len(digests) == 1 else ""
+                try:
+                    download, size = app.open_cyd_firmware(version, sha256)
+                except UpdateError as error:
+                    self._json(HTTPStatus.BAD_GATEWAY, {"error": str(error)})
+                    return
+                self.close_connection = True
+                try:
+                    self.send_response(HTTPStatus.OK)
+                    self.send_header("Content-Type", "application/octet-stream")
+                    self.send_header("Content-Length", str(size))
+                    self.send_header("Cache-Control", "no-store")
+                    self.send_header("X-Content-Type-Options", "nosniff")
+                    self.end_headers()
+                    with download:
+                        while True:
+                            chunk = download.read(64 * 1024)
+                            if not chunk:
+                                break
+                            self.wfile.write(chunk)
+                except OSError:
+                    pass
                 return
             self._json(HTTPStatus.NOT_FOUND, {"error": "not found"})
 

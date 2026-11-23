@@ -176,6 +176,153 @@ bool WebDisplayApi::mintApiKey(
   return true;
 }
 
+bool WebDisplayApi::download(
+    const CompanionConfig& config,
+    const String& path,
+    std::size_t expected_size,
+    const std::function<bool(const std::uint8_t*, std::size_t)>& sink,
+    String& error) const {
+  if (!WiFi.isConnected()) {
+    error = "Wi-Fi is not connected";
+    return false;
+  }
+  if (!config.pi_host.length() || config.pi_port == 0) {
+    error = "Pi address is missing";
+    return false;
+  }
+  if (!config.use_https) {
+    error = "OTA requires HTTPS";
+    return false;
+  }
+
+  IPAddress target_address;
+  bool resolved = WiFi.hostByName(config.pi_host.c_str(), target_address);
+  resolved = resolved && static_cast<std::uint32_t>(target_address) != 0;
+  if (!resolved && config.pi_host.endsWith(".local")) {
+    const String mdns_name = config.pi_host.substring(0, config.pi_host.length() - 6);
+    MDNS.begin("web-display-cyd");
+    target_address = MDNS.queryHost(mdns_name, 2500);
+    resolved = static_cast<std::uint32_t>(target_address) != 0;
+  }
+
+  NetworkClientSecure client;
+  client.setInsecure();
+  client.setTimeout(kReadTimeoutMs);
+  client.setHandshakeTimeout(kReadTimeoutMs);
+  const bool connected = resolved
+      ? client.connect(target_address, config.pi_port, kConnectTimeoutMs)
+      : client.connect(config.pi_host.c_str(), config.pi_port, kConnectTimeoutMs);
+  if (!connected) {
+    char tls_error[96] = {};
+    client.lastError(tls_error, sizeof(tls_error));
+    error = tls_error[0] ? String(tls_error) : "Could not connect to Pi";
+    return false;
+  }
+
+  std::uint8_t digest[32] = {};
+  if (!client.getFingerprintSHA256(digest)) {
+    error = "Could not read Pi certificate";
+    client.stop();
+    return false;
+  }
+  if (!config.fingerprint.equalsIgnoreCase(fingerprintText(digest))) {
+    error = "Pi certificate changed; remove and re-enroll this CYD";
+    client.stop();
+    return false;
+  }
+
+  String request;
+  request.reserve(512);
+  request += "GET ";
+  request += path;
+  request += " HTTP/1.1\r\nHost: ";
+  request += config.pi_host;
+  request += "\r\nConnection: close\r\nAccept: application/octet-stream\r\nAuthorization: Bearer ";
+  request += config.api_key;
+  request += "\r\n\r\n";
+  if (client.write(
+          reinterpret_cast<const std::uint8_t*>(request.c_str()), request.length())
+      != request.length()) {
+    error = "OTA request was interrupted";
+    client.stop();
+    return false;
+  }
+
+  String headers;
+  headers.reserve(512);
+  bool header_complete = false;
+  int status = 0;
+  std::size_t content_length = 0;
+  std::size_t received = 0;
+  const std::uint32_t started = millis();
+  while (millis() - started < kReadTimeoutMs * 4) {
+    while (client.available()) {
+      const int value = client.read();
+      if (value < 0) {
+        break;
+      }
+      if (!header_complete) {
+        headers += static_cast<char>(value);
+        const int header_end = headers.indexOf("\r\n\r\n");
+        if (header_end >= 0) {
+          const String status_line = headers.substring(0, headers.indexOf('\r'));
+          const int first = status_line.indexOf(' ');
+          const int second = status_line.indexOf(' ', first + 1);
+          status = status_line.substring(first + 1, second > 0 ? second : status_line.length()).toInt();
+          if (status != 200) {
+            error = "Pi firmware download was rejected";
+            client.stop();
+            return false;
+          }
+          const String length = headerValue(headers, "Content-Length");
+          content_length = length.length() ? static_cast<std::size_t>(length.toInt()) : 0;
+          if (content_length != expected_size) {
+            error = "CYD firmware size mismatch";
+            client.stop();
+            return false;
+          }
+          header_complete = true;
+          break;
+        }
+      }
+    }
+    if (header_complete) {
+      break;
+    }
+    delay(1);
+  }
+  if (!header_complete) {
+    error = "Pi firmware download did not start";
+    client.stop();
+    return false;
+  }
+
+  while (received < content_length && millis() - started < kReadTimeoutMs * 20) {
+    if (!client.available()) {
+      delay(1);
+      continue;
+    }
+    std::uint8_t buffer[4096];
+    const std::size_t wanted = content_length - received;
+    const std::size_t count = client.read(buffer, wanted < sizeof(buffer) ? wanted : sizeof(buffer));
+    if (!count) {
+      break;
+    }
+    received += count;
+    if (!sink(buffer, count)) {
+      error = "CYD firmware write failed";
+      client.stop();
+      return false;
+    }
+  }
+  client.stop();
+  if (received != expected_size) {
+    error = "CYD firmware download ended early";
+    return false;
+  }
+  return true;
+}
+
 ApiResponse WebDisplayApi::exchange(
     const String& host,
     std::uint16_t port,

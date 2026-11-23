@@ -3,6 +3,7 @@
 #include <Arduino.h>
 #include <ArduinoJson.h>
 #include <cstdint>
+#include <functional>
 
 #include "CompanionConfig.h"
 
@@ -45,6 +46,12 @@ class WebDisplayApi {
       const String& cookie,
       const String& csrf,
       String& api_key,
+      String& error) const;
+  bool download(
+      const CompanionConfig& config,
+      const String& path,
+      std::size_t expected_size,
+      const std::function<bool(const std::uint8_t*, std::size_t)>& sink,
       String& error) const;
 
  private:

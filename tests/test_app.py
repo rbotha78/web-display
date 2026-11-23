@@ -1,4 +1,6 @@
 import json
+import io
+import base64
 import http.client
 import tempfile
 import threading
@@ -245,7 +247,7 @@ class ApiTests(unittest.TestCase):
             for headers in ({"Cookie": f"session={token}"}, {"Authorization": f"Bearer {key}"}):
                 response, body = self.request("GET", "/api/remote-view", headers=headers)
                 self.assertEqual(response.status, 503)
-                self.assertIn("unavailable", body["error"])
+                self.assertIn("kiosk runtime is missing", body["error"])
             remote_view.publish(path, remote_view.snapshot(
                 "single", {"id": "single", "kind": "web", "url": "https://user:secret@site.example/page?key=x"},
                 {"sleeping": False, "scheduled_sleep": False, "wake_until": None},
@@ -256,8 +258,9 @@ class ApiTests(unittest.TestCase):
                 self.assertEqual(body["scene"]["url"], "https://site.example/page")
             value = json.loads(path.read_text())
             path.write_text(json.dumps({**value, "updated": 0}))
-            response, _ = self.request("GET", "/api/remote-view", headers={"Cookie": f"session={token}"})
+            response, body = self.request("GET", "/api/remote-view", headers={"Cookie": f"session={token}"})
             self.assertEqual(response.status, 503)
+            self.assertIn("heartbeat is stale", body["error"])
 
     def test_wifi_requires_login_and_csrf(self):
         response, _ = self.request("POST", "/api/wifi/scan", {})
@@ -581,6 +584,57 @@ class ApiTests(unittest.TestCase):
             control.assert_called_once_with(body)
             self.assertNotIn("control_url", result)
 
+    def test_cyd_firmware_status_and_manifest_require_api_key(self):
+        key = self.app.create_key("CYD")["key"]
+        headers = {"Authorization": f"Bearer {key}"}
+        latest = {
+            "version": "0.2.21",
+            "bin": {"url": "https://github.com/rbotha78/web-display/releases/download/v0.2.21/web-display-cyd-0.2.21.bin", "size": 1234},
+            "manifest": {"url": "https://github.com/rbotha78/web-display/releases/download/v0.2.21/web-display-cyd-0.2.21.manifest.json", "size": 300},
+            "signature": {"url": "https://github.com/rbotha78/web-display/releases/download/v0.2.21/web-display-cyd-0.2.21.manifest.sig", "size": 64},
+        }
+        with patch("webdisplay.app.releases.latest_cyd_firmware", return_value=latest):
+            response, _ = self.request("GET", "/api/cyd/firmware/status?version=0.2.20")
+            self.assertEqual(response.status, 401)
+            response, result = self.request(
+                "GET", "/api/cyd/firmware/status?version=0.2.20", headers=headers
+            )
+            self.assertEqual(response.status, 200)
+            self.assertTrue(result["available"])
+            self.assertEqual(result["latest"]["version"], "0.2.21")
+
+        manifest = json.dumps({
+            "format": 1,
+            "product": "web-display-cyd",
+            "version": "0.2.21",
+            "size": 1234,
+            "sha256": "a" * 64,
+        }).encode()
+        manifest = (manifest + b" " * max(0, 300 - len(manifest)))[:300]
+        signature = b"s" * 64
+
+        class Download:
+            def __init__(self, data):
+                self.data = data
+            def __enter__(self):
+                return io.BytesIO(self.data)
+            def __exit__(self, *args):
+                return False
+
+        def open_download(url):
+            if url.endswith(".manifest.json"):
+                return Download(manifest)
+            return Download(signature)
+
+        with patch("webdisplay.app.releases.latest_cyd_firmware", return_value=latest), \
+             patch("webdisplay.app.releases.open_download", side_effect=open_download):
+            response, result = self.request(
+                "GET", "/api/cyd/firmware/manifest", headers=headers
+            )
+            self.assertEqual(response.status, 200)
+            self.assertEqual(base64.b64decode(result["manifest"]), manifest)
+            self.assertEqual(base64.b64decode(result["signature"]), signature)
+
     def test_liking_current_song_requires_authentication_and_csrf(self):
         token, session = self.app.sessions.create()
         body = {"rating_key": "42"}
@@ -798,7 +852,11 @@ class ApiTests(unittest.TestCase):
         initial = json.loads(path.read_text())
         for action in ("pause", "next", "next"):
             response, result = self.request("POST", "/api/playlist/control", {"action": action}, headers)
-            self.assertEqual((response.status, result), (200, {"ok": True}))
+            self.assertEqual(response.status, 200)
+            self.assertTrue(result["ok"])
+            self.assertEqual(result["carousel"]["generation"], initial["generation"])
+            self.assertIs(type(result["carousel"]["paused"]), bool)
+            self.assertIs(type(result["carousel"]["next"]), int)
         control = json.loads(path.read_text())
         self.assertEqual(control["generation"], initial["generation"])
         self.assertTrue(control["paused"])

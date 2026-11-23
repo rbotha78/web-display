@@ -119,7 +119,8 @@ bool RemoteViewClient::fetch(
 }
 
 bool RemoteViewClient::controlCarousel(
-    const CompanionConfig& config, const String& action, String& error) {
+    const CompanionConfig& config, const String& action,
+    ControlResult& result, String& error) {
   JsonDocument body;
   body["action"] = action;
   String payload;
@@ -128,15 +129,26 @@ bool RemoteViewClient::controlCarousel(
   const ApiResponse response = api.request(
       config, "POST", "/api/playlist/control", payload);
   if (response.status == 200) {
-    error = "";
-    return true;
+    JsonDocument document;
+    if (!deserializeJson(document, response.body)
+        && document["ok"] == true) {
+      result.ok = true;
+      result.has_carousel_paused =
+          document["carousel"]["paused"].is<bool>();
+      result.carousel_paused =
+          document["carousel"]["paused"] | false;
+      return true;
+    }
+    error = "Pi returned an invalid carousel response";
+    return false;
   }
   error = errorFrom(response, "Carousel command failed");
   return false;
 }
 
 bool RemoteViewClient::controlMusic(
-    const CompanionConfig& config, const String& action, String& error) {
+    const CompanionConfig& config, const String& action,
+    ControlResult& result, String& error) {
   JsonDocument body;
   body["action"] = action;
   String payload;
@@ -145,7 +157,18 @@ bool RemoteViewClient::controlMusic(
   const ApiResponse response = api.request(
       config, "POST", "/api/plex/music/control", payload);
   if (response.status == 200) {
+    JsonDocument document;
+    if (!deserializeJson(document, response.body)
+        && document["status"].is<JsonObjectConst>()) {
+      result.ok = true;
+      result.music_state = text(document["status"]["state"], 20);
+      result.music_title = text(document["status"]["title"], 100);
+      result.music_artist = text(document["status"]["artist"], 100);
+      result.music_next = "";
+      return true;
+    }
     error = "";
+    result.ok = true;
     return true;
   }
   error = errorFrom(response, "Music command failed");

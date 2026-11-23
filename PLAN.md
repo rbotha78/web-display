@@ -14,8 +14,11 @@
 - Landscape orientation is persisted in NVS and can be selected during
   provisioning or toggled 180 degrees with a short BOOT press. A five-second
   hold remains the destructive enrollment reset gesture.
-- USB/serial is the accepted development delivery path. Native signed OTA
-  remains future scope; the partition layout reserves room for it.
+- USB/serial remains the development flashing path. Native signed OTA is
+  implemented with manifest-signature and SHA-256 verification, inactive-slot
+  installation, remote-health confirmation and explicit previous-partition
+  rollback. Signed swap and rollback were accepted on the development board;
+  repeated power-loss/endurance rollback remains open.
 - Physical touch, enrollment, reconnect and endurance acceptance remain open
   until checked on the attached board and a real Pi.
 

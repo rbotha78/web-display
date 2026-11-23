@@ -21,6 +21,7 @@ class BoardDisplay {
   void begin(std::uint8_t orientation);
   void setOrientation(std::uint8_t orientation);
   void loop();
+  bool pollTouch(std::uint16_t& x, std::uint16_t& y);
   bool takeTouch(std::uint16_t& x, std::uint16_t& y);
 
   void showSetup(const String& ssid, const String& password, const String& address);

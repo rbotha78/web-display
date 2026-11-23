@@ -102,6 +102,83 @@ vitals or deployment instructions.
 - CYD 0.2.15-0.2.16 round temperature to the nearest degree, preserve wind as
   tenths of km/h, use consistent text sizing in both widget lines and enlarge
   the widgets date. Physical checks confirmed temperature, wind, layout and date.
+- CYD 0.2.17 replaces the 300 ms initial-contact latch with press/release
+  action handling across the full control row and adds pressed, waiting,
+  success and failure feedback in each button. Physical edge/corner and
+  duplicate-suppression acceptance remains pending.
+- CYD 0.2.18 adds 40 ms stable-contact arming and a 250 ms repeat guard after
+  successful action completion. It is built but not uploaded pending
+  `/dev/ttyUSB0` permission; physical touch acceptance remains blocked.
+- CYD 0.2.18 adds a 40 ms stable-press arm and 250 ms post-action repeat guard
+  while keeping immediate pressed feedback for each target.
+- CYD 0.2.17 replaces the 300 ms touch latch with press/release lifecycle
+  handling across the full control row and adds pressed, waiting, success and
+  failure feedback inside each 64-pixel target. Physical acceptance is pending.
+- CYD 0.2.19 keeps a control in WAIT after POST, polls remote-view until the
+  relevant carousel/music state changes or a timeout expires, then shows OK or
+  FAIL. The refreshed display state determines button feedback, not POST alone.
+- CYD 0.2.20 replaces post-command remote-view polling with a single immediate
+  POST state response. Carousel controls return resulting pause/next/generation
+  state; music controls return resulting status. The CYD applies that state,
+  fetches remote-view once only when the returned state indicates display
+  content should change, then redraws the full display and shows OK/FAIL.
+- CYD 0.2.20 was built and uploaded locally through `/dev/ttyUSB0` on
+  2026-11-23. Physical WAIT/OK/FAIL and duplicate-action acceptance remains
+  pending.
+- The 0.2.20 Pi API change was deployed to the Pi 2, Pi 3 and Zero 2 W
+  development targets on 2026-11-23. Each service and kiosk is active; local
+  `/health` is OK and deployed `app.py` hashes match the repository.
+- CYD 0.2.19 physical upload was completed locally through `/dev/ttyUSB0` after
+  the 40 ms stable-press and 250 ms repeat guard implementation. Edge/corner,
+  success/failure and duplicate suppression acceptance is pending a final
+  physical button test.
+- CYD 0.2.21 OTA implementation is in progress: the ESP32 app now links
+  libsodium Ed25519 verification and OTA update libraries, exposes pending
+  health-confirm/rollback state, and adds opt-in OTA settings. The Pi now
+  exposes allowlisted CYD status, manifest and firmware download endpoints.
+  Focused API/manifest tests and a CYD firmware build pass; hardware OTA,
+  power-loss rollback and signed-release asset verification remain open.
+- CYD 0.2.23 combines the OTA client with immediate control POST feedback,
+  remote-view-only full refresh and stable touch handling. The ESP32 OTA path
+  verifies an Ed25519 manifest, streams firmware into app1/app0, verifies
+  SHA-256 and retains a health-confirm/rollback marker. Pi2/Pi3/Zero received
+  the allowlisted OTA API and unauthenticated probes return 401. A real signed
+  OTA partition swap and power-loss rollback still need a signed next release.
+- CYD 0.2.25 fixes the connected-screen stall: `pollPi()` now renders successful
+  remote-view snapshots instead of returning before the UI update.
+- CYD 0.2.25 was uploaded 2026-11-23 after the connected-screen report.
+  Serial diagnostics showed `state=2 wifi=1 snapshot=1 scene=train`,
+  empty `remote_error`, healthy heap and no OTA-pending state across repeated
+  samples. The stuck “CYD connected” screen is resolved.
+- CYD 0.2.22 is the OTA-capable baseline being prepared for USB upload. It
+  contains signed-manifest verification, streaming OTA partition writes,
+  SHA-256 verification, health-confirm and rollback state.
+- CYD 0.2.21 was uploaded locally on 2026-11-23 and booted with OTA code
+  present. The OTA implementation now uses the existing Ed25519 update signer
+  public key, verifies the manifest before partition write, streams the signed
+  payload, checks SHA-256 and marks pending/rollback state. Hardware install,
+  health confirmation and rollback have not yet been observed.
+- CYD 0.2.23 is the latest OTA-capable USB baseline, combining the OTA client
+  with immediate control POST state feedback and full-display refresh.
+- On 2026-11-23, the signed CYD OTA hardware path completed a real
+  `0.2.26 -> 0.2.27` partition swap through the Pi 3 gateway. The target booted,
+  recovered a remote-view snapshot and cleared its pending health state. The
+  initial OTA loops exposed loop-task TLS stack exhaustion and repeated
+  watchdog reset errors; the stack was raised to 16 KiB and the ineffective
+  watchdog reset call was removed. The installer also clears pending state if
+  `Update.begin()` fails.
+- The first post-confirmation rollback probe only rebooted the confirmed image,
+  as expected after rollback had been cancelled. A correct pre-confirmation
+  probe then exposed that this ESP32 build could leave no valid ESP-IDF fallback
+  entry. Rollback now stores the running OTA subtype before installation and
+  explicitly selects that partition while retaining the pending marker for
+  health confirmation by the restored app. A signed pending `0.2.32` rolled back
+  to healthy confirmed `0.2.31` on the attached board. The temporary Pi gateway
+  override and release assets were removed, and production CYD `0.2.25` was
+  reflashed and observed healthy with `snapshot=1`, empty remote error and
+  `ota_pending=0`. Validation after the rollback fix: 492 Python tests passed,
+  Python compilation and shell syntax checks passed, and both `cyd` and
+  `cyd-dev` PlatformIO builds succeeded.
 - On 2026-11-20/21, Pi 3 temporarily stopped completing local or external HTTPS
   requests on port 8443 while `web-display.service` remained active and listening.
   Restarting the unit restored `/health` immediately. There was no service
@@ -109,10 +186,17 @@ vitals or deployment instructions.
   log in the retained evidence, so this is documented as a listener stall, not a
   confirmed HTTPS process crash. The CYD diagnosis should wait for health or
   add watchdog behavior rather than infer a crash from request timeouts.
+- On 2026-11-23, Pi 3 kiosk restart at 09:02 left a brief window where
+  `/run/web-display-kiosk/remote-view.json` was missing. The kiosk service stopped
+  and restarted, and direct `remote_view.load()` checks later succeeded on Pi 2,
+  Pi 3 and Zero 2 W with heartbeat ages below one second. The app now distinguishes
+  missing runtime files from stale runtime files in `/api/remote-view` responses
+  instead of returning one generic unavailable message.
 - Not yet accepted on hardware: all weather/dashboard/music rendered scene
-  variants, reconnect/endurance, heap under repeated train payloads and OTA.
-  OTA delivery is not implemented; current firmware updates use the attached
-  USB/serial path.
+  variants, reconnect/endurance, heap under repeated train payloads and OTA
+  repeated power-loss recovery. Signed OTA installation and explicit
+  pre-confirmation partition rollback are accepted; USB/serial remains the
+  development flashing path.
 
 - Unreleased image-build change: `WPA_COUNTRY` defaults to `GB`, is validated
   before build side effects, is passed through pi-gen and participates in the

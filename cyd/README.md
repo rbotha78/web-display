@@ -32,8 +32,20 @@ Web Display; it does not render Chromium pages or play video/audio.
 - NVS persistence, reconnect backoff and a physical reset flow.
 - Runtime landscape orientation selection persisted in NVS. A short BOOT press
   toggles 180-degree orientation; holding BOOT for five seconds resets enrollment.
+- Touch controls use press-and-release activation across the full button area.
+  Pressed, waiting, success and failure feedback appears in the target itself.
+  After a command, the CYD remains in WAIT and uses the control POST response
+  immediately. It fetches `/api/remote-view` once when returned state indicates
+  that the display changed, redraws the full scene, and shows OK or FAIL based
+  on that confirmed result. Normal five-second remote-view refreshes remain
+  unchanged.
 - DNS and `_web-display._tcp` mDNS endpoint resolution, with direct IPv4
   enrollment available on networks that block local name resolution.
+- OTA firmware updates use the Pi as an allowlisted release gateway. The CYD
+  verifies a 64-byte Ed25519 manifest signature, streams firmware to the inactive
+  OTA partition, verifies SHA-256 and health-confirms the new app. A pending
+  install records the running partition so an expired confirmation explicitly
+  selects the previous image before restart.
 - Dashboard/widget scenes use clock/date, notice text and optional weather.
 
 The remote view contains sanitized public display state only. Plex capability
@@ -106,9 +118,13 @@ physical flash compromise can expose the saved Wi-Fi and bearer key.
 
 - No Chromium/web-page rendering, video playback or local provider fetching.
 - No SD-card assets or album art yet.
-- No native OTA delivery yet; firmware uploads are currently over the remote
-  USB/serial device. The min-SPIFFS partition layout reserves two application
-  slots for a future OTA implementation.
+- OTA firmware updates use two app partitions and an Ed25519-signed manifest.
+  The Pi exposes allowlisted status, manifest and firmware download endpoints;
+  the CYD verifies the signature and SHA-256, writes the inactive app partition,
+  confirms remote health after reboot, and retains rollback state. A signed OTA
+  swap and an explicit rollback to a previously healthy partition have passed
+  on the attached development board. Repeated power-loss/endurance rollback
+  acceptance remains open.
 - Touch calibration, TLS enrollment, reconnects, controls and long-running heap
   behavior require physical-board acceptance. A successful build or USB boot
   does not complete those checks.

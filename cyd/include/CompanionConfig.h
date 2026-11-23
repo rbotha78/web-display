@@ -12,6 +12,7 @@ struct CompanionConfig {
   String fingerprint;
   String api_key;
   bool use_https = true;
+  bool ota_auto = false;
 };
 
 class CompanionConfigStore {
