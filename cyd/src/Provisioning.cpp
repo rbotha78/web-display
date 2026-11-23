@@ -108,6 +108,8 @@ void Provisioning::handleRoot() {
       "</select></label>"
       "<label><input name='ota_auto' type='checkbox' value='yes'>"
       " Automatically install verified CYD OTA firmware updates</label>"
+      "<label><input name='playback_controls' type='checkbox' value='yes' checked>"
+      " Show carousel and music playback controls</label>"
       "<label>Pi hostname or IPv4 address<input name='host' "
       "placeholder='web-display-pi2.local' required></label>"
       "<label>HTTPS port<input name='port' type='number' min='1' max='65535' "
@@ -122,6 +124,7 @@ void Provisioning::handleRoot() {
 void Provisioning::handleProbe() {
   pending_.orientation = server_.arg("orientation").toInt() == 3 ? 3 : 1;
   pending_.ota_auto = server_.arg("ota_auto") == "yes";
+  pending_.playback_controls = server_.arg("playback_controls") == "yes";
   display_.setOrientation(pending_.orientation);
   pending_.wifi_ssid = server_.arg("ssid");
   pending_.wifi_password = server_.arg("wifi_password");
@@ -151,6 +154,7 @@ void Provisioning::handleProbe() {
     return;
   }
   pending_.fingerprint = probe.fingerprint;
+  pending_.pi_paired = probe.paired;
   display_.showPairing(hostForLog(), probe.fingerprint);
 
   String body = "<p>Pi version: ";
@@ -162,16 +166,26 @@ void Provisioning::handleProbe() {
   body += "<form method='post' action='/enroll'>";
   body += hiddenPendingFields();
   body += "<label><input name='confirmed' type='checkbox' value='yes' required>"
-      " The fingerprints match</label>"
-      "<label>Enrollment mode<select name='mode'>"
-      "<option value='pair'>Pair an unconfigured Pi with its pairing code</option>"
-      "<option value='login'>Log in to an already paired Pi</option>"
-      "</select></label>"
-      "<label>Pairing code (pair mode)<input name='pairing_code'></label>"
-      "<label>New admin password (pair mode) or current admin password (login mode)"
-      "<input name='admin_password' type='password' required></label>"
-      "<button type='submit'>Enroll this CYD</button>"
-      "</form>";
+      " The fingerprints match</label>";
+  if (pending_.pi_paired) {
+    body +=
+        "<input name='mode' type='hidden' value='login'>"
+        "<p>This Pi is already paired. Enter the existing administrator password "
+        "to add this CYD as an additional companion.</p>"
+        "<label>Current administrator password"
+        "<input name='admin_password' type='password' autocomplete='current-password' "
+        "required></label>";
+  } else {
+    body +=
+        "<input name='mode' type='hidden' value='pair'>"
+        "<p>This Pi is not paired yet. Enter the pairing code shown by the Pi "
+        "and choose its administrator password.</p>"
+        "<label>Pairing code<input name='pairing_code' required></label>"
+        "<label>New administrator password"
+        "<input name='admin_password' type='password' autocomplete='new-password' "
+        "required></label>";
+  }
+  body += "<button type='submit'>Enroll this CYD</button></form>";
   respond("Confirm Pi certificate", body);
 }
 
@@ -233,6 +247,7 @@ void Provisioning::handleEnroll() {
   enrolled_.wifi_ssid = pending_.wifi_ssid;
   enrolled_.orientation = pending_.orientation;
   enrolled_.ota_auto = pending_.ota_auto;
+  enrolled_.playback_controls = pending_.playback_controls;
   enrolled_.wifi_password = pending_.wifi_password;
   enrolled_.pi_host = pending_.pi_host;
   enrolled_.pi_port = pending_.pi_port;

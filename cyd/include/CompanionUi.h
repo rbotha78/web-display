@@ -30,6 +30,7 @@ class CompanionUi {
       const String& error,
       bool connected);
   TouchAction takeAction(const RemoteViewSnapshot& view, bool connected);
+  void setPlaybackControls(bool enabled);
   void showActionResult(
       TouchAction action,
       bool success,
@@ -46,7 +47,9 @@ class CompanionUi {
   void renderScene(const RemoteViewSnapshot& view);
   void renderClock(const RemoteViewSnapshot& view);
   void renderDashboard(const RemoteViewSnapshot& view);
-  void drawWeatherIcon(std::int16_t x, std::int16_t y, std::uint16_t size, const String& icon) const;
+  void drawWeatherIcon(
+      std::int16_t x, std::int16_t y, std::uint16_t size,
+      const String& icon, std::uint16_t background) const;
   String dateText(const String& device_time) const;
   void renderWeather(const RemoteViewSnapshot& view);
   void renderTrain(const RemoteViewSnapshot& view);
@@ -67,5 +70,6 @@ class CompanionUi {
   std::uint32_t pressed_since_ = 0;
   std::uint32_t last_action_ms_ = 0;
   bool pressed_armed_ = false;
+  bool playback_controls_ = true;
 };
 

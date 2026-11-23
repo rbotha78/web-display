@@ -13,6 +13,7 @@ struct CompanionConfig {
   String api_key;
   bool use_https = true;
   bool ota_auto = false;
+  bool playback_controls = true;
 };
 
 class CompanionConfigStore {

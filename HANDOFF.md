@@ -15,6 +15,38 @@ vitals or deployment instructions.
 
 Release `v0.5.26` delivers signed CYD OTA support and CYD firmware `0.2.26`,
 including runtime automatic-OTA control and startup firmware status.
+Release `v0.5.27` delivers CYD firmware `0.2.27` with optional playback controls,
+expanded scene layouts, higher-quality weather icons, automatic multi-companion
+login and valid bounded-length NVS settings keys. Release validation passed:
+493 Python tests plus successful `cyd` and `cyd-dev` PlatformIO builds.
+
+Post-release development: enrollment now has a default-on playback-controls
+checkbox. The preference is stored in NVS and existing enrollments default to
+enabled when the key is absent. Disabling it removes touch-control polling and
+expands clock, dashboard, weather, train, music and generic scenes into the
+lower screen area. Weather icons were upgraded with smooth layered day/night,
+cloud, rain, storm, snow and mist drawings. Both PlatformIO environments build.
+The updated `0.2.26` development firmware was uploaded through `/dev/ttyUSB0`;
+an existing enrollment retained `controls=1`, and a live weather scene rendered
+with healthy heap and no remote error. Physical visual acceptance of the
+expanded control-free layouts remains open.
+On 2026-11-23 a newly attached CYD (MAC `70:4B:CA:76:B6:88`) was flashed from
+the same current source with the full-image serial upload. It boots `0.2.26`
+in unconfigured provisioning state with controls defaulting to enabled and
+healthy heap.
+The second-companion enrollment flow now reads the Pi's `paired` health field:
+an unpaired Pi presents pairing-code enrollment, while an already-paired Pi
+automatically presents administrator login for a separately named CYD API key.
+Both PlatformIO environments build and the second CYD was reflashed into setup
+mode with this corrected flow.
+Enrollment exposed an ESP32 NVS constraint: key names are limited to 15
+characters. `orientation_version` and `playback_controls` were therefore
+invalid and made the aggregate save report failure. They were replaced with
+`orient_ver` and `controls`, preserving any existing orientation selection and
+defaulting missing playback state to enabled. The previously written valid
+credential/key fields recovered on reboot: the second CYD connected with a live
+snapshot after the corrected firmware upload. A Python source regression test
+now rejects overlong `CompanionConfig` NVS keys.
 
 ### ESP32-2432S028R companion (2026-11-20)
 
@@ -198,6 +230,10 @@ including runtime automatic-OTA control and startup firmware status.
   log in the retained evidence, so this is documented as a listener stall, not a
   confirmed HTTPS process crash. The CYD diagnosis should wait for health or
   add watchdog behavior rather than infer a crash from request timeouts.
+- The Pi 3 HTTPS listener stall recurred on 2026-11-23 after about seven hours
+  of continuous service uptime. The unit remained active at
+  `192.168.0.251:8443`; restarting `web-display.service` immediately restored
+  both local and external `/health` responses. The root cause remains unresolved.
 - On 2026-11-23, Pi 3 kiosk restart at 09:02 left a brief window where
   `/run/web-display-kiosk/remote-view.json` was missing. The kiosk service stopped
   and restarted, and direct `remote_view.load()` checks later succeeded on Pi 2,

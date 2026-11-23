@@ -10,11 +10,13 @@ Web Display; it does not render Chromium pages or play video/audio.
 - Captive-portal Wi-Fi setup at `192.168.4.1`.
 - Pairing-code enrollment or login to an already paired Pi.
 - A dedicated `wdk_...` API key; the Pi administrator password is never saved.
+  Multiple CYDs can enroll to the same Pi, each with a separately named key.
 - SHA-256 certificate fingerprint confirmation and pinning before authenticated
   requests are sent.
 - Native dashboard, weather, train and now-playing scenes from `/api/remote-view`.
 - Touch controls for carousel pause/resume/next and music play/pause/resume,
-  stop and skip.
+  stop and skip. They are enabled by default and can be disabled during
+  enrollment; the active scene then expands into the full screen.
 - Offline, stale-heartbeat and certificate-change states.
 - Train status uses each service's dedicated column and wraps long statuses
   instead of truncating. Unchanged remote snapshots do not redraw the full
@@ -23,8 +25,8 @@ Web Display; it does not render Chromium pages or play video/audio.
   generic carousel label.
 - Dashboard/widget scenes show clock/date, notice text and optional weather
   using the sanitized remote-view payload.
-- Weather widgets include compact embedded sun, cloud, rain, storm, snow and
-  mist icons without external assets or network requests.
+- Weather widgets include smooth-edged embedded sun, moon, cloud, rain, storm,
+  snow and mist icons without external assets or network requests.
 - Dashboard weather uses a dedicated bottom strip above the control headings,
   with location/temperature/conditions and humidity/wind on separate lines.
   The now-playing scene leaves the top title area clear because it is already
@@ -104,11 +106,14 @@ scripted shell use a pseudo-terminal wrapper around the monitor command.
 2. Join the setup Wi-Fi shown on its screen.
 3. Open `http://192.168.4.1`.
 4. Enter the local Wi-Fi credentials and the Pi hostname or IPv4 address.
+   Playback controls are checked by default; clear the checkbox to reserve the
+   full display for scene content.
 5. Compare the displayed SHA-256 certificate fingerprint with the Pi display
    and confirm it in the portal.
 6. For an unpaired Pi, enter the pairing code shown on the Pi and choose a new
-   administrator password. For an already paired Pi, choose login mode and
-   enter the existing administrator password.
+   administrator password. For an already paired Pi, the CYD detects that state
+   automatically and asks for the existing administrator password. This adds
+   an additional companion key rather than trying to pair the Pi again.
 7. The CYD creates a named API key, stores that key and Wi-Fi credentials in
    NVS, discards the password, and reconnects as a companion.
 
@@ -132,3 +137,5 @@ physical flash compromise can expose the saved Wi-Fi and bearer key.
 - Touch calibration, TLS enrollment, reconnects, controls and long-running heap
   behavior require physical-board acceptance. A successful build or USB boot
   does not complete those checks.
+- Playback-control-free layouts and the enlarged weather icon rendering still
+  need visual acceptance across every scene on the physical board.

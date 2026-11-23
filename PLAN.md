@@ -24,6 +24,9 @@
   5-second hold retains factory reset.
 - Physical touch, enrollment, reconnect and endurance acceptance remain open
   until checked on the attached board and a real Pi.
+- Playback controls are enabled by default but can be disabled during
+  enrollment. Control-free scenes expand into the 62-pixel lower control area.
+  Weather icons use smooth layered vector-like primitives at runtime.
 
 ## Goal
 

@@ -1,6 +1,14 @@
 #include "CompanionUi.h"
 
+#include <algorithm>
+#include <cmath>
+
 CompanionUi::CompanionUi(BoardDisplay& display) : display_(display) {}
+
+void CompanionUi::setPlaybackControls(bool enabled) {
+  playback_controls_ = enabled;
+  invalidate();
+}
 
 namespace {
 
@@ -53,11 +61,13 @@ void CompanionUi::render(
   if (error.length() || !view.valid) {
     lcd.setTextColor(TFT_RED);
     lcd.setTextSize(2);
-    lcd.drawString("Display offline", 10, 72);
+    lcd.drawString("Display offline", 10, playback_controls_ ? 72 : 88);
     lcd.setTextColor(TFT_LIGHTGREY);
     lcd.setTextSize(1);
     lcd.drawString(error.length() ? error.substring(0, 52) : "No remote data", 10, 108);
-    renderControls(view, false);
+    if (playback_controls_) {
+      renderControls(view, false);
+    }
     return;
   }
   if (view.stale) {
@@ -67,7 +77,9 @@ void CompanionUi::render(
     lcd.drawString("Pi heartbeat is stale", 8, 39);
   }
   renderScene(view);
-  renderControls(view, connected && !view.stale && !view.sleeping);
+  if (playback_controls_) {
+    renderControls(view, connected && !view.stale && !view.sleeping);
+  }
 }
 
 void CompanionUi::renderScene(const RemoteViewSnapshot& view) {
@@ -90,11 +102,14 @@ void CompanionUi::renderClock(const RemoteViewSnapshot& view) {
   CydDisplay& lcd = display_.gfx();
   lcd.setTextColor(TFT_WHITE, TFT_BLACK);
   lcd.setFont(&fonts::FreeSansBold24pt7b);
-  lcd.drawCentreString(clockText(view.device_time), 160, 72);
+  lcd.drawCentreString(
+      clockText(view.device_time), 160, playback_controls_ ? 72 : 82);
   lcd.setFont(&fonts::Font0);
   lcd.setTextSize(1);
   lcd.setTextColor(TFT_CYAN, TFT_BLACK);
-  lcd.drawCentreString(view.scene_title.length() ? view.scene_title : "Web Display", 160, 142);
+  lcd.drawCentreString(
+      view.scene_title.length() ? view.scene_title : "Web Display",
+      160, playback_controls_ ? 142 : 180);
 }
 
 void CompanionUi::renderDashboard(const RemoteViewSnapshot& view) {
@@ -119,7 +134,11 @@ void CompanionUi::renderDashboard(const RemoteViewSnapshot& view) {
     String notice = view.scene_text;
     const std::int16_t notice_y = show_clock ? 124 : 54;
     const std::size_t line_limit = 48;
-    const std::size_t line_count = view.show_weather ? 2 : 3;
+    const std::int16_t weather_y = playback_controls_ ? 142 : 188;
+    const std::size_t line_count =
+        (view.show_weather
+            ? static_cast<std::size_t>((weather_y - notice_y) / 12)
+            : static_cast<std::size_t>(((playback_controls_ ? 176 : 232) - notice_y) / 12));
     for (std::size_t offset = 0, line = 0;
          offset < notice.length() && line < line_count;
          line++) {
@@ -137,16 +156,19 @@ void CompanionUi::renderDashboard(const RemoteViewSnapshot& view) {
   }
 
   if (view.show_weather && view.weather_present) {
-    lcd.fillRect(0, 142, 320, 36, TFT_DARKGREY);
+    const std::int16_t y = playback_controls_ ? 142 : 188;
+    const std::uint16_t height = playback_controls_ ? 36 : 50;
+    lcd.fillRect(0, y, 320, height, TFT_DARKGREY);
     lcd.setTextSize(1);
     lcd.setTextColor(TFT_WHITE, TFT_DARKGREY);
-    drawWeatherIcon(4, 144, 32, view.weather_icon);
+    drawWeatherIcon(4, y + 2, playback_controls_ ? 32 : 46, view.weather_icon, TFT_DARKGREY);
     String location = view.weather_location.length()
         ? view.weather_location.substring(0, 10) : "Weather";
     String temperature = String(view.weather_temperature) + "C";
     lcd.setTextSize(2);
-    lcd.drawString(location, 42, 148);
-    lcd.drawRightString(temperature, 312, 148);
+    const std::int16_t text_x = playback_controls_ ? 42 : 58;
+    lcd.drawString(location, text_x, y + 6);
+    lcd.drawRightString(temperature, 312, y + 6);
 
     String forecast = view.weather_description.length()
         ? view.weather_description.substring(0, 12) : "Weather";
@@ -155,14 +177,18 @@ void CompanionUi::renderDashboard(const RemoteViewSnapshot& view) {
     measurements += "% W";
     measurements += String(view.weather_wind_kmh, 1);
     measurements += "";
-    lcd.drawString(forecast, 42, 164);
-    lcd.drawRightString(measurements, 312, 164);
+    lcd.drawString(forecast, text_x, y + 25);
+    lcd.drawRightString(measurements, 312, y + 25);
   }
 }
 
 void CompanionUi::renderWeather(const RemoteViewSnapshot& view) {
   CydDisplay& lcd = display_.gfx();
-  drawWeatherIcon(220, 76, 48, view.weather_icon);
+  drawWeatherIcon(
+      playback_controls_ ? 220 : 238,
+      playback_controls_ ? 76 : 58,
+      playback_controls_ ? 48 : 72,
+      view.weather_icon, TFT_BLACK);
   lcd.setTextColor(TFT_WHITE, TFT_BLACK);
   lcd.setTextSize(2);
   lcd.drawString(
@@ -181,11 +207,12 @@ void CompanionUi::renderWeather(const RemoteViewSnapshot& view) {
   lcd.drawString(view.weather_description.substring(0, 24), 10, 132);
   lcd.setTextSize(1);
   lcd.setTextColor(TFT_LIGHTGREY);
-  lcd.drawString("Humidity " + String(view.weather_humidity) + "%", 10, 164);
-  lcd.drawString("Wind " + String(view.weather_wind_kmh, 1) + " km/h", 150, 164);
+  const std::int16_t details_y = playback_controls_ ? 164 : 186;
+  lcd.drawString("Humidity " + String(view.weather_humidity) + "%", 10, details_y);
+  lcd.drawString("Wind " + String(view.weather_wind_kmh, 1) + " km/h", 150, details_y);
   if (view.weather_stale) {
     lcd.setTextColor(TFT_ORANGE);
-    lcd.drawString("Weather data is stale", 10, 178);
+    lcd.drawString("Weather data is stale", 10, playback_controls_ ? 178 : 208);
   }
 }
 
@@ -199,10 +226,12 @@ void CompanionUi::renderTrain(const RemoteViewSnapshot& view) {
     lcd.drawString(view.train_error.substring(0, 58), 8, 64);
   }
   const std::int16_t start_y = 66;
+  const std::int16_t row_height = playback_controls_ ? 29 : 40;
+  const std::int16_t row_box_height = playback_controls_ ? 26 : 36;
   for (std::size_t index = 0; index < view.train_count; ++index) {
     const RemoteTrainRow& row = view.train_rows[index];
-    const std::int16_t y = start_y + index * 29;
-    lcd.fillRect(6, y, 308, 26, index % 2 ? 0x1082 : 0x0841);
+    const std::int16_t y = start_y + index * row_height;
+    lcd.fillRect(6, y, 308, row_box_height, index % 2 ? 0x1082 : 0x0841);
     lcd.setTextColor(TFT_WHITE);
     lcd.drawString(row.scheduled, 10, y + 7);
     lcd.drawString(row.destination.substring(0, 22), 54, y + 7);
@@ -231,11 +260,12 @@ void CompanionUi::renderTrain(const RemoteViewSnapshot& view) {
   }
   if (!view.train_count) {
     lcd.setTextColor(TFT_LIGHTGREY);
-    lcd.drawString("No train departures available", 8, 90);
+    lcd.drawString(
+        "No train departures available", 8, playback_controls_ ? 90 : 120);
   }
   if (view.train_stale) {
     lcd.setTextColor(TFT_ORANGE);
-    lcd.drawString("Train data is stale", 8, 174);
+    lcd.drawString("Train data is stale", 8, playback_controls_ ? 174 : 228);
   }
 }
 
@@ -243,19 +273,21 @@ void CompanionUi::renderMusic(const RemoteViewSnapshot& view) {
   CydDisplay& lcd = display_.gfx();
   lcd.setTextColor(TFT_CYAN);
   lcd.setTextSize(1);
-  lcd.drawString(String("Music: ") + view.music_state, 10, 50);
+  lcd.drawString(String("Music: ") + view.music_state, 10, playback_controls_ ? 50 : 54);
   lcd.setTextColor(TFT_WHITE);
   lcd.setTextSize(2);
   lcd.drawString(
       view.music_title.length() ? view.music_title.substring(0, 25) : "Nothing playing",
-      10, 76);
+      10, playback_controls_ ? 76 : 88);
   lcd.setTextColor(TFT_LIGHTGREY);
   lcd.setTextSize(1);
-  lcd.drawString(view.music_artist.substring(0, 44), 10, 112);
+  lcd.drawString(
+      view.music_artist.substring(0, 44), 10, playback_controls_ ? 112 : 138);
   lcd.setTextColor(TFT_CYAN);
-  lcd.drawString("Next:", 10, 142);
+  lcd.drawString("Next:", 10, playback_controls_ ? 142 : 190);
   lcd.setTextColor(TFT_WHITE);
-  lcd.drawString(view.music_next.substring(0, 44), 44, 142);
+  lcd.drawString(
+      view.music_next.substring(0, 44), 44, playback_controls_ ? 142 : 190);
 }
 
 void CompanionUi::renderGeneric(const RemoteViewSnapshot& view) {
@@ -269,9 +301,15 @@ void CompanionUi::renderGeneric(const RemoteViewSnapshot& view) {
   lcd.setTextSize(1);
   lcd.setTextColor(TFT_LIGHTGREY);
   if (view.scene_text.length()) {
-    lcd.drawString(view.scene_text.substring(0, 50), 10, 110);
-    lcd.drawString(view.scene_text.substring(50, 100), 10, 126);
-    lcd.drawString(view.scene_text.substring(100, 150), 10, 142);
+    const std::size_t line_count = playback_controls_ ? 3 : 7;
+    for (std::size_t line = 0; line < line_count; ++line) {
+      const std::size_t offset = line * 50;
+      if (offset >= view.scene_text.length()) {
+        break;
+      }
+      lcd.drawString(
+          view.scene_text.substring(offset, offset + 50), 10, 110 + line * 16);
+    }
   } else if (view.music_title.length()) {
     lcd.drawString("Music: " + view.music_title.substring(0, 42), 10, 120);
   } else {
@@ -282,6 +320,9 @@ void CompanionUi::renderGeneric(const RemoteViewSnapshot& view) {
 }
 
 void CompanionUi::renderControls(const RemoteViewSnapshot& view, bool enabled) {
+  if (!playback_controls_) {
+    return;
+  }
   CydDisplay& lcd = display_.gfx();
   constexpr std::uint16_t width = 64;
   const char* music_toggle =
@@ -325,6 +366,11 @@ void CompanionUi::renderControls(const RemoteViewSnapshot& view, bool enabled) {
 
 TouchAction CompanionUi::takeAction(
     const RemoteViewSnapshot& view, bool connected) {
+  if (!playback_controls_) {
+    pressed_zone_ = -1;
+    pressed_armed_ = false;
+    return TouchAction::kNone;
+  }
   std::uint16_t x = 0;
   std::uint16_t y = 0;
   const bool touched = display_.pollTouch(x, y);
@@ -405,6 +451,9 @@ void CompanionUi::showActionResult(
     bool success,
     const RemoteViewSnapshot& view,
     bool enabled) {
+  if (!playback_controls_) {
+    return;
+  }
   std::int8_t zone = -1;
   switch (action) {
     case TouchAction::kCarouselPause: zone = 0; break;
@@ -436,51 +485,106 @@ String CompanionUi::dateText(const String& device_time) const {
 }
 
 void CompanionUi::drawWeatherIcon(
-    std::int16_t x, std::int16_t y, std::uint16_t size, const String& icon) const {
+    std::int16_t x, std::int16_t y, std::uint16_t size,
+    const String& icon, std::uint16_t background) const {
   CydDisplay& lcd = display_.gfx();
   const float scale = size / 24.0f;
   const auto sx = [scale](int value) -> int { return static_cast<int>(value * scale); };
+  const auto point_x = [x, &sx](int value) -> int { return x + sx(value); };
+  const auto point_y = [y, &sx](int value) -> int { return y + sx(value); };
+  const auto circle = [&](int cx, int cy, int radius, std::uint16_t color) {
+    lcd.fillSmoothCircle(point_x(cx), point_y(cy), sx(radius), color);
+  };
+  const auto wide_line = [&](
+      int x0, int y0, int x1, int y1, float radius, std::uint16_t color) {
+    lcd.drawWideLine(
+        point_x(x0), point_y(y0), point_x(x1), point_y(y1),
+        std::max(0.5f, radius * scale), color);
+  };
+  const auto cloud = [&](int ox, int oy, std::uint16_t color) {
+    lcd.fillSmoothRoundRect(
+        point_x(3 + ox), point_y(10 + oy), sx(18), sx(8), sx(4), color);
+    circle(8 + ox, 10 + oy, 5, color);
+    circle(15 + ox, 9 + oy, 6, color);
+  };
+  const auto sun = [&](int cx, int cy) {
+    circle(cx, cy, 5, TFT_ORANGE);
+    circle(cx, cy, 4, TFT_YELLOW);
+    for (int index = 0; index < 8; ++index) {
+      const float angle = static_cast<float>(index) * 0.785398163f;
+      const int x0 = cx + static_cast<int>(std::cos(angle) * 7.0f);
+      const int y0 = cy + static_cast<int>(std::sin(angle) * 7.0f);
+      const int x1 = cx + static_cast<int>(std::cos(angle) * 10.0f);
+      const int y1 = cy + static_cast<int>(std::sin(angle) * 10.0f);
+      wide_line(x0, y0, x1, y1, 0.9f, TFT_YELLOW);
+    }
+  };
+  const auto moon = [&](int cx, int cy) {
+    circle(cx, cy, 6, 0x9E7F);
+    circle(cx + 3, cy - 2, 6, background);
+  };
   const String code = icon.length() >= 2 ? icon.substring(0, 2) : "";
   const bool night = icon.endsWith("n");
 
   if (code == "01") {
-    lcd.fillCircle(x + sx(12), y + sx(12), sx(6), TFT_YELLOW);
-    lcd.drawLine(x + sx(12), y, x + sx(12), y + sx(3), TFT_YELLOW);
-    lcd.drawLine(x + sx(12), y + sx(21), x + sx(12), y + sx(24), TFT_YELLOW);
-    lcd.drawLine(x, y + sx(12), x + sx(3), y + sx(12), TFT_YELLOW);
-    lcd.drawLine(x + sx(21), y + sx(12), x + sx(24), y + sx(12), TFT_YELLOW);
-  } else if (code == "02" || code == "03" || code == "04") {
-    lcd.fillCircle(x + sx(8), y + sx(10), sx(6), TFT_LIGHTGREY);
-    lcd.fillCircle(x + sx(15), y + sx(9), sx(7), TFT_LIGHTGREY);
-    lcd.fillRect(x + sx(3), y + sx(10), sx(18), sx(8), TFT_LIGHTGREY);
     if (night) {
-      lcd.fillCircle(x + sx(7), y + sx(7), sx(4), TFT_CYAN);
-      lcd.fillCircle(x + sx(10), y + sx(5), sx(4), TFT_DARKGREY);
+      moon(12, 12);
+      circle(19, 5, 1, TFT_WHITE);
+      circle(5, 18, 1, TFT_WHITE);
+    } else {
+      sun(12, 12);
     }
+  } else if (code == "02") {
+    if (night) {
+      moon(7, 7);
+    } else {
+      sun(7, 7);
+    }
+    cloud(0, 2, 0xCE59);
+    cloud(0, 3, TFT_LIGHTGREY);
+  } else if (code == "03") {
+    cloud(0, 2, 0xCE59);
+    cloud(0, 0, TFT_LIGHTGREY);
+  } else if (code == "04") {
+    cloud(-1, -2, 0x8430);
+    cloud(2, 3, 0xC618);
   } else if (code == "09" || code == "10") {
-    lcd.fillCircle(x + sx(8), y + sx(7), sx(5), TFT_LIGHTGREY);
-    lcd.fillCircle(x + sx(14), y + sx(6), sx(6), TFT_LIGHTGREY);
-    lcd.fillRect(x + sx(3), y + sx(7), sx(17), sx(7), TFT_LIGHTGREY);
-    lcd.drawLine(x + sx(6), y + sx(16), x + sx(4), y + sx(21), TFT_CYAN);
-    lcd.drawLine(x + sx(12), y + sx(16), x + sx(10), y + sx(22), TFT_CYAN);
-    lcd.drawLine(x + sx(18), y + sx(16), x + sx(16), y + sx(21), TFT_CYAN);
+    cloud(0, -1, 0xA514);
+    for (int drop = 0; drop < 3; ++drop) {
+      wide_line(
+          6 + drop * 6, 16, 4 + drop * 6, 21,
+          1.1f, drop == 1 ? 0x07FF : TFT_CYAN);
+    }
   } else if (code == "11") {
-    lcd.fillCircle(x + sx(8), y + sx(7), sx(5), TFT_LIGHTGREY);
-    lcd.fillCircle(x + sx(15), y + sx(6), sx(6), TFT_LIGHTGREY);
-    lcd.fillRect(x + sx(3), y + sx(7), sx(18), sx(7), TFT_LIGHTGREY);
-    lcd.fillTriangle(x + sx(13), y + sx(12), x + sx(8), y + sx(22), x + sx(13), y + sx(18), TFT_YELLOW);
+    cloud(0, -2, 0x8430);
+    lcd.fillTriangle(
+        point_x(13), point_y(11), point_x(8), point_y(23),
+        point_x(13), point_y(18), TFT_ORANGE);
+    lcd.fillTriangle(
+        point_x(15), point_y(15), point_x(12), point_y(23),
+        point_x(18), point_y(15), TFT_YELLOW);
   } else if (code == "13") {
-    lcd.fillCircle(x + sx(12), y + sx(12), sx(2), TFT_WHITE);
-    lcd.drawLine(x + sx(12), y + sx(2), x + sx(12), y + sx(22), TFT_WHITE);
-    lcd.drawLine(x + sx(2), y + sx(12), x + sx(22), y + sx(12), TFT_WHITE);
-    lcd.drawLine(x + sx(5), y + sx(5), x + sx(19), y + sx(19), TFT_WHITE);
-    lcd.drawLine(x + sx(19), y + sx(5), x + sx(5), y + sx(19), TFT_WHITE);
+    circle(12, 12, 2, TFT_WHITE);
+    for (int index = 0; index < 6; ++index) {
+      const float angle = static_cast<float>(index) * 1.047197551f;
+      const int dx = static_cast<int>(std::cos(angle) * 10.0f);
+      const int dy = static_cast<int>(std::sin(angle) * 10.0f);
+      wide_line(12, 12, 12 + dx, 12 + dy, 0.9f, TFT_WHITE);
+      wide_line(
+          12 + dx * 3 / 4, 12 + dy * 3 / 4,
+          12 + dx * 3 / 4 - dy / 5, 12 + dy * 3 / 4 + dx / 5,
+          0.65f, TFT_CYAN);
+    }
   } else if (code == "50") {
-    lcd.drawLine(x + sx(2), y + sx(7), x + sx(22), y + sx(7), TFT_LIGHTGREY);
-    lcd.drawLine(x + sx(5), y + sx(12), x + sx(19), y + sx(12), TFT_LIGHTGREY);
-    lcd.drawLine(x + sx(2), y + sx(17), x + sx(22), y + sx(17), TFT_LIGHTGREY);
+    wide_line(2, 6, 21, 6, 1.1f, 0xCE59);
+    wide_line(5, 12, 23, 12, 1.1f, TFT_LIGHTGREY);
+    wide_line(1, 18, 19, 18, 1.1f, 0xA514);
   } else {
-    lcd.drawRect(x + sx(4), y + sx(4), sx(16), sx(16), TFT_LIGHTGREY);
+    cloud(0, 0, TFT_LIGHTGREY);
+    lcd.setFont(&fonts::FreeSansBold18pt7b);
+    lcd.setTextColor(TFT_DARKGREY, TFT_BLACK);
+    lcd.drawCentreString("?", point_x(12), point_y(3));
+    lcd.setFont(&fonts::Font0);
   }
 }
 
@@ -519,6 +623,7 @@ String CompanionUi::renderSignature(
     bool connected) const {
   String signature;
   signature.reserve(180);
+  signature += playback_controls_ ? "k|" : "n|";
   signature += view.valid ? "1|" : "0|";
   signature += connected ? "c|" : "d|";
   signature += error;

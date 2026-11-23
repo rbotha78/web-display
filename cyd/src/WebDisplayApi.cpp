@@ -115,6 +115,7 @@ ProbeResult WebDisplayApi::probe(
     return result;
   }
   result.ok = document["status"] == "ok";
+  result.paired = document["paired"] | false;
   result.version = document["version"] | "";
   if (!result.ok) {
     result.error = "Pi reports unhealthy status";
@@ -155,9 +156,14 @@ bool WebDisplayApi::mintApiKey(
     const String& csrf,
     String& api_key,
     String& error) const {
+  JsonDocument key_document;
+  key_document["name"] =
+      "ESP32 CYD " + String(static_cast<std::uint32_t>(ESP.getEfuseMac() & 0xFFFF), HEX);
+  String key_payload;
+  serializeJson(key_document, key_payload);
   const ApiResponse response = exchange(
       host, port, use_https, fingerprint, false, "POST", "/api/keys",
-      "{\"name\":\"ESP32 CYD\"}", "", cookie, csrf);
+      key_payload, "", cookie, csrf);
   if (response.status != 201) {
     error = response.error.length() ? response.error : "Could not create CYD API key";
     return false;

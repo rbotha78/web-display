@@ -233,6 +233,7 @@ void setup() {
   delay(150);
   Serial.printf("\nWeb Display CYD %s\n", CYD_VERSION);
   const bool enrolled = config_store.load(config);
+  ui.setPlaybackControls(config.playback_controls);
   display.begin(config.orientation);
   pinMode(0, INPUT_PULLUP);
   if (ota.pending()) {
@@ -284,7 +285,8 @@ void loop() {
     last_diagnostic_at = millis();
     Serial.printf(
         "CYD diag version=%s state=%u wifi=%u heap=%lu largest=%lu"
-        " snapshot=%u scene=%s remote_error=%s ota_pending=%u ota_auto=%u\n",
+        " snapshot=%u scene=%s remote_error=%s ota_pending=%u ota_auto=%u"
+        " controls=%u\n",
         CYD_VERSION,
         static_cast<unsigned>(state),
         WiFi.isConnected() ? 1u : 0u,
@@ -294,12 +296,14 @@ void loop() {
         snapshot.scene_kind.c_str(),
         poll_error.c_str(),
         ota.pending() ? 1u : 0u,
-        config.ota_auto ? 1u : 0u);
+        config.ota_auto ? 1u : 0u,
+        config.playback_controls ? 1u : 0u);
   }
 
   if (state == AppState::kUnconfigured) {
     provisioning.loop();
     if (provisioning.enrolled(config)) {
+      ui.setPlaybackControls(config.playback_controls);
       state = AppState::kConnecting;
       reconnect_at = 0;
     }

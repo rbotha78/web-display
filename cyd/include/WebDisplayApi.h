@@ -16,6 +16,7 @@ struct ApiResponse {
 
 struct ProbeResult {
   bool ok = false;
+  bool paired = false;
   String fingerprint;
   String version;
   String error;

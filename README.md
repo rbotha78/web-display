@@ -3,7 +3,7 @@
 A 32-bit Raspberry Pi OS appliance for Raspberry Pi 2 and Raspberry Pi 3,
 with Chromium on HDMI, authenticated HTTPS administration, Wi-Fi provisioning,
 signed application updates and PC and Android display managers.
-Release **[v0.5.26](https://github.com/rbotha78/web-display/releases/tag/v0.5.26)**
+Release **[v0.5.27](https://github.com/rbotha78/web-display/releases/tag/v0.5.27)**
 adds automatic recovery from stalled internet-radio relay buffers and correct
 48 kHz 16-bit playback through the Pi 3 3.5 mm headphone output. It also adds
 the confirmed Pi Zero 2 W WPA3/SAE compatibility boot workaround.
@@ -36,6 +36,9 @@ API key and stores that key plus Wi-Fi credentials in ESP32 NVS; the Pi
 administrator password is not retained. Normal firmware requires
 fingerprint-pinned HTTPS. A separate `cyd-dev` build can select HTTP for
 controlled development only.
+The first CYD pairs an unconfigured Pi with its pairing code. Additional CYDs
+are recognized as companions of an already-paired Pi and use the existing
+administrator password to receive separate API keys.
 
 While connecting, the CYD shows its firmware version and whether automatic OTA
 is enabled. A short BOOT press still changes orientation; hold BOOT for two
@@ -46,6 +49,9 @@ The CYD receives `carousel_paused` and background-music text through the
 sanitized `/api/remote-view` payload. It never receives provider tokens, Plex
 playback capabilities or private configuration. Firmware, wiring and remote
 PlatformIO instructions are in [`cyd/README.md`](cyd/README.md).
+Enrollment enables carousel/music playback controls by default, with a checkbox
+to hide them. Without controls, the CYD gives the freed lower screen area back
+to the active scene for larger weather, dashboard, train and music layouts.
 CYD OTA updates use a signed manifest and streamed firmware download through
 the Pi. The CYD verifies the manifest signature and payload SHA-256 before
 writing the inactive OTA app partition and requires remote-health confirmation

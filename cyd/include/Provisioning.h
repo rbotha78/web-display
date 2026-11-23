@@ -24,6 +24,8 @@ class Provisioning {
     std::uint16_t pi_port = 8443;
     bool use_https = true;
     bool ota_auto = false;
+    bool playback_controls = true;
+    bool pi_paired = false;
     String fingerprint;
   };
 

@@ -11,13 +11,9 @@ bool CompanionConfigStore::load(CompanionConfig& config) const {
   if (!preferences.begin(kNamespace, false)) {
     return false;
   }
-  const bool migrate_orientation =
-      preferences.getUChar("orientation_version", 0) < 1;
-  config.orientation = migrate_orientation
-      ? 1 : preferences.getUChar("orientation", 1);
-  if (migrate_orientation) {
-    preferences.putUChar("orientation", config.orientation);
-    preferences.putUChar("orientation_version", 1);
+  config.orientation = preferences.getUChar("orientation", 1);
+  if (preferences.getUChar("orient_ver", 0) < 1) {
+    preferences.putUChar("orient_ver", 1);
   }
   config.wifi_ssid = preferences.getString("wifi_ssid", "");
   config.wifi_password = preferences.getString("wifi_pass", "");
@@ -27,6 +23,7 @@ bool CompanionConfigStore::load(CompanionConfig& config) const {
   config.api_key = preferences.getString("api_key", "");
   config.use_https = preferences.getBool("https", true);
   config.ota_auto = preferences.getBool("ota_auto", false);
+  config.playback_controls = preferences.getBool("controls", true);
   preferences.end();
   return config.wifi_ssid.length() && config.pi_host.length()
       && (!config.use_https || config.fingerprint.length()) && config.api_key.length();
@@ -43,7 +40,7 @@ bool CompanionConfigStore::save(const CompanionConfig& config) const {
   }
   bool ok = true;
   ok = preferences.putUChar("orientation", config.orientation) > 0 && ok;
-  ok = preferences.putUChar("orientation_version", 1) > 0 && ok;
+  ok = preferences.putUChar("orient_ver", 1) > 0 && ok;
   ok = preferences.putString("wifi_ssid", config.wifi_ssid) > 0 && ok;
   ok = preferences.putString("wifi_pass", config.wifi_password) > 0 && ok;
   ok = preferences.putString("pi_host", config.pi_host) > 0 && ok;
@@ -52,6 +49,7 @@ bool CompanionConfigStore::save(const CompanionConfig& config) const {
   ok = preferences.putString("api_key", config.api_key) > 0 && ok;
   ok = preferences.putBool("https", config.use_https) > 0 && ok;
   ok = preferences.putBool("ota_auto", config.ota_auto) > 0 && ok;
+  ok = preferences.putBool("controls", config.playback_controls) > 0 && ok;
   preferences.end();
   return ok;
 }
@@ -62,7 +60,7 @@ bool CompanionConfigStore::saveOrientation(std::uint8_t orientation) const {
     return false;
   }
   const bool ok = preferences.putUChar("orientation", orientation) > 0;
-  const bool version_ok = preferences.putUChar("orientation_version", 1) > 0;
+  const bool version_ok = preferences.putUChar("orient_ver", 1) > 0;
   preferences.end();
   return ok && version_ok;
 }
@@ -88,8 +86,9 @@ void CompanionConfigStore::clear() const {
     preferences.remove("api_key");
     preferences.remove("https");
     preferences.remove("ota_auto");
+    preferences.remove("controls");
     preferences.remove("orientation");
-    preferences.remove("orientation_version");
+    preferences.remove("orient_ver");
     preferences.end();
   }
 }
