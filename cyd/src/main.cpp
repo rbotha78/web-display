@@ -62,7 +62,7 @@ bool ota_checked = false;
 std::uint32_t ota_pending_started_at = 0;
 std::uint32_t last_diagnostic_at = 0;
 
-void handleOrientationButton() {
+void handleBootButton() {
   const bool pressed = digitalRead(0) == LOW;
   if (pressed && !boot_pressed) {
     boot_pressed = true;
@@ -83,6 +83,22 @@ void handleOrientationButton() {
   }
   boot_pressed = false;
   if (millis() - boot_pressed_at < 100) {
+    return;
+  }
+  const std::uint32_t held_for = millis() - boot_pressed_at;
+  if (held_for >= 2000) {
+    config.ota_auto = !config.ota_auto;
+    if (!config_store.saveOtaAuto(config.ota_auto)) {
+      config.ota_auto = !config.ota_auto;
+      display.showStatus("Automatic OTA", "Could not save setting", false);
+      return;
+    }
+    display.showStatus(
+        "Automatic OTA",
+        config.ota_auto ? "Enabled" : "Disabled",
+        true);
+    Serial.printf("Automatic CYD OTA %s\n", config.ota_auto ? "enabled" : "disabled");
+    heartbeat_at = millis() + 2000;
     return;
   }
   if (millis() - last_orientation_change_at < 500) {
@@ -106,7 +122,7 @@ bool connectSavedWifi() {
   if (!config.wifi_ssid.length()) {
     return false;
   }
-  display.showConnecting(config.wifi_ssid);
+  display.showConnecting(config.wifi_ssid, config.ota_auto);
   WiFi.mode(WIFI_STA);
   WiFi.begin(config.wifi_ssid.c_str(), config.wifi_password.c_str());
   const std::uint32_t started = millis();
@@ -238,7 +254,7 @@ void setup() {
 
 void loop() {
   display.loop();
-  handleOrientationButton();
+  handleBootButton();
 
 #ifdef CYD_OTA_TEST_COMMAND
   const int ota_test_command = Serial.available() ? Serial.read() : -1;

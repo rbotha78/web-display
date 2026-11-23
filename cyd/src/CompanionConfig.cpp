@@ -67,6 +67,16 @@ bool CompanionConfigStore::saveOrientation(std::uint8_t orientation) const {
   return ok && version_ok;
 }
 
+bool CompanionConfigStore::saveOtaAuto(bool enabled) const {
+  Preferences preferences;
+  if (!preferences.begin(kNamespace, false)) {
+    return false;
+  }
+  const bool ok = preferences.putBool("ota_auto", enabled) > 0;
+  preferences.end();
+  return ok;
+}
+
 void CompanionConfigStore::clear() const {
   Preferences preferences;
   if (preferences.begin(kNamespace, false)) {

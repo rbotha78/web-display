@@ -20,6 +20,7 @@ class CompanionConfigStore {
   bool load(CompanionConfig& config) const;
   bool save(const CompanionConfig& config) const;
   bool saveOrientation(std::uint8_t orientation) const;
+  bool saveOtaAuto(bool enabled) const;
   void clear() const;
   std::int32_t incrementBootCount() const;
   String fingerprintHint(const CompanionConfig& config) const;

@@ -3,7 +3,7 @@
 A 32-bit Raspberry Pi OS appliance for Raspberry Pi 2 and Raspberry Pi 3,
 with Chromium on HDMI, authenticated HTTPS administration, Wi-Fi provisioning,
 signed application updates and PC and Android display managers.
-Release **[v0.5.25](https://github.com/rbotha78/web-display/releases/tag/v0.5.25)**
+Release **[v0.5.26](https://github.com/rbotha78/web-display/releases/tag/v0.5.26)**
 adds automatic recovery from stalled internet-radio relay buffers and correct
 48 kHz 16-bit playback through the Pi 3 3.5 mm headphone output. It also adds
 the confirmed Pi Zero 2 W WPA3/SAE compatibility boot workaround.
@@ -36,6 +36,11 @@ API key and stores that key plus Wi-Fi credentials in ESP32 NVS; the Pi
 administrator password is not retained. Normal firmware requires
 fingerprint-pinned HTTPS. A separate `cyd-dev` build can select HTTP for
 controlled development only.
+
+While connecting, the CYD shows its firmware version and whether automatic OTA
+is enabled. A short BOOT press still changes orientation; hold BOOT for two
+seconds and release to toggle automatic OTA without clearing enrollment. Keep
+holding for five seconds to retain the existing factory reset gesture.
 
 The CYD receives `carousel_paused` and background-music text through the
 sanitized `/api/remote-view` payload. It never receives provider tokens, Plex

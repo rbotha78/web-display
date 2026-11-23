@@ -31,7 +31,9 @@ Web Display; it does not render Chromium pages or play video/audio.
   showing the track in its main scene.
 - NVS persistence, reconnect backoff and a physical reset flow.
 - Runtime landscape orientation selection persisted in NVS. A short BOOT press
-  toggles 180-degree orientation; holding BOOT for five seconds resets enrollment.
+  toggles 180-degree orientation. Hold BOOT for two seconds and release to
+  toggle automatic OTA without clearing enrollment; hold it for five seconds
+  to reset enrollment.
 - Touch controls use press-and-release activation across the full button area.
   Pressed, waiting, success and failure feedback appears in the target itself.
   After a command, the CYD remains in WAIT and uses the control POST response
@@ -46,6 +48,8 @@ Web Display; it does not render Chromium pages or play video/audio.
   OTA partition, verifies SHA-256 and health-confirms the new app. A pending
   install records the running partition so an expired confirmation explicitly
   selects the previous image before restart.
+- The Wi-Fi connecting screen shows the CYD firmware version and current
+  automatic-OTA state.
 - Dashboard/widget scenes use clock/date, notice text and optional weather.
 
 The remote view contains sanitized public display state only. Plex capability

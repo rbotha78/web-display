@@ -1,5 +1,9 @@
 #include "BoardDisplay.h"
 
+#ifndef CYD_VERSION
+#define CYD_VERSION "development"
+#endif
+
 #include <Preferences.h>
 
 #include "BoardPins.h"
@@ -179,8 +183,18 @@ void BoardDisplay::showPairing(const String& host, const String& fingerprint) {
   footer();
 }
 
-void BoardDisplay::showConnecting(const String& ssid) {
-  showStatus("Connecting", ssid, true);
+void BoardDisplay::showConnecting(const String& ssid, bool ota_auto) {
+  header("Connecting", 0x0380);
+  display_.setTextSize(2);
+  display_.setTextColor(TFT_GREEN, TFT_BLACK);
+  display_.drawString(ssid, 10, 70);
+  display_.setTextSize(1);
+  display_.setTextColor(TFT_CYAN, TFT_BLACK);
+  display_.drawString(String("CYD firmware ") + CYD_VERSION, 10, 110);
+  display_.setTextColor(TFT_WHITE, TFT_BLACK);
+  display_.drawString(
+      String("Auto OTA: ") + (ota_auto ? "enabled" : "disabled"), 10, 126);
+  footer();
 }
 
 void BoardDisplay::showStatus(const String& title, const String& line, bool ok) {

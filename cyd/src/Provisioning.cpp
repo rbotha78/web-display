@@ -70,7 +70,7 @@ bool Provisioning::enrolled(CompanionConfig& config) {
 }
 
 bool Provisioning::connectStation(const Pending& pending) {
-  display_.showConnecting(pending.wifi_ssid);
+  display_.showConnecting(pending.wifi_ssid, pending.ota_auto);
   WiFi.disconnect(false, false);
   WiFi.begin(pending.wifi_ssid.c_str(), pending.wifi_password.c_str());
   const std::uint32_t started = millis();

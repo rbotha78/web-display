@@ -19,6 +19,9 @@
   installation, remote-health confirmation and explicit previous-partition
   rollback. Signed swap and rollback were accepted on the development board;
   repeated power-loss/endurance rollback remains open.
+- Automatic OTA remains opt-in. A 2-second BOOT hold toggles and persists it
+  without clearing enrollment; a short press retains orientation control and a
+  5-second hold retains factory reset.
 - Physical touch, enrollment, reconnect and endurance acceptance remain open
   until checked on the attached board and a real Pi.
 

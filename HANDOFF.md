@@ -1,6 +1,6 @@
 # Copilot Session Handoff
 
-Last updated: 2026-11-14.
+Last updated: 2026-11-23.
 
 ## Start Here
 
@@ -12,6 +12,9 @@ observations and endurance acceptance; historical findings below are not current
 vitals or deployment instructions.
 
 ## Current Repository And Release
+
+Release `v0.5.26` delivers signed CYD OTA support and CYD firmware `0.2.26`,
+including runtime automatic-OTA control and startup firmware status.
 
 ### ESP32-2432S028R companion (2026-11-20)
 
@@ -150,6 +153,10 @@ vitals or deployment instructions.
   Serial diagnostics showed `state=2 wifi=1 snapshot=1 scene=train`,
   empty `remote_error`, healthy heap and no OTA-pending state across repeated
   samples. The stuck “CYD connected” screen is resolved.
+- On 2026-11-23, the CYD BOOT gesture gained a no-reset automatic-OTA toggle:
+  a short release still rotates, a 2-second hold toggles and persists automatic
+  OTA, and a 5-second hold still clears enrollment. The Wi-Fi connecting screen
+  now displays the firmware version and automatic-OTA state.
 - CYD 0.2.22 is the OTA-capable baseline being prepared for USB upload. It
   contains signed-manifest verification, streaming OTA partition writes,
   SHA-256 verification, health-confirm and rollback state.
@@ -179,6 +186,11 @@ vitals or deployment instructions.
   `ota_pending=0`. Validation after the rollback fix: 492 Python tests passed,
   Python compilation and shell syntax checks passed, and both `cyd` and
   `cyd-dev` PlatformIO builds succeeded.
+- The automatic-OTA toggle/startup-version change built in both `cyd` and
+  `cyd-dev` and was uploaded through `/dev/ttyUSB0` on 2026-11-23. Production
+  `0.2.25` then reported a healthy snapshot, empty remote error, no pending OTA
+  and persisted `ota_auto=0`. Physical timing/feedback acceptance of the
+  2-second BOOT toggle remains open.
 - On 2026-11-20/21, Pi 3 temporarily stopped completing local or external HTTPS
   requests on port 8443 while `web-display.service` remained active and listening.
   Restarting the unit restored `/health` immediately. There was no service

@@ -27,7 +27,7 @@ class BoardDisplay {
   void showSetup(const String& ssid, const String& password, const String& address);
   void showPairing(const String& host, const String& fingerprint);
   void showStatus(const String& title, const String& line, bool ok);
-  void showConnecting(const String& ssid);
+  void showConnecting(const String& ssid, bool ota_auto);
   void showTouchPoint(std::int32_t x, std::int32_t y);
   CydDisplay& gfx();
 
