@@ -291,6 +291,24 @@ class RemoteViewTest {
     }
 
     @Test
+    fun remoteViewPreservesScenePresentationWithoutAcceptingArbitraryWeatherIcons() {
+        val body = remoteBody("""{"kind":"weather","title":"Weather"}""")
+            .put("carousel_paused", true)
+        body.put("weather", JSONObject(
+            """{"location":"Cape Town","temperature":17,"description":"Few clouds",
+            "icon":"02d","forecast":[
+            {"date":"2026-07-02","low":8,"high":20,"description":"Clear","icon":"01d"},
+            {"date":"2026-07-03","low":9,"high":18,"description":"Private","icon":"https://secret/icon"}
+            ]}""",
+        ))
+        val snapshot = RemoteViewParser.parse(body, 0)
+        assertTrue(snapshot.carouselPaused)
+        assertEquals("02d", requireNotNull(snapshot.weather).icon)
+        assertEquals("01d", requireNotNull(snapshot.weather).forecast[0].icon)
+        assertEquals("", requireNotNull(snapshot.weather).forecast[1].icon)
+    }
+
+    @Test
     fun recoveryAndSleepDoNotInventACurrentScene() {
         val body = remoteBody("null").put("mode", "recovery").put("message", "Waiting for a target")
         body.getJSONObject("sleep").put("sleeping", true).put("scheduled_sleep", true).put("wake_until", 1790001000)

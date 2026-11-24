@@ -29,6 +29,7 @@ sealed interface RemoteScene {
 data class RemoteSnapshot(
     val mode: String,
     val updated: Double,
+    val carouselPaused: Boolean,
     val clock: DeviceClock,
     val scene: RemoteScene?,
     val train: RemoteTrain?,
@@ -105,6 +106,7 @@ data class RemoteRecentStop(
 }
 
 private val RAIL_CLOCK = Regex("(?:[01][0-9]|2[0-3]):[0-5][0-9]")
+private val WEATHER_ICON = Regex("(?:0[12349]|10|11|13|50)[dn]")
 
 private fun compactRailTime(scheduled: String, actual: String, estimated: String, cancelled: Boolean): String =
     when {
@@ -162,12 +164,13 @@ data class RemoteStop(
 
 data class RemoteWeather(
     val location: String, val temperature: Double?, val feelsLike: Double?, val description: String,
+    val icon: String,
     val humidity: Double?, val windKmh: Double?, val observedAt: Double?,
     val forecast: List<RemoteForecast>, val forecastError: String, val error: String, val stale: Boolean,
 )
 
 data class RemoteForecast(
-    val date: String, val low: Double?, val high: Double?, val description: String,
+    val date: String, val low: Double?, val high: Double?, val description: String, val icon: String = "",
 )
 
 data class RemoteViewState(
@@ -224,6 +227,7 @@ object RemoteViewParser {
             require(sleep.opt("sleeping") is Boolean && sleep.opt("scheduled_sleep") is Boolean)
             return RemoteSnapshot(
                 mode, body.number("updated") ?: throw IllegalArgumentException(),
+                body.optBoolean("carousel_paused"),
                 DeviceClock(time.toInstant(), zone, timezone, elapsed), scene,
                 body.optJSONObject("train")?.let(::train),
                 body.optJSONObject("weather")?.let(::weather),
@@ -293,10 +297,13 @@ object RemoteViewParser {
 
     private fun weather(value: JSONObject) = RemoteWeather(
         value.text("location"), value.number("temperature"), value.number("feels_like"),
-        value.text("description"), value.number("humidity"), value.number("wind_kmh"),
+        value.text("description"), value.weatherIcon("icon"), value.number("humidity"), value.number("wind_kmh"),
         value.number("observed_at"),
         value.optJSONArray("forecast").objects().map {
-            RemoteForecast(it.text("date"), it.number("low"), it.number("high"), it.text("description"))
+            RemoteForecast(
+                it.text("date"), it.number("low"), it.number("high"),
+                it.text("description"), it.weatherIcon("icon"),
+            )
         },
         value.text("forecast_error"), value.text("error"), value.optBoolean("stale"),
     )
@@ -316,6 +323,7 @@ object RemoteViewParser {
         (0 until (this?.length() ?: 0)).mapNotNull { index -> this?.opt(index) as? String }
 
     private fun JSONObject.text(key: String) = opt(key) as? String ?: ""
+    private fun JSONObject.weatherIcon(key: String) = text(key).takeIf(WEATHER_ICON::matches).orEmpty()
     private fun JSONObject.boolean(key: String) = opt(key) as? Boolean
     private fun JSONObject.number(key: String) = (opt(key) as? Number)?.toDouble()?.takeIf { it.isFinite() }
 }

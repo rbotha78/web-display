@@ -20,6 +20,22 @@ expanded scene layouts, higher-quality weather icons, automatic multi-companion
 login and valid bounded-length NVS settings keys. Release validation passed:
 493 Python tests plus successful `cyd` and `cyd-dev` PlatformIO builds.
 
+Post-release Android development: the native manager remote view is now an
+interactive, display-shaped reconstruction matching the CYD scene model rather
+than a stack of detail cards. It adds local weather glyphs,
+compact dashboard/weather/train/music rendering, and guarded carousel/music
+controls reusing `PlayerSession`; detailed sanitized metadata remains below the
+preview. The model accepts only known OpenWeather icon codes, not arbitrary
+URLs. Android unit tests, lint and debug APK assembly pass; the APK is at
+`android/app/build/outputs/apk/debug/web-display-manager.apk`. A physical
+Android phone check for portrait/landscape layout, weather glyph quality and
+control feedback remains open.
+After initial phone review, the remote-view refresh indicator was moved entirely
+to the fixed-size header icon to eliminate layout shift, explanatory chrome and
+normal state metadata were trimmed, dialog margins were reduced, and train
+departure times now use a wider non-wrapping compact text style. The full
+Android unit-test/lint/APK command still passes after those changes.
+
 Post-release development: enrollment now has a default-on playback-controls
 checkbox. The preference is stored in NVS and existing enrollments default to
 enabled when the key is absent. Disabling it removes touch-control polling and

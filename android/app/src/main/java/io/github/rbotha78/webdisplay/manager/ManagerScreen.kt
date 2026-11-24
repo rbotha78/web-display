@@ -74,7 +74,7 @@ fun ManagerScreen(viewModel: ManagerViewModel) {
     val musicSyncResults by viewModel.musicSyncResults.collectAsState()
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
-    val homeVisible = settings == null && remoteView == null && addDevice == null &&
+    val homeVisible = settings == null && addDevice == null &&
         !confirmUpdateAll && updateResults == null && !musicSyncOpen && "update-all" !in busy
     DisposableEffect(homeVisible) {
         viewModel.homeVisible(homeVisible)
@@ -187,7 +187,21 @@ fun ManagerScreen(viewModel: ManagerViewModel) {
                 }
                 GroupPlayer(groupLeaders(statuses, players), players, viewModel::playerCommand)
             }
-            remoteView?.let { RemoteViewDialog(it, viewModel::closeRemoteView) }
+            remoteView?.let { remote ->
+                val status = statuses.firstOrNull { it.id == remote.deviceId }
+                RemoteViewDialog(
+                    state = remote,
+                    player = players[remote.deviceId] ?: PlayerState(),
+                    onCommand = { viewModel.playerCommand(remote.deviceId, it) },
+                    onReenroll = {
+                        status?.let {
+                            viewModel.closeRemoteView()
+                            addDevice = AddRequest(it.host, it.port.toString(), it.name, it.id)
+                        }
+                    },
+                    onClose = viewModel::closeRemoteView,
+                )
+            }
         }
     }
 

@@ -1064,10 +1064,13 @@ without replaying previous Next commands. Updated firmware is required for these
 controls, and a missing/stale kiosk heartbeat disables them rather than showing
 old playback state as live.
 
-**Remote view** opens a reconstructed preview of the current display scene,
-refreshing every five seconds only while the view is open. Dashboard clocks
-and notices, train boards, weather and now-playing/up-next text use the display's current
-scene data; album covers are not included.
+**Remote view** opens a practical display-shaped reconstruction of the current
+scene, refreshing every five seconds only while the view is open. Dashboard
+clocks/notices, compact train boards, weather with local condition glyphs, and
+now-playing/up-next text use the display's current scene data; album covers are
+not included. The Android preview includes the same guarded carousel and music
+controls as the device card, while detailed train/forecast/web/video metadata
+remains below the preview.
 Web pages show an address/details card; videos show a metadata card and are
 never streamed to the manager. This is not a screenshot or remote-control
 session: browser page contents, playback pixels and exact TV layout are not
@@ -1130,7 +1133,9 @@ The app supports the same operations as the PC manager: device enrollment,
 online/offline and network status, URL changes, restart, individual and fleet
 update checks/installations, SSH public-key management on development images,
 automatic or manual browser administration links, and the same reconstructed
-**Remote view** available in the PC manager. Installation does not
+**Remote view** available in the PC manager. The Android preview is
+display-shaped and interactive, while both managers keep detailed sanitized
+scene data available. Installation does not
 automatically reboot a display.
 
 **Configure device** opens native **Global settings** and **Carousel** tabs,

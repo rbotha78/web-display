@@ -316,6 +316,9 @@ The dated status below and
   retaining source/volume, and play starts a fresh queue for that source.
 - PC and Android managers with sanitized reconstructed remote views and native
   editable Global settings/Carousel views, without embedding device web pages.
+  The Android remote view is a practical display-shaped scene reconstruction
+  with local weather glyphs, a compact CYD-like visual hierarchy and guarded
+  carousel/music controls; detailed train/forecast/URL metadata remains below it.
   Settings use enrolled, fingerprint-pinned connections and retain manager-key
   permissions. Drafts remain local until explicit save/apply; opening an external
   administration page remains an optional fallback.
