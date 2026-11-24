@@ -3,10 +3,12 @@
 A 32-bit Raspberry Pi OS appliance for Raspberry Pi 2 and Raspberry Pi 3,
 with Chromium on HDMI, authenticated HTTPS administration, Wi-Fi provisioning,
 signed application updates and PC and Android display managers.
-Release **[v0.5.27](https://github.com/rbotha78/web-display/releases/tag/v0.5.27)**
-adds automatic recovery from stalled internet-radio relay buffers and correct
-48 kHz 16-bit playback through the Pi 3 3.5 mm headphone output. It also adds
-the confirmed Pi Zero 2 W WPA3/SAE compatibility boot workaround.
+Release **[v0.5.28](https://github.com/rbotha78/web-display/releases/tag/v0.5.28)**
+keeps active non-video scenes visible in Android and PC manager remote views
+during display sleep, matching the CYD companion. v0.5.27 added automatic
+recovery from stalled internet-radio relay buffers, correct 48 kHz 16-bit
+playback through the Pi 3 3.5 mm headphone output and the confirmed Pi Zero 2 W
+WPA3/SAE compatibility boot workaround.
 v0.5.24 added stable hardware-derived setup AP names and passwords for recovery
 from any phone or computer, captive-portal discovery and more reliable Wi-Fi
 provisioning rollback. v0.5.23 added
@@ -49,6 +51,9 @@ The CYD receives `carousel_paused` and background-music text through the
 sanitized `/api/remote-view` payload. It never receives provider tokens, Plex
 playback capabilities or private configuration. Firmware, wiring and remote
 PlatformIO instructions are in [`cyd/README.md`](cyd/README.md).
+Both the Android and PC managers follow the same sleep reconstruction as the
+CYD: the active non-video scene remains visible while the preview is marked
+sleeping, but playback controls stay unavailable until the display wakes.
 Enrollment enables carousel/music playback controls by default, with a checkbox
 to hide them. Without controls, the CYD gives the freed lower screen area back
 to the active scene for larger weather, dashboard, train and music layouts.

@@ -164,7 +164,8 @@ private fun DisplayFrame(snapshot: RemoteSnapshot, state: RemoteViewState, elaps
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    snapshot.scene?.title?.ifBlank { "Web Display" } ?: "Web Display",
+                    if (snapshot.sleeping) "Sleeping"
+                    else snapshot.scene?.title?.ifBlank { "Web Display" } ?: "Web Display",
                     color = Color.White,
                     fontWeight = FontWeight.Bold,
                     maxLines = 1,
@@ -197,10 +198,6 @@ private fun DisplayFrame(snapshot: RemoteSnapshot, state: RemoteViewState, elaps
             }
             Box(Modifier.weight(1f).fillMaxWidth().padding(12.dp)) {
                 when {
-                    snapshot.sleeping -> DisplayMessage(
-                        "Display sleeping",
-                        if (snapshot.scheduledSleep) "Scheduled sleep is active." else "The physical display is asleep.",
-                    )
                     snapshot.mode == "recovery" -> DisplayMessage(
                         "Recovery screen",
                         snapshot.message.ifBlank { "The display is waiting for setup or recovery." },
@@ -630,49 +627,47 @@ private fun RemoteDetails(state: RemoteViewState, snapshot: RemoteSnapshot?, ela
         }
         }
     }
-    if (!snapshot.sleeping) {
-        when (val scene = snapshot.scene) {
-            is RemoteScene.Website -> RemoteSection("Website details") {
-                Text(scene.url.ifBlank { "No website address was reported." })
-                Text(
-                    "This website is not loaded by the manager. Private URL details may be omitted.",
-                    style = MaterialTheme.typography.bodySmall,
-                )
-            }
-            is RemoteScene.Video -> RemoteSection("Video details") {
-                Text("Source: ${scene.source.ifBlank { "Not reported" }}")
-                Text("Audio: ${scene.audioEnabled?.let { if (it) "Enabled" else "Muted" } ?: "Not reported"}")
-                scene.duration?.let { Text("Scene duration: ${number(it)} seconds") }
-                if (scene.ratingKey.isNotBlank()) Text("Plex rating key: ${scene.ratingKey}")
-                Text("Video and audio are not streamed or played here.",
-                    style = MaterialTheme.typography.bodySmall)
-            }
-            is RemoteScene.Train -> RemoteSection("Departure details") {
-                TrainContent(snapshot.train, snapshot.clock)
-            }
-            is RemoteScene.Weather -> RemoteSection("Weather details") {
-                WeatherContent(snapshot.weather, snapshot.clock)
-            }
-            is RemoteScene.Dashboard -> RemoteSection("Dashboard details") {
-                if (scene.layout != "notice") Text(snapshot.clock.at(elapsed).format(CLOCK_FORMAT))
-                if (scene.layout != "clock") Text(scene.text.ifBlank { "No notice text." })
-                if (scene.showWeather) WeatherContent(snapshot.weather, snapshot.clock)
-            }
-            is RemoteScene.Music -> RemoteSection("Music details") {
-                Text(if (scene.state == "paused") "Now playing · paused" else "Now playing",
-                    fontWeight = FontWeight.Bold)
-                Text(scene.song.ifBlank { "No music is playing." })
-                if (scene.artist.isNotBlank()) Text(scene.artist)
-                if (scene.album.isNotBlank()) Text(scene.album)
-                if (scene.nextSong.isNotBlank()) {
-                    Text("Up next: ${scene.nextSong}" +
-                        if (scene.nextArtist.isNotBlank()) " — ${scene.nextArtist}" else "")
-                }
-                Text("Album covers and audio are not shown in this preview.",
-                    style = MaterialTheme.typography.bodySmall)
-            }
-            null -> Unit
+    when (val scene = snapshot.scene) {
+        is RemoteScene.Website -> RemoteSection("Website details") {
+            Text(scene.url.ifBlank { "No website address was reported." })
+            Text(
+                "This website is not loaded by the manager. Private URL details may be omitted.",
+                style = MaterialTheme.typography.bodySmall,
+            )
         }
+        is RemoteScene.Video -> RemoteSection("Video details") {
+            Text("Source: ${scene.source.ifBlank { "Not reported" }}")
+            Text("Audio: ${scene.audioEnabled?.let { if (it) "Enabled" else "Muted" } ?: "Not reported"}")
+            scene.duration?.let { Text("Scene duration: ${number(it)} seconds") }
+            if (scene.ratingKey.isNotBlank()) Text("Plex rating key: ${scene.ratingKey}")
+            Text("Video and audio are not streamed or played here.",
+                style = MaterialTheme.typography.bodySmall)
+        }
+        is RemoteScene.Train -> RemoteSection("Departure details") {
+            TrainContent(snapshot.train, snapshot.clock)
+        }
+        is RemoteScene.Weather -> RemoteSection("Weather details") {
+            WeatherContent(snapshot.weather, snapshot.clock)
+        }
+        is RemoteScene.Dashboard -> RemoteSection("Dashboard details") {
+            if (scene.layout != "notice") Text(snapshot.clock.at(elapsed).format(CLOCK_FORMAT))
+            if (scene.layout != "clock") Text(scene.text.ifBlank { "No notice text." })
+            if (scene.showWeather) WeatherContent(snapshot.weather, snapshot.clock)
+        }
+        is RemoteScene.Music -> RemoteSection("Music details") {
+            Text(if (scene.state == "paused") "Now playing · paused" else "Now playing",
+                fontWeight = FontWeight.Bold)
+            Text(scene.song.ifBlank { "No music is playing." })
+            if (scene.artist.isNotBlank()) Text(scene.artist)
+            if (scene.album.isNotBlank()) Text(scene.album)
+            if (scene.nextSong.isNotBlank()) {
+                Text("Up next: ${scene.nextSong}" +
+                    if (scene.nextArtist.isNotBlank()) " — ${scene.nextArtist}" else "")
+            }
+            Text("Album covers and audio are not shown in this preview.",
+                style = MaterialTheme.typography.bodySmall)
+        }
+        null -> Unit
     }
 }
 

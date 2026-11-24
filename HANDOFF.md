@@ -15,7 +15,10 @@ vitals or deployment instructions.
 
 Release `v0.5.26` delivers signed CYD OTA support and CYD firmware `0.2.26`,
 including runtime automatic-OTA control and startup firmware status.
-Release `v0.5.27` delivers CYD firmware `0.2.27` with optional playback controls,
+Release `v0.5.28` keeps active non-video scenes visible in the Android and PC
+manager remote views while the physical display is sleeping, matching the CYD.
+The release retains CYD firmware `0.2.27`. Release `v0.5.27` delivered CYD
+firmware `0.2.27` with optional playback controls,
 expanded scene layouts, higher-quality weather icons, automatic multi-companion
 login and valid bounded-length NVS settings keys. Release validation passed:
 493 Python tests plus successful `cyd` and `cyd-dev` PlatformIO builds.
@@ -35,6 +38,14 @@ to the fixed-size header icon to eliminate layout shift, explanatory chrome and
 normal state metadata were trimmed, dialog margins were reduced, and train
 departure times now use a wider non-wrapping compact text style. The full
 Android unit-test/lint/APK command still passes after those changes.
+The Android preview now follows the CYD sleep rule: sleeping labels the preview
+header but does not replace an active non-video scene, and scene details and
+controls retain the same treatment as the active view (with controls disabled).
+The PC manager explicitly documents and tests that its sleeping preview keeps
+the active non-video scene visible. The focused PC preview suite passes all 8
+tests after both React bundles were rebuilt. The Android unit tests, lint and
+debug APK assembly also pass; this manager-only behavior has not yet been
+accepted on physical Android portrait/landscape devices.
 
 Post-release development: enrollment now has a default-on playback-controls
 checkbox. The preference is stored in NVS and existing enrollments default to

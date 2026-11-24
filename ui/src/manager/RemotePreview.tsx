@@ -100,7 +100,9 @@ export function RemotePreview({ deviceId, deviceName, close }: {
         {value && !error && !stale && (
           <div className="remote-preview-scene">
             <p className="muted">{value.mode} · {value.timezone} · Device snapshot {value.device_time}</p>
-            {value.sleep.sleeping && <p role="status">Sleep schedule active — videos and music paused; non-video scenes continue.</p>}
+            {value.sleep.sleeping && <p role="status">
+              Sleeping — videos and music are paused; the active non-video scene remains visible.
+            </p>}
             {value.message && <p role="status">{value.message}</p>}
             {scene && <h3>{scene.title || scene.kind}</h3>}
             {clock && scene && ["dashboard", "train", "weather"].includes(scene.kind) &&

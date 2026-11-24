@@ -322,6 +322,18 @@ class RemoteViewTest {
     }
 
     @Test
+    fun sleepingStatePreservesTheActiveScene() {
+        val body = remoteBody("""{"kind":"dashboard","layout":"notice","title":"Status","text":"Still visible"}""")
+        body.getJSONObject("sleep").put("sleeping", true).put("scheduled_sleep", true)
+        val snapshot = RemoteViewParser.parse(body, 0)
+        assertTrue(snapshot.sleeping)
+        assertEquals(
+            RemoteScene.Dashboard("Status", "notice", "Still visible", false),
+            snapshot.scene,
+        )
+    }
+
+    @Test
     fun malformedOrUnavailableStateFailsRatherThanShowingFakeDefaults() {
         listOf(
             remoteBody().put("available", false),

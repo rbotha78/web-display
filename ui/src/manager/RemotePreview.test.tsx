@@ -149,6 +149,20 @@ test("expires a near-stale kiosk heartbeat even while the preview connection rem
   expect(screen.queryByText("<script>Only text</script>")).toBeNull();
 });
 
+test("continues showing the active non-video scene while the display is sleeping", async () => {
+  vi.stubGlobal("fetch", vi.fn(async () => reply({
+    ...initial,
+    sleep: { sleeping: true, scheduled_sleep: true, wake_until: null },
+    scene: { id: "weather", kind: "weather", title: "Weather" },
+    weather: { location: "London", temperature: 12, description: "Clear sky", icon: "01d" },
+  })));
+  render(<RemotePreview deviceId="aabbccddeeff" deviceName="Lobby" close={vi.fn()} />);
+  await settle();
+  expect(screen.getByText(/active non-video scene remains visible/)).toBeTruthy();
+  expect(screen.getByRole("heading", { name: "Weather" })).toBeTruthy();
+  expect(screen.getByText("12 °C")).toBeTruthy();
+});
+
 test("hides previous departure information when disabled on the active scene", async () => {
   vi.stubGlobal("fetch", vi.fn(async () => reply({
     ...initial,
