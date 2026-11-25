@@ -1,5 +1,6 @@
 import http.client
 import json
+import socket
 import ssl
 import struct
 import subprocess
@@ -11,7 +12,7 @@ from urllib.parse import urlsplit
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 
-from webdisplay.app import Application, make_handler
+from webdisplay.app import Application, ThreadingTLSServer, make_handler
 from webdisplay_manager import client, discovery, version
 from webdisplay_manager.client import CertificateMismatch, DeviceClient, DeviceError
 from webdisplay_manager.server import make_handler as manager_handler
@@ -29,6 +30,16 @@ def make_certificate(directory: Path, name: str) -> tuple[Path, Path]:
     return certificate, key
 
 
+class ObservedTLSServer(ThreadingTLSServer):
+    def __init__(self, *args, **kwargs):
+        self.handshake_started = threading.Event()
+        super().__init__(*args, **kwargs)
+
+    def process_request_thread(self, request, client_address) -> None:
+        self.handshake_started.set()
+        super().process_request_thread(request, client_address)
+
+
 class FakeDevice:
     """A real Application served over TLS with a throwaway certificate."""
 
@@ -41,10 +52,9 @@ class FakeDevice:
         self.actions: list[str] = []
         self.app.updater.running_version = lambda: "0.5.7"
         self.app.config.update(password=__import__("webdisplay.app", fromlist=["x"]).hash_password("device password"))
-        self.server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(self.app))
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         context.load_cert_chain(self.certificate, key)
-        self.server.socket = context.wrap_socket(self.server.socket, server_side=True)
+        self.server = ObservedTLSServer(("127.0.0.1", 0), make_handler(self.app), context)
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
         self.port = self.server.server_port
@@ -75,6 +85,16 @@ class ManagerCase(unittest.TestCase):
 
 
 class ClientTests(ManagerCase):
+    def test_stalled_tls_handshake_does_not_block_healthy_requests(self):
+        stalled = socket.create_connection(("127.0.0.1", self.device.port), timeout=1)
+        try:
+            stalled.sendall(b"\x16\x03\x03\x00\x05")
+            self.assertTrue(self.device.server.handshake_started.wait(1))
+            healthy = DeviceClient("127.0.0.1", self.device.port, self.device.fingerprint)
+            self.assertEqual(healthy.call("GET", "/health", timeout=1)["status"], "ok")
+        finally:
+            stalled.close()
+
     def test_fetches_the_fingerprint_shown_on_the_device(self):
         self.assertEqual(client.fetch_fingerprint("127.0.0.1", self.device.port), self.device.fingerprint)
 

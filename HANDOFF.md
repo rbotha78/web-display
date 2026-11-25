@@ -261,6 +261,34 @@ now rejects overlong `CompanionConfig` NVS keys.
   of continuous service uptime. The unit remained active at
   `192.168.0.251:8443`; restarting `web-display.service` immediately restored
   both local and external `/health` responses. The root cause remains unresolved.
+- On 2026-11-25, the Pi 3 stall was isolated without restarting the service.
+  Successful access logs stopped at 12:01:08 UTC and resumed at 12:04:55, with
+  `web-display.service` remaining active, PID 750, zero restarts and no Python
+  traceback or OOM event. A 1-second `/health` monitor captured repeated
+  two-second timeouts at 12:09:17, 12:09:51 and later. During the timeout, the
+  process had only its normal five persistent threads, the port 8443 listen
+  backlog reached four of five, and an `ESTABLISHED` connection from
+  `192.168.0.43` owned FD 4 with 1,658 bytes already in Send-Q. A live GDB
+  snapshot placed the main thread (TID 750) in libc `read` called from
+  `libcrypto`, while the socket remained in TLS handshaking. Later connections
+  queued behind that client. This matches the server construction in
+  `app.py`: the listening socket is wrapped by `SSLContext` before
+  `ThreadingHTTPServer`, so OpenSSL performs the handshake synchronously in the
+  accept thread before a request worker can be created. A slow-lossy TLS client
+  can therefore hang all new HTTPS accepts until it resumes or disconnects.
+  Memory was not exhausted; a concurrent Chromium vc4 GEM allocation warning at
+  11:52 was not followed by an OOM kill and does not explain later recurrences.
+  `ThreadingTLSServer` now accepts raw TCP immediately and performs a
+  10-second TLS handshake inside the request worker; normal requests retain that
+  bounded socket timeout and update uploads explicitly retain their 60-second
+  stream timeout. A regression test holds a TCP client at an incomplete TLS
+  record while a separately pinned `/health` request succeeds. All 494 Python
+  tests pass. A pinned development push deployed matching `app.py` hashes to
+  Pi 2, Pi 3 and Zero 2 W; each completed `/health` in 0.06-0.18 seconds while
+  an incomplete TLS client was held open. On Pi 3, 21 consecutive health
+  requests over 12 seconds all succeeded, with 0.094-second maximum latency,
+  while that client remained stuck. Long-duration recurrence/endurance
+  acceptance remains open.
 - On 2026-11-23, Pi 3 kiosk restart at 09:02 left a brief window where
   `/run/web-display-kiosk/remote-view.json` was missing. The kiosk service stopped
   and restarted, and direct `remote_view.load()` checks later succeeded on Pi 2,

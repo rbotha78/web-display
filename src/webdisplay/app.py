@@ -14,6 +14,7 @@ import secrets
 import socket
 import ssl
 import subprocess
+import sys
 import threading
 import time
 import uuid
@@ -1900,6 +1901,40 @@ def local_addresses() -> list[str]:
     return sorted(addresses)
 
 
+class ThreadingTLSServer(ThreadingHTTPServer):
+    """Keep slow TLS handshakes off the accept loop."""
+
+    daemon_threads = True
+
+    def __init__(
+        self,
+        server_address: tuple[str, int],
+        handler,
+        context: ssl.SSLContext,
+        handshake_timeout: float = 10,
+    ) -> None:
+        self.tls_context = context
+        self.handshake_timeout = handshake_timeout
+        super().__init__(server_address, handler)
+
+    def process_request_thread(self, request, client_address) -> None:
+        request.settimeout(self.handshake_timeout)
+        try:
+            tls_request = self.tls_context.wrap_socket(request, server_side=True)
+        except (OSError, ssl.SSLError) as error:
+            self.shutdown_request(request)
+            LOG.debug("TLS handshake failed for %s: %s", client_address[0], error)
+            return
+        super().process_request_thread(tls_request, client_address)
+
+    def handle_error(self, request, client_address) -> None:
+        error = sys.exc_info()[1]
+        if isinstance(error, (ConnectionError, TimeoutError, ssl.SSLError)):
+            LOG.debug("TLS request disconnected from %s: %s", client_address[0], error)
+            return
+        super().handle_error(request, client_address)
+
+
 def serve(args: argparse.Namespace) -> None:
     app = Application(
         Path(args.state),
@@ -1912,11 +1947,10 @@ def serve(args: argparse.Namespace) -> None:
         debug_keys_helper=Path(args.debug_keys_helper),
         bluetooth_helper=Path(args.bluetooth_helper),
     )
-    server = ThreadingHTTPServer((args.bind, args.port), make_handler(app))
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     context.minimum_version = ssl.TLSVersion.TLSv1_2
     context.load_cert_chain(args.certificate, args.private_key)
-    server.socket = context.wrap_socket(server.socket, server_side=True)
+    server = ThreadingTLSServer((args.bind, args.port), make_handler(app), context)
     LOG.info("Management service listening on https://%s:%d", args.bind, args.port)
     try:
         server.serve_forever()

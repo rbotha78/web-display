@@ -54,6 +54,9 @@ PlatformIO instructions are in [`cyd/README.md`](cyd/README.md).
 Both the Android and PC managers follow the same sleep reconstruction as the
 CYD: the active non-video scene remains visible while the preview is marked
 sleeping, but playback controls stay unavailable until the display wakes.
+Administration TLS handshakes are bounded in independent request threads, so
+an interrupted manager or companion connection cannot block the listener for
+other clients.
 Enrollment enables carousel/music playback controls by default, with a checkbox
 to hide them. Without controls, the CYD gives the freed lower screen area back
 to the active scene for larger weather, dashboard, train and music layouts.
