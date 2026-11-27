@@ -1,1047 +1,133 @@
 # Copilot Session Handoff
 
-Last updated: 2026-11-23.
+Last updated: 2026-11-27.
 
 ## Start Here
 
-Read `AGENTS.md` and `.github/copilot-instructions.md` for workflow, commands and
-invariants, then this current-status section and `PLAN.md` for approved scope.
-`README.md` documents user-facing operation. Do not depend on session-local todos
-or artifacts to resume work. Distinguish tests, live API checks, physical-display
-observations and endurance acceptance; historical findings below are not current
-vitals or deployment instructions.
+Read `AGENTS.md` and `.github/copilot-instructions.md` for workflow, commands
+and invariants, `docs/architecture.md` and `docs/implementation.md` for
+architecture and conventions, then this current-status section and `PLAN.md`
+for approved scope. `README.md` documents user-facing operation. Do not depend
+on session-local todos or artifacts to resume work. Distinguish tests, live API
+checks, physical-display observations and endurance acceptance; historical
+findings below are not current vitals or deployment instructions.
 
-## Current Repository And Release
+## Current Release
 
-Release `v0.5.26` delivers signed CYD OTA support and CYD firmware `0.2.26`,
-including runtime automatic-OTA control and startup firmware status.
-Release `v0.5.28` keeps active non-video scenes visible in the Android and PC
-manager remote views while the physical display is sleeping, matching the CYD.
-The release retains CYD firmware `0.2.27`. Release `v0.5.27` delivered CYD
-firmware `0.2.27` with optional playback controls,
-expanded scene layouts, higher-quality weather icons, automatic multi-companion
-login and valid bounded-length NVS settings keys. Release validation passed:
-493 Python tests plus successful `cyd` and `cyd-dev` PlatformIO builds.
+**Branch:** `main` | **Release:** v0.5.28 | **CYD firmware:** 0.2.27
 
-Post-release Android development: the native manager remote view is now an
-interactive, display-shaped reconstruction matching the CYD scene model rather
-than a stack of detail cards. It adds local weather glyphs,
-compact dashboard/weather/train/music rendering, and guarded carousel/music
-controls reusing `PlayerSession`; detailed sanitized metadata remains below the
-preview. The model accepts only known OpenWeather icon codes, not arbitrary
-URLs. Android unit tests, lint and debug APK assembly pass; the APK is at
-`android/app/build/outputs/apk/debug/web-display-manager.apk`. A physical
-Android phone check for portrait/landscape layout, weather glyph quality and
-control feedback remains open.
-After initial phone review, the remote-view refresh indicator was moved entirely
-to the fixed-size header icon to eliminate layout shift, explanatory chrome and
-normal state metadata were trimmed, dialog margins were reduced, and train
-departure times now use a wider non-wrapping compact text style. The full
-Android unit-test/lint/APK command still passes after those changes.
-The Android preview now follows the CYD sleep rule: sleeping labels the preview
-header but does not replace an active non-video scene, and scene details and
-controls retain the same treatment as the active view (with controls disabled).
-The PC manager explicitly documents and tests that its sleeping preview keeps
-the active non-video scene visible. The focused PC preview suite passes all 8
-tests after both React bundles were rebuilt. The Android unit tests, lint and
-debug APK assembly also pass; this manager-only behavior has not yet been
-accepted on physical Android portrait/landscape devices.
+Release v0.5.28 keeps active non-video scenes visible in Android and PC manager
+remote views during display sleep, matching the CYD. Validation passed: 494
+Python tests plus successful `cyd` and `cyd-dev` PlatformIO builds.
 
-Post-release development: enrollment now has a default-on playback-controls
-checkbox. The preference is stored in NVS and existing enrollments default to
-enabled when the key is absent. Disabling it removes touch-control polling and
-expands clock, dashboard, weather, train, music and generic scenes into the
-lower screen area. Weather icons were upgraded with smooth layered day/night,
-cloud, rain, storm, snow and mist drawings. Both PlatformIO environments build.
-The updated `0.2.26` development firmware was uploaded through `/dev/ttyUSB0`;
-an existing enrollment retained `controls=1`, and a live weather scene rendered
-with healthy heap and no remote error. Physical visual acceptance of the
-expanded control-free layouts remains open.
-On 2026-11-23 a newly attached CYD (MAC `70:4B:CA:76:B6:88`) was flashed from
-the same current source with the full-image serial upload. It boots `0.2.26`
-in unconfigured provisioning state with controls defaulting to enabled and
-healthy heap.
-The second-companion enrollment flow now reads the Pi's `paired` health field:
-an unpaired Pi presents pairing-code enrollment, while an already-paired Pi
-automatically presents administrator login for a separately named CYD API key.
-Both PlatformIO environments build and the second CYD was reflashed into setup
-mode with this corrected flow.
-Enrollment exposed an ESP32 NVS constraint: key names are limited to 15
-characters. `orientation_version` and `playback_controls` were therefore
-invalid and made the aggregate save report failure. They were replaced with
-`orient_ver` and `controls`, preserving any existing orientation selection and
-defaulting missing playback state to enabled. The previously written valid
-credential/key fields recovered on reboot: the second CYD connected with a live
-snapshot after the corrected firmware upload. A Python source regression test
-now rejects overlong `CompanionConfig` NVS keys.
+### Recent Features
 
-### ESP32-2432S028R companion (2026-11-20)
+- **CYD companion** — captive-portal enrollment, touch controls, signed OTA
+  with manifest verification, SHA-256 payload check, health-confirm rollback
+- **Background music** — Plex stations/playlists/mixes, internet radio,
+  weekday sources, smart-playlist builder, music sync groups
+- **Carousel transport** — Pause/Resume/Next via manager, heartbeat-gated
+- **Remote view** — display-shaped reconstruction with sleep state
+- **Android manager** — native settings editors, compact home cards,
+  interactive preview with guarded controls
+- **Bluetooth speakers** — pair/connect, live output switching, wired fallback
+- **Weekly sleep** — per-day schedule with temporary wake override
 
-- New `cyd/` PlatformIO project targets the attached standard ESP32-2432S028R
-  board with LovyanGFX, ArduinoJson and min-SPIFFS OTA-capable partitions.
-- The attached remote device is PlatformIO Remote `HomePC:COM5`, CH340
-  `USB VID:PID=1A86:7523`. Build, upload and monitor operations must use
-  `pio remote -a HomePC`; the board is ESP32-D0WD-V3 revision 3.1 with 4 MB
-  flash, 320 KB RAM, 40 MHz crystal and no PSRAM.
-- Implemented captive-portal Wi-Fi provisioning, Pi certificate fingerprint
-  display/confirmation/pinning, pairing-code or password enrollment, dedicated
-  API-key minting, NVS persistence, factory-reset boot gesture, reconnect
-  backoff, native dashboard/weather/train/music views and touch controls for
-  carousel pause/resume/next and music play/pause/resume/stop/skip.
-- `/api/remote-view` now exposes sanitized `carousel_paused` and background
-  now-playing metadata even outside the music scene. Focused Python remote-view
-  tests and UI typechecking pass.
-- Current CYD release firmware uses 59% of a 1.966 MB app partition (about
-  1.16 MB). Both `cyd` and explicit-development `cyd-dev` builds compile. The
-  latter alone enables HTTP selection; release firmware rejects it.
-- Physical validation completed on the attached board: serial upload/hash,
-  reboot, 320x240 LovyanGFX output initialization, no-PSRAM detection, NVS boot
-  persistence and setup-AP startup at `WebDisplay-CYD-bfb4`. The final 0.2.0
-  release firmware was uploaded and hash-verified through `HomePC:COM5`, then
-  booted to that setup AP. The user completed certificate comparison and
-  dedicated-key enrollment against Pi 3, and the CYD retained that enrollment
-  across firmware uploads. This board requires VSPI XPT2046,
-  ADC limits 200-3900, touch rotation offset 2 and Y inversion. With those
-  settings, the train view renders upright and all five physical buttons map
-  correctly: carousel pause/resume, next, music play/pause, stop and skip.
-  Orientation is now persisted as rotation 1 or 3. New devices default to
-  rotation 1 (180 degrees from the originally validated orientation), the
-  provisioning portal offers both choices, and a short BOOT press toggles and
-  saves it while running; a five-second hold retains factory reset.
-  On 2026-11-21, 0.2.1 was physically checked on `HomePC:COM5`: rotation 1
-  starts upright in the requested flipped direction, one BOOT press produces
-  exactly one 180-degree change, touch remains mapped correctly in both
-  directions, and a one-time NVS migration leaves the attached device in the
-  flipped orientation without overriding later versioned selections.
-  The attached network did not resolve the saved `.local` name reliably after
-  reboot, so the validated enrollment uses the current Pi 3 address
-  `192.168.0.251:8443`; mDNS service lookup remains present as a fallback.
-- The Pi-side companion contract was pushed to the confirmed development Pi 2
-  (`192.168.0.249`), Pi 3 (`192.168.0.251`) and Pi Zero 2 W
-  (`192.168.0.246`) on 2026-11-20 with `--restart-kiosk` and pinned SSH/SCP.
-  All services are active and report `/health`; their deployed
-  `remote_view.py` hash matches the repository and each live kiosk snapshot
-  contains `carousel_paused` plus background `music`.
-- GitHub Actions can build and release CYD assets through the dedicated
-  `.github/workflows/cyd.yml` workflow. It builds only `cyd`, excludes
-  `cyd-dev`, attaches provenance and SHA-256 checksums to published releases,
-  and uploads 14-day CI artifacts. The CYD's `CYD_VERSION` remains separate
-  from the Raspberry Pi release tag.
-- CYD 0.2.2 fixes train status rendering by showing estimated/state fallbacks
-  for every departure and wrapping long status text across two lines. It also
-  uses a content signature to avoid redrawing unchanged scenes between
-  five-second remote-view polls and replaces the generic carousel header with
-  current music/radio title and artist.
-- CYD 0.2.3 widens train destination text and gives status
-  the remaining right-side column while retaining platform and word-aware wraps.
-- CYD 0.2.4 renders dashboard/widget layouts with clock/date, notice text and
-  optional weather from the existing sanitized remote-view payload.
-- CYD 0.2.5 hides the permanent header clock while the dashboard clock widget
-  is active, reduces the dashboard clock size, separates the date row, and
-  renders weather in a larger dedicated bottom strip.
-- CYD 0.2.6 restores a larger dashboard clock, constrains weather to a short
-  bottom strip and adds a serial `S` framebuffer dump for screenshot inspection.
-- CYD 0.2.7 uses 16-row serial framebuffer chunks so `S` captures all 320x240
-  pixels without exhausting ESP32 heap. Local usbip upload and PNG capture
-  confirmed a readable dashboard clock/date and dedicated lower control layout.
-- CYD 0.2.8 moved weather information into a dedicated two-line bottom strip
-  above the control headings and removed the duplicate music/radio title from
-  the top bar during the now-playing scene.
-- CYD 0.2.9 investigated the framebuffer crash and made screenshot storage
-  static. CYD 0.2.10 removed the crash-capable serial framebuffer diagnostic,
-  preserving the layout fixes in a stable normal firmware build.
-- CYD 0.2.11 embeds compact weather icons and gives the dashboard weather strip
-  a location/conditions line plus humidity/wind line with a 24-pixel icon.
-- CYD 0.2.12-0.2.14 increase weather readability and icon scale: widget icons
-  are 32 pixels and standalone weather icons are 48 pixels beside the
-  temperature/forecast area; locations are limited to fit the widget strip.
-- CYD 0.2.15 rounds Pi weather temperature values before display, prevents
-  widget location clipping and separates location/temperature/forecast from
-  humidity/wind text.
-- CYD 0.2.12 enlarges the widget weather strip, keeps location/conditions and
-  humidity/wind on separate lines, and renders the same embedded icon on both
-  widget and standalone weather scenes.
-- CYD 0.2.15-0.2.16 round temperature to the nearest degree, preserve wind as
-  tenths of km/h, use consistent text sizing in both widget lines and enlarge
-  the widgets date. Physical checks confirmed temperature, wind, layout and date.
-- CYD 0.2.17 replaces the 300 ms initial-contact latch with press/release
-  action handling across the full control row and adds pressed, waiting,
-  success and failure feedback in each button. Physical edge/corner and
-  duplicate-suppression acceptance remains pending.
-- CYD 0.2.18 adds 40 ms stable-contact arming and a 250 ms repeat guard after
-  successful action completion. It is built but not uploaded pending
-  `/dev/ttyUSB0` permission; physical touch acceptance remains blocked.
-- CYD 0.2.18 adds a 40 ms stable-press arm and 250 ms post-action repeat guard
-  while keeping immediate pressed feedback for each target.
-- CYD 0.2.17 replaces the 300 ms touch latch with press/release lifecycle
-  handling across the full control row and adds pressed, waiting, success and
-  failure feedback inside each 64-pixel target. Physical acceptance is pending.
-- CYD 0.2.19 keeps a control in WAIT after POST, polls remote-view until the
-  relevant carousel/music state changes or a timeout expires, then shows OK or
-  FAIL. The refreshed display state determines button feedback, not POST alone.
-- CYD 0.2.20 replaces post-command remote-view polling with a single immediate
-  POST state response. Carousel controls return resulting pause/next/generation
-  state; music controls return resulting status. The CYD applies that state,
-  fetches remote-view once only when the returned state indicates display
-  content should change, then redraws the full display and shows OK/FAIL.
-- CYD 0.2.20 was built and uploaded locally through `/dev/ttyUSB0` on
-  2026-11-23. Physical WAIT/OK/FAIL and duplicate-action acceptance remains
-  pending.
-- The 0.2.20 Pi API change was deployed to the Pi 2, Pi 3 and Zero 2 W
-  development targets on 2026-11-23. Each service and kiosk is active; local
-  `/health` is OK and deployed `app.py` hashes match the repository.
-- CYD 0.2.19 physical upload was completed locally through `/dev/ttyUSB0` after
-  the 40 ms stable-press and 250 ms repeat guard implementation. Edge/corner,
-  success/failure and duplicate suppression acceptance is pending a final
-  physical button test.
-- CYD 0.2.21 OTA implementation is in progress: the ESP32 app now links
-  libsodium Ed25519 verification and OTA update libraries, exposes pending
-  health-confirm/rollback state, and adds opt-in OTA settings. The Pi now
-  exposes allowlisted CYD status, manifest and firmware download endpoints.
-  Focused API/manifest tests and a CYD firmware build pass; hardware OTA,
-  power-loss rollback and signed-release asset verification remain open.
-- CYD 0.2.23 combines the OTA client with immediate control POST feedback,
-  remote-view-only full refresh and stable touch handling. The ESP32 OTA path
-  verifies an Ed25519 manifest, streams firmware into app1/app0, verifies
-  SHA-256 and retains a health-confirm/rollback marker. Pi2/Pi3/Zero received
-  the allowlisted OTA API and unauthenticated probes return 401. A real signed
-  OTA partition swap and power-loss rollback still need a signed next release.
-- CYD 0.2.25 fixes the connected-screen stall: `pollPi()` now renders successful
-  remote-view snapshots instead of returning before the UI update.
-- CYD 0.2.25 was uploaded 2026-11-23 after the connected-screen report.
-  Serial diagnostics showed `state=2 wifi=1 snapshot=1 scene=train`,
-  empty `remote_error`, healthy heap and no OTA-pending state across repeated
-  samples. The stuck “CYD connected” screen is resolved.
-- On 2026-11-23, the CYD BOOT gesture gained a no-reset automatic-OTA toggle:
-  a short release still rotates, a 2-second hold toggles and persists automatic
-  OTA, and a 5-second hold still clears enrollment. The Wi-Fi connecting screen
-  now displays the firmware version and automatic-OTA state.
-- CYD 0.2.22 is the OTA-capable baseline being prepared for USB upload. It
-  contains signed-manifest verification, streaming OTA partition writes,
-  SHA-256 verification, health-confirm and rollback state.
-- CYD 0.2.21 was uploaded locally on 2026-11-23 and booted with OTA code
-  present. The OTA implementation now uses the existing Ed25519 update signer
-  public key, verifies the manifest before partition write, streams the signed
-  payload, checks SHA-256 and marks pending/rollback state. Hardware install,
-  health confirmation and rollback have not yet been observed.
-- CYD 0.2.23 is the latest OTA-capable USB baseline, combining the OTA client
-  with immediate control POST state feedback and full-display refresh.
-- On 2026-11-23, the signed CYD OTA hardware path completed a real
-  `0.2.26 -> 0.2.27` partition swap through the Pi 3 gateway. The target booted,
-  recovered a remote-view snapshot and cleared its pending health state. The
-  initial OTA loops exposed loop-task TLS stack exhaustion and repeated
-  watchdog reset errors; the stack was raised to 16 KiB and the ineffective
-  watchdog reset call was removed. The installer also clears pending state if
-  `Update.begin()` fails.
-- The first post-confirmation rollback probe only rebooted the confirmed image,
-  as expected after rollback had been cancelled. A correct pre-confirmation
-  probe then exposed that this ESP32 build could leave no valid ESP-IDF fallback
-  entry. Rollback now stores the running OTA subtype before installation and
-  explicitly selects that partition while retaining the pending marker for
-  health confirmation by the restored app. A signed pending `0.2.32` rolled back
-  to healthy confirmed `0.2.31` on the attached board. The temporary Pi gateway
-  override and release assets were removed, and production CYD `0.2.25` was
-  reflashed and observed healthy with `snapshot=1`, empty remote error and
-  `ota_pending=0`. Validation after the rollback fix: 492 Python tests passed,
-  Python compilation and shell syntax checks passed, and both `cyd` and
-  `cyd-dev` PlatformIO builds succeeded.
-- The automatic-OTA toggle/startup-version change built in both `cyd` and
-  `cyd-dev` and was uploaded through `/dev/ttyUSB0` on 2026-11-23. Production
-  `0.2.25` then reported a healthy snapshot, empty remote error, no pending OTA
-  and persisted `ota_auto=0`. Physical timing/feedback acceptance of the
-  2-second BOOT toggle remains open.
-- On 2026-11-20/21, Pi 3 temporarily stopped completing local or external HTTPS
-  requests on port 8443 while `web-display.service` remained active and listening.
-  Restarting the unit restored `/health` immediately. There was no service
-  restart count, OOM entry, coredump, segfault, Python traceback or fatal listener
-  log in the retained evidence, so this is documented as a listener stall, not a
-  confirmed HTTPS process crash. The CYD diagnosis should wait for health or
-  add watchdog behavior rather than infer a crash from request timeouts.
-- The Pi 3 HTTPS listener stall recurred on 2026-11-23 after about seven hours
-  of continuous service uptime. The unit remained active at
-  `192.168.0.251:8443`; restarting `web-display.service` immediately restored
-  both local and external `/health` responses. The root cause remains unresolved.
-- On 2026-11-25, the Pi 3 stall was isolated without restarting the service.
-  Successful access logs stopped at 12:01:08 UTC and resumed at 12:04:55, with
-  `web-display.service` remaining active, PID 750, zero restarts and no Python
-  traceback or OOM event. A 1-second `/health` monitor captured repeated
-  two-second timeouts at 12:09:17, 12:09:51 and later. During the timeout, the
-  process had only its normal five persistent threads, the port 8443 listen
-  backlog reached four of five, and an `ESTABLISHED` connection from
-  `192.168.0.43` owned FD 4 with 1,658 bytes already in Send-Q. A live GDB
-  snapshot placed the main thread (TID 750) in libc `read` called from
-  `libcrypto`, while the socket remained in TLS handshaking. Later connections
-  queued behind that client. This matches the server construction in
-  `app.py`: the listening socket is wrapped by `SSLContext` before
-  `ThreadingHTTPServer`, so OpenSSL performs the handshake synchronously in the
-  accept thread before a request worker can be created. A slow-lossy TLS client
-  can therefore hang all new HTTPS accepts until it resumes or disconnects.
-  Memory was not exhausted; a concurrent Chromium vc4 GEM allocation warning at
-  11:52 was not followed by an OOM kill and does not explain later recurrences.
-  `ThreadingTLSServer` now accepts raw TCP immediately and performs a
-  10-second TLS handshake inside the request worker; normal requests retain that
-  bounded socket timeout and update uploads explicitly retain their 60-second
-  stream timeout. A regression test holds a TCP client at an incomplete TLS
-  record while a separately pinned `/health` request succeeds. All 494 Python
-  tests pass. A pinned development push deployed matching `app.py` hashes to
-  Pi 2, Pi 3 and Zero 2 W; each completed `/health` in 0.06-0.18 seconds while
-  an incomplete TLS client was held open. On Pi 3, 21 consecutive health
-  requests over 12 seconds all succeeded, with 0.094-second maximum latency,
-  while that client remained stuck. Long-duration recurrence/endurance
-  acceptance remains open.
-- On 2026-11-23, Pi 3 kiosk restart at 09:02 left a brief window where
-  `/run/web-display-kiosk/remote-view.json` was missing. The kiosk service stopped
-  and restarted, and direct `remote_view.load()` checks later succeeded on Pi 2,
-  Pi 3 and Zero 2 W with heartbeat ages below one second. The app now distinguishes
-  missing runtime files from stale runtime files in `/api/remote-view` responses
-  instead of returning one generic unavailable message.
-- Not yet accepted on hardware: all weather/dashboard/music rendered scene
-  variants, reconnect/endurance, heap under repeated train payloads and OTA
-  repeated power-loss recovery. Signed OTA installation and explicit
-  pre-confirmation partition rollback are accepted; USB/serial remains the
-  development flashing path.
+## Current Development Deployment
 
-- Unreleased image-build change: `WPA_COUNTRY` defaults to `GB`, is validated
-  before build side effects, is passed through pi-gen and participates in the
-  development-base cache identity. Manual image workflows expose `wifi_country`;
-  release images default to GB. The custom stage keeps the country in
-  `/etc/modprobe.d/web-display-regdom.conf` and removes pi-gen's country boot
-  option so later administration changes remain persistent. All 19 build-config
-  tests and shell syntax checks pass. No fresh image has been built or
-  boot-tested for this change; signed updates/development pushes cannot apply
-  this build-time setting, so the existing development displays are unchanged.
-  Wi-Fi credentials and automatic-AP opt-in are unchanged.
-  Original Pi Zero W support was investigated and explicitly excluded: Trixie's
-  Chromium does not support ARMv6; setting the Wi-Fi country cannot fix that.
-- Branch `main`; use `git status` and `git log` for the actual checkout/commit.
-  v0.5.19 adds five-star Plex liking, the Global SSH-card phone overflow fix,
-  integrated manager configuration/compact home playback controls, stable sync
-  indicator, enrolled-discovery matching, weekday music sources and music sync
-  groups (user confirmed a Pi 2/Pi 3 group working well by ear on Nov 14).
-  Train layout refinements were committed in `f5a18e4`; Plex playlists/mixes and
-  the guidance refresh followed in `c82595c`. The v0.5.18 release work includes
-  the deployed animated equalizer icon, Plex smart-playlist builder, floating
-  admin music controls and admin landing/guidance refinements.
-- Release/tag: **v0.5.22** adds the default-gateway setup-AP connectivity mode
-  (`ap_check`, internet probe optional) and automatic `brcmfmac` reload when the
-  Pi 3 built-in radio's boot firmware download fails (seen once on the Pi 3,
-  recovered by a manual reload).
-- Earlier release **v0.5.21** adds the Now playing carousel scene (album cover,
-  up-next and clock), floating group players in the PC and Android managers,
-  saved Wi-Fi SSID display, pause-free sync drift correction, the empty-body
-  manager mutation fix and the fresh-image Wi-Fi country preset (image only).
-- Earlier release **v0.5.20**, adding Bluetooth speaker controls to both managers,
-  live output switching, wired fallback and manual group-delay compensation.
-  It also stabilizes the Chromium smoke test and isolates the music sleep mock
-  from background threads. All 436 Python tests and 60 single-CPU browser runs
-  passed locally. Signed-update and image assets come from release workflows;
-  check their status rather than assuming completion. Bluetooth requires the
-  new base image; signed updates cannot install its system packages/helpers.
-- Earlier release **v0.5.18**, committed in `552e85d` and published
-  on Nov 12. That release added optional previous departures,
-  reclaimed row space, the larger footer clock, Plex playlists/custom mixes,
-  smart-playlist creation, floating admin music controls, the animated music
-  icon and Global settings as the default administration view.
-  Publishing triggers signed-update and full-image builds; check GitHub release
-  assets and workflow status rather than assuming either build has completed.
-- Confirmed on Nov 9: v0.5.17 has the signed `.wdupdate`, update checksum, Android
-  APK, full `.img.xz` and image checksum. The image workflow completed successfully
-  (run `42657619061`); it is no longer waiting to build. This is not a claim that
-  this newly built image has been flashed/boot-accepted on both Pis.
-- The local Android APK at
-  `android/app/build/outputs/apk/debug/web-display-manager.apk` was rebuilt
-  Nov 14 with native Bluetooth speaker settings, including the existing
-  configuration, music controls and sync-group screens (26,247,279 bytes),
-  SHA-256 `b86f7786a6d9ac62603c6e6ea8583fdd14867d752cc21e92203763ef707d5ae5`.
-  This APK is attached to v0.5.20; keep using the local development signing key
-  for release APKs so existing installations can upgrade without a signature
-  mismatch.
+Both targets received the latest iteration with pinned SSH and `--restart-kiosk`:
 
-## Current Development Deployment (2026-11-12)
+| Target | Address | Notes |
+|--------|---------|-------|
+| Pi 2 | `192.168.0.249` | Development target |
+| Pi 3 | `192.168.0.251` | Development target |
+| Zero 2 W | `192.168.0.246` | Development target |
 
-- Both targets listed in `AGENTS.md` received the five-star Plex Like heart,
-  Global settings SSH-key/card width fix and shared native-manager editor API
-  context refactor and carousel playback transport; the original admin
-  single-row player controls are restored
-  using `tools/push-to-device.sh --restart-kiosk`, with pinned SSH host checking.
-  They remain development targets; confirm this again before future pushes.
-- Both now run the factory package at
-  `/usr/lib/python3/dist-packages/webdisplay`, not patched `versions/0.5.11`.
-  Development pushes removed installed update versions/state but preserved
-  private configuration, API keys and carousel playlists. They are not signed
-  update installations, even though version metadata now says 0.5.18.
-- Final deployed device UI: `static/assets/index-FolTy0d-.js`,
-  CSS `static/assets/style-d-DuA2sQ.css`. Local PC manager UI:
-  `static/assets/manager-33lwhFgJ.js`; both UIs were rebuilt together.
-  Both services (`web-display` and `web-display-kiosk`) were active; HTTPS
-  `/health`, Python module hashes, static index/JS hashes and served JS bytes
-  matched the final local build on both devices.
-  The new carousel transport heartbeat was fresh on both, the command file had
-  matching runtime generation/mode 0640, and unauthenticated transport was denied.
-- Remote-view snapshot: `/run/web-display-kiosk/remote-view.json`, not
-  `/run/web-display/remote-view.json`. Private configuration remains
-  `/var/lib/web-display/config.json`; never print credentials or relay capability
-  URLs during checks.
-- Do not redeploy or alter playback merely to resume a session. Inspect current
-  live state first. Never silently replace a changed SSH host key or disable
-  host verification. Do not enable music or change sources during probes.
+Confirm addresses via mDNS before each deployment:
+```sh
+avahi-browse -rpt _web-display._tcp
+```
 
-## Latest Implemented Features
-
-- Discovery no longer offers already-enrolled displays as new solely because
-  NSD chooses an alternate interface, hostname spelling or `.local` alias.
-  Android classifies discovery results against persisted enrollment before
-  publishing them, not incomplete/offline status snapshots; enrollment and
-  refresh reclassify the current scan. The Add dialog marks/disables already
-  added entries except during explicit re-trust. PC discovery uses matching
-  normalized saved endpoints and groups interface announcements; the home UI
-  also reconciles stale scan flags with current device records. Friendly display
-  labels are not identities, different service ports remain distinct and TLS
-  pins/API keys are untouched. Newly forgotten devices can be discovered again.
-- Both managers now have compact home cards: display identity/online status,
-  music state/song and inline music/carousel controls. Configure device and
-  remote preview remain prominent; diagnostics, SSH keys, updates, restart,
-  browser links and local removal are secondary actions rather than default
-  card content. Music uses existing transport/Like APIs. Carousel adds Pause/
-  Resume and Next scene through authenticated `POST /api/playlist/control`.
-  Pause freezes the scheduler and native mpv playback, not web page activity or
-  dashboard clocks. Next preserves pause. Commands are transient and asynchronous;
-  runtime/settings republish or service restart resets pause, while kiosk-only
-  restart retains it without replaying old Next commands. No saved playlist or
-  private config is changed by transport.
-  `/api/playlist/status` reports capability, enabled/applied pause, scene title
-  and a <=10-second kiosk heartbeat gate. Old firmware and unavailable players
-  remain explicit; neither client invents live playback state.
-- Android home playback refreshes/commands now use a rotating sync icon in an
-  always-reserved 24dp top-right header slot, rather than inserting/removing a
-  status-text row. Rotation uses a graphics layer, so it does not affect layout.
-  Accessible refresh/command descriptions remain; errors stay inline.
-  The home refresh action also uses this icon in a fixed 48dp touch target,
-  spinning while busy instead of widening its text label; repeat taps remain
-  disabled during refresh.
-- Administration opens on **Global settings**; the menu switches to **Carousel**
-  without discarding either screen's drafts. The obsolete experimental/browser-
-  relaunch banner is removed; retained Chromium is the current transition path.
-  Display backgrounds are black. Existing endurance acceptance remains open.
-- Both admin screens have a floating bottom-pinned background-music player:
-  Play/Pause/Resume, Stop, Skip and a five-star Plex Like heart. The heart shows
-  confirmed five-star ratings and cannot clear ratings; edit those in Plex.
-  The original single-row button layout is retained on both screens. A temporary
-  two-column player layout was reverted at the user's request: the reported phone
-  overflow came from SSH fingerprints/key names in Global settings. SSH entries
-  now wrap within their card, cards have zero automatic minimum width, and the
-  settings grid can shrink below its usual 20rem column minimum.
-  Requests identify the displayed song and reject a changed track rather than
-  rating its replacement. Ratings belong to the configured Plex token's user.
-  Existing rating-filtered Plex smart playlists update without creating another
-  playlist; rating metadata from other clients refreshes with the queue.
-  Manual pause retains position through video
-  handovers; a paused skip defers loading until Resume. Stop persists disabled
-  playback but retains the source/volume; Play starts a fresh queue for that
-  source. Source/volume drafts remain intact and Play/Stop updates the enabled
-  checkbox. Sleep/video-audio guards still apply. Manual pause is transient and
-  clears on a source/enable/identity change or service restart.
-- Train boards support destination and calling-station filters (including earlier
-  stops), actual-only last-seen/departure observations, compact previous-service
-  routes and horizontally scrolling long routes with key stations pinned.
-  **Show previous departure** defaults on; disabling it lets upcoming rows fill
-  the space. The bold gold seconds clock stays below weather. Both reconstructed
-  manager views follow the scene settings.
-- Weather scenes, dashboard/train weather, overscan-safe countdown, weekly sleep
-  and temporary wake are implemented. Sleep stops music/skips videos, not the
-  screen or non-video scenes.
-- **Global settings -> Background music** lists Plex library stations,
-  regular/smart audio playlists and supported server-advertised mixes. Artist
-  and album mix builders search/page through libraries and save up to 20
-  selections on this display, not as a new Plex playlist.
-- **Create Plex smart playlist** saves dynamic audio playlists in the connected
-  Plex account, available to other Plex clients. Optional album-decade,
-  track-genre and track-mood filters match all selected criteria; at least one
-  is required. Choices come from Plex, a preview counts current matches and
-  new playlists use random ordering. Empty matches and duplicate names are
-  rejected. Creation does not change the display's music source or enabled state.
-  Edit/delete playlists in Plex; missing mood metadata limits filtering.
-- Custom mixes shuffle selected tracks, not sonic recommendations or Guest DJ.
-  Plexamp-local mixes are not directly importable: save them as an audio playlist
-  first unless the server already exposes them as a supported station/playlist.
-  Smart playlists re-evaluate and mixes reshuffle when a queue is renewed.
-  Empty sources fail explicitly. Music remains opt-in, pauses for video audio,
-  respects sleep/output selection, and has bounded automatic retries.
-- The native top-left now-playing card floats without resizing the scene; it
-  can overlap content and is not included in reconstructed manager previews.
-  Playback shows animated equalizer bars instead of the "Now playing:" label;
-  paused/loading/retry states retain explicit text. The bars indicate playback,
-  not measured audio levels. Only the small icon is redrawn at five frames per
-  second; carousel/configuration polling retains its one-second cadence.
-- The PC manager now has **Configure device**, with native editable Global
-  settings and Carousel tabs, shared React editors, retained local drafts,
-  discard confirmation on closing and abort-on-close requests. It includes the
-  existing Plex browse/mix/smart-playlist tools and floating music controls.
-  `DeviceApiContext` scopes the editor API per selected view; never replace the
-  global default device API/CSRF transport. Keep callbacks stable so periodic
-  manager refreshes cannot reload cards and overwrite drafts.
-  A token/Host/Origin-protected JSON gateway forwards only explicitly allowlisted
-  settings operations through the enrolled device's pinned connection. No bearer
-  key reaches browser code. Password-only API-key management and raw signed-file
-  uploads are excluded; published update checks/installation remain available.
-  Optional external browser administration links remain.
-- Android now has native **Configure device** Global/Carousel tabs too, using
-  `SettingsModels`, `SettingsSession`, Compose settings widgets, music builders
-  and carousel editors. Requests retain existing pinned address fallback,
-  cancellation and single-mutation admission. Drafts survive section/tab changes
-  and background refreshes, with dirty-close/reload confirmation. Sleep, music
-  and carousel saves detect intervening edits and ask before overwriting; the
-  check is client-side, not atomic against another editor.
-  Global coverage includes display/audio, weekly sleep/wake, Plex credentials,
-  stations/playlists/custom artist/album mixes, smart-playlist filters/preview/
-  creation, transport/Like, RailData/weather, hostname/Wi-Fi, published updates,
-  development SSH keys and restart. Carousel supports all scene types and Plex
-  video browsing, preserving newer unknown fields. Credentials are write-only
-  in-memory drafts, never saved state. Password/API-key management and raw
-  update uploads stay external. Builder search/filter state resets on tab
-  switches; selected music sources remain drafts. No phone UI or physical
-  hardware acceptance has been performed for these new native screens.
-
-## Latest Validation
-
-- Bluetooth speaker: full Python suite 436 tests, 111 UI tests, typecheck/both
-  builds, Android 75 tests/lint (0 errors)/APK passed. Pi 3 (BlueALSA installed
-  manually, source-only) paired a JBL Flip 4 through the no-input agent; synced
-  group music switched live to `alsa/bluealsa:...`, fell back to the jack when
-  the speaker was switched off (one mpv error, 5 s retry) and returned live on
-  automatic reconnection. A `delay_ms` of 180 ms aligned it with the wired Pi 2
-  leader (BlueALSA's reported delay alone left it late). Video audio over
-  Bluetooth and the admin/Android UIs were not exercised on hardware. Pi 2 has
-  no adapter (`available: false`). Testing tip: instantiating `Application`
-  outside the service republishes `music.json` with a dead relay URL.
-
-- Music sync groups (leader-coordinated): full Python suite 429 tests, 109 UI
-  tests, typecheck/both builds, Android 73 tests/lint (0 errors, 5 warnings)/APK
-  passed. Deployed Nov 14 to both Pis (development targets): services active,
-  `/api/music/sync` live, served `index-D-WKPZ6H.js`, `music*.py`/`app.py` match
-  local, configs unchanged (both remain `role: off`). Pi mpv 0.40 accepts the
-  `start`/`speed`/`aid` IPC properties used for priming and drift correction.
-  No group has been created on hardware yet: actual audible sync accuracy, Pi 2
-  CPU cost and leader-loss behaviour are unobserved.
-
-- Weekday music sources: full Python suite 414 tests (one static-bundle test
-  re-run after it overlapped the concurrent bundle rebuild), 104 UI tests,
-  typecheck/build, Android 54 tests/lint (0 errors, 5 warnings)/APK passed.
-  `music.day_sources` (monday..sunday, blank = default) is preserved when PUTs
-  omit it; the relay resolves the device-local weekday and switches only at the
-  next song/skip/queue end. Android hides the editor for firmware lacking it.
-  No live midnight transition was observed on hardware. Deployed Nov 14 to both
-  Pis (development targets): services healthy, installed/served `index-B5S4RRMl.js`
-  / `style-C5bgXRkd.css` and `music.py`/`app.py` match local, configs unchanged.
-
-- Fixed-width Android refresh icon: 51 unit tests, lint (zero errors, five
-  existing warnings) and APK assembly passed. Both web bundles rebuilt unchanged;
-  no Pi deployment was needed. No phone installation or visual acceptance claimed.
-- Enrolled discovery: 42 manager Python tests and 14 targeted manager UI tests
-  passed; both web bundles rebuilt/typechecked. Android 51 unit tests, lint
-  (zero errors, five existing warnings) and APK assembly passed. Coverage
-  includes saved secondary addresses, DNS aliases before status refresh,
-  normalized names, grouped interface announcements, distinct ports, new-device
-  visibility, forgotten records and stale scan flags with offline devices.
-  Device-side firmware/UI bundles did not change in this manager-only iteration;
-  no phone installation or live phone discovery acceptance is claimed.
-- Stable sync indicator: Android unit tests (49), lint (zero errors, five
-  existing warnings) and APK assembly passed. Both web bundles were rebuilt and
-  remained unchanged. This iteration changes Android presentation only; no phone
-  installation or physical layout acceptance is claimed.
-- Compact manager home: 29 targeted UI tests/typecheck passed and both UIs were
-  rebuilt. Chromium checked native home/player bounds at seven widths from
-  320 to 1280px, hidden maintenance content, non-floating inline controls and
-  continued native configuration/draft behavior. Fake-device config was unchanged.
-  Carousel/API/renderer/manager regressions exercised authenticated/CSRF gates,
-  transient commands, paused timeouts/countdowns, next while paused, restart-safe
-  sequence handling, mpv pause/resume and suppression of intentional-pause stalls.
-  Existing kiosk sleep/AP/single-page transition tests passed too.
-  Android rebuilt successfully with 49 passing unit tests, zero lint errors and
-  five dependency-version warnings. No physical phone or live video-pause
-  acceptance is claimed.
-- Native PC settings: all 99 UI tests and typecheck passed; both UIs were rebuilt.
-  All 40 manager Python tests passed, including pinning, token/Host/Origin gates,
-  forbidden routes/envelopes, optional-endpoint errors and larger carousel drafts.
-  A real Chromium 390px-wide session against a disposable TLS device and actual
-  manager server confirmed native rendering without an iframe, SSH/page/player
-  bounds, retained Global/Carousel drafts, manager permissions and upload gating.
-  Browsing/unsaved edits did not change device configuration. No real device
-  settings or music sources were changed for this check.
-- Android native settings: JDK 17 / platform 36 / build tools 35.0.0;
-  `ANDROID_HOME=$HOME/Android/Sdk ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug`
-  passed from `android/`. All 37 unit tests passed, including 10 new settings
-  cases; lint reported zero errors and five existing warnings. APK existence,
-  byte count and hash were independently checked. Install the local APK to use
-  these features on a phone; no phone installation or UI interaction is claimed.
-- Global settings overflow: reproduced page/card expansion from a normal-length
-  SHA256 SSH fingerprint and long key names in the actual SSH-card markup and
-  settings grid, while the carousel/player remained within bounds. Restored the
-  original player styles and fixed SSH-entry wrapping/card/grid sizing instead.
-  24 UI tests passed across `MusicControls.test.tsx` and `App.test.tsx`; both UIs
-  rebuilt/typechecked. Real Chromium checks passed 60 cases at 10 widths from
-  320 to 1280px, with empty/normal/long-name key lists and both screen visibility
-  states. Checked document/card/text/input/action bounds and the unchanged
-  single-row player layout. This is not a physical-phone or endurance sign-off.
-- Plex liking: 56 Python tests passed across `test_plex` and `test_app`;
-  compilation passed. 24 UI tests passed across `MusicControls.test.tsx` and
-  `App.test.tsx`. Both UIs rebuilt/typechecked. Regressions cover the authenticated/
-  CSRF-protected endpoint, actual PUT rating protocol against fake Plex, existing
-  ratings, failed requests without optimistic liking, track-change rejection and
-  unchanged playback/settings. Real Chromium layout checks passed for all three
-  Play/Pause/Resume labels at five sizes from 320x640 to 1280x720, with all four
-  buttons fitting, reachable save controls and separated notifications.
-- Both Pis received this iteration with pinned SSH and kiosk restart; their
-  private configuration hashes were unchanged. Both services/HTTPS health were
-  healthy, installed Python/UI hashes matched local files, served UI matched
-  installed assets and the Like endpoint rejected unauthenticated requests.
-  Read-only live Plex inspection confirmed existing rating-filtered smart audio
-  playlists; no real track ratings or music settings were changed for probes.
-  This is development code newer than the v0.5.18 release, not new physical-audio
-  or endurance acceptance.
-- Release preparation: all 399 Python tests and 94 UI tests passed; both UIs
-  typechecked and rebuilt with the same final assets already deployed above.
-  Firmware/Python package versions are aligned at 0.5.18. The development
-  displays still report 0.5.17 metadata; release preparation does not imply a
-  signed update installation or new physical/endurance acceptance.
-- Admin landing/guidance cleanup: 24 UI tests passed across `App.test.tsx` and
-  `PlaylistCard.test.tsx`, including Global settings as the initial view,
-  active-menu state, removal of the obsolete banner and draft retention on both
-  screens. Both UI bundles rebuilt/typechecked; manager output unchanged.
-  Both Pis received the final bundle, with active services, healthy HTTPS health
-  and matching installed/served assets. This does not close endurance acceptance.
-- Admin player controls: 84 Python tests passed across `test_music_player`,
-  `test_plex`, `test_app`, `test_kiosk` and `test_scene_windows`; compilation
-  passed. 32 UI tests passed across `MusicControls.test.tsx`, `MusicCard.test.tsx`,
-  `PlexCard.test.tsx` and `App.test.tsx`; both UI bundles rebuilt/typechecked.
-  The new status poll is sequential, aborts on unmount and reports an outage once
-  until recovery rather than repeating notifications.
-- Real Chromium geometry checks passed at 320x640, 375x812, 480x600, 800x600 and
-  1280x720: the bar stays pinned through scrolling, long titles/buttons fit,
-  final save controls remain reachable and toasts sit above the bar.
-- Isolated real-mpv checks passed on both Pis with silent output and synthetic
-  local tracks: pause, video handover while manually paused, paused skip, resume,
-  queue-end skip, stop and play. Pause/skip reused mpv; Stop terminated it.
-  These checks did not use Plex or change either display's actual music settings.
-  Services/HTTPS health and installed/served final assets matched after deployment.
-  Physical listening and sustained endurance acceptance were not repeated.
-- Smart-playlist builder: 64 Python tests passed with
-  `PYTHONPATH=src:tests python3 -m unittest test_plex test_app test_music_player -q`;
-  compilation passed. 25 UI tests passed across `MusicCard.test.tsx`,
-  `PlexCard.test.tsx` and `App.test.tsx`; `npm run build` typechecked and rebuilt
-  both apps (manager output unchanged).
-- Live Plex check through Pi 2 created a temporary smart audio playlist combining
-  1990s, Pop/Rock and Acerbic: preview and saved membership both matched 21 tracks.
-  Verified all three stored filter IDs, track type, random sort, album years,
-  genre tags and discovery in the source catalog. Deleted the temporary playlist;
-  saved display music settings were unchanged.
-- Both Pis had active management/kiosk services, healthy HTTPS health, matching
-  installed Python/static hashes and matching served JS after the pinned-SSH
-  development pushes. New endpoints reject unauthenticated requests. No Android
-  code changed; the existing APK remains applicable. Physical audio/endurance
-  acceptance was not repeated.
-- Animated music icon: 29 tests passed with
-  `PYTHONPATH=src:tests python3 -m unittest test_scene_windows test_kiosk test_music_player -q`;
-  compilation and whitespace checks passed. Tests cover icon-only redraws,
-  unchanged captions, track/state/geometry changes and preserved carousel cadence.
-- Both Pis passed native off-screen X11/Cairo rendering checks: eight distinct
-  equalizer frames, unchanged caption pixels and paused-label rendering.
-  Pi 2's live notification produced six distinct sampled frames. Pi 3's live
-  notification was hidden; music settings were not changed to force playback.
-  Services and HTTPS health were healthy; installed Python/static hashes and
-  served JS matched, with no recent notification errors. This is not new physical
-  speaker or endurance acceptance. No web UI or Android source changed, so their
-  existing bundles/APK were retained.
-- Playlist/mix extension: 61 Python tests passed with
-  `PYTHONPATH=src:tests python3 -m unittest test_plex test_music_player test_app -q`.
-  Compilation and whitespace checks passed.
-- 23 UI tests passed with
-  `cd ui && npm test -- src/components/MusicCard.test.tsx src/components/PlexCard.test.tsx src/App.test.tsx`.
-  `npm run build` typechecked and rebuilt both apps. The final regression prevents
-  saved-mix metadata lookup after Plex credentials are removed.
-- Live Pi 2 checks discovered stations/playlists, searched/paged artist/album
-  metadata, built artist-mix, album-mix and nonempty smart-playlist queues, and
-  streamed audio bytes through a separate private relay. Temporary queue items
-  were cleaned up; neither display's saved music settings was changed.
-  These checks did not include listening to physical speaker output.
-- Train space-reclamation checks used real Chromium at 1920x1080, 1280x720 and
-  800x600, with 3, 8 and 40 services and previous departure shown/hidden.
-  They establish geometry, not sustained physical-display acceptance.
-- Full-suite counts recorded farther below are historical, not a claim that a
-  full Python/UI suite was rerun for the latest extension.
-
-## Milestone Status
-
-- **Milestone 1:** implemented and validated on Pi 2.
-- **Milestone 2:** networking, Wi-Fi setup/recovery, Ethernet preference, and
-  setup AP functions are implemented. Pi 2 WPA2 client/AP operation and real
-  outage recovery were validated. Pi 3 built-in Wi-Fi works as a client, but its
-  built-in WPA2 setup AP does **not** authenticate Android or iPhone clients.
-  Do not use an open AP as a workaround. A compatible USB Edimax EW-7811Un has
-  been tested as an AP-capable adapter on Pi 3; secured AP, DHCP and HTTPS
-  administration worked with it.
-- **Milestone 3, Phase A:** signed application bundles, verification, staged
-  install, rollback/boot guard, admin UI/API, GitHub release assets and manager
-  update operations are implemented. Hardware checks of valid upload, invalid
-  signature, tampering, rollback and anti-retry are recorded for Pi 2 and Pi 3.
-  Manager-driven release updates to 0.5.7 and 0.5.8 were also tested on both
-  Pis. Phase B (A/B root images) remains deferred. Do not treat an app bundle
-  as updating the base image.
-- **Milestone 4:** central PC manager is implemented and tested. It discovers
-  and enrolls devices, pins TLS fingerprints, stores per-device API keys, lists
-  multiple interface addresses, changes display URL, checks/installs updates,
-  updates all devices and restarts devices. The device-side **Manager access**
-  card lists and revokes keys; the user confirmed it works on Pi 3.
+Services are active, `/health` is OK, and deployed `app.py` hashes match the
+repository. Private configuration, API keys and carousel playlists are preserved
+across development pushes.
 
 ## Outstanding Work And Acceptance
 
-The latest requested music features and admin player controls are complete and deployed; no
-further implementation is implied. Resume only the work the user requests.
+### Open
 
-- `verify-persistent-scenes`: still open. Dashboard acknowledgment retries and
-  stage-specific diagnostics are implemented, but Pi 2 again reported
-  `Dashboard did not acknowledge its rendered revision` on Nov 7 after about
-  54.7 hours uptime. Zero service restarts did not mean correct carousel playback.
-  The latest deployment restarted the kiosk; short healthy checks do not prove
-  this recurrence fixed. Investigate revision acknowledgment/freeze-thaw and
-  perform comparable multi-cycle/endurance checks without masking timeouts.
-- `train-departure-scene`, `weather-scenes`, `plex-background-music`: implemented,
-  committed in earlier iterations and deployed, not missing feature work.
-  Sustained visual/provider/forecast/audio/queue-recovery acceptance remains
-  incomplete. The playlist/mix extension is also deployed and live API/relay
-  checked, but has no new physical-audio/endurance sign-off.
-- `m2-pi2-wifi-dropout`: historical scan/dropout issue remains under observation.
-  A reboot restored scanning; short clean samples do not establish reliability.
-- `admin-ui-resume-session-resource-spike`: leaving the admin UI open and then
-  suspending/resuming the computer can produce repeated fetch-error notifications
-  instead of returning to login after session expiry, driving CPU/memory growth
-  and making the tab unresponsive. Tracking only; not fixed by toast expiry.
-  Investigate polling/effect lifecycle, cancellation, overlapping requests and
-  expired-session handling after the carousel issue.
-- `pi3-builtin-ap-phones`: built-in secured AP authentication remains unsupported
-  with phones; use the tested compatible USB adapter, never an open AP.
-- `verify-manager-address-fallback`: exercise an actual interface outage.
-- `phase-b-ab-images`: blocked/deferred, not implemented.
+- **CYD physical acceptance** — weather/dashboard/music layout visual checks,
+  touch button edge/corner/duplicate suppression, OTA repeated power-loss
+  recovery, heap under repeated train payloads
+- **Endurance** — long-duration TLS stall recurrence, Pi 2 dashboard
+  acknowledgment, sync group audible accuracy, Pi 2 CPU cost, leader-loss
+  behavior
+- **Android phone** — portrait/landscape layout, weather glyph quality,
+  control feedback, native settings interaction
+- **Music audio** — physical listening on Bluetooth speakers, video-audio
+  over Bluetooth, sustained endurance with background music enabled
 
-Image uploads, native manager playlist editing, general-purpose overlays and
-animated transitions remain deferred. Weekly sleep and the specific now-playing
-notification are implemented exceptions to the original scheduling/overlay
-deferral. Do not enlarge scope without a request.
+### Known Issues
 
-### Historical Wi-Fi Observations
+- **Pi 3 TLS handshake stall** — isolated without service restart; a slow-lossy
+  TLS client hangs the accept backlog. Fixed in `app.py` with bounded
+  handshake threads. Long-duration recurrence acceptance remains open.
+- **Pi 2 dashboard retries** — `verify-persistent-scenes` still open; dashboard
+  acknowledgment retries are implemented but multi-cycle/endurance checks
+  have not proven the recurrence fixed.
+- **Pi 3 built-in AP** — WPA2 authentication fails with Android/iPhone clients.
+  Use a compatible USB adapter; never substitute an open AP.
 
-Update 2026-10-12 (SSH now works on both Pis, ~26 h uptime, 60 pings each,
-Wi-Fi only): with Wi-Fi power saving off (`wifi.powersave = 2` in
-`web-display-wifi.conf`; `iw dev wlan0 get power_save` reports off) the links
-look much more stable, which the user confirmed. Pi 3 had 0 disconnects, 9 ms
-average latency and -35 dBm. Pi 2 (USB RTL8188CUS) is healthy at the radio level
-(-45 dBm, no retries, failures or beacon loss, 0% ping loss) but roamed 158 times
-in 26 h between two similarly strong APs of the same network (reason=4 locally generated) and averaged 64 ms latency with
-spikes to ~500 ms. Decision: keep roaming and do not pin a BSSID. If stalls
-become visible, move the displays to a dedicated Wi-Fi network. Note `iw` is in
-`/usr/sbin`, which is not on `webdebug`'s PATH. Still not a full observation
-window; it is not evidence of present-day Wi-Fi reliability.
+### Deferred
 
-The previous short checks were on 2026-10-10. Both Pis' Ethernet ports were
-re-enabled for manager multi-address testing, so Ethernet reachability alone is
-not evidence that Wi-Fi is healthy. Confirm the present device/link state before
-starting an observation; for Wi-Fi-only testing, disable the Ethernet switch
-ports and verify the Wi-Fi address directly. Capture relevant journal output
-before rebooting: on the latest Pi 2 check only the current boot was available,
-despite a persistent-journal directory existing. Do not assume previous-boot
-logs survive or close reliability work based on Ethernet reachability alone.
+- A/B root images (Phase B)
+- Image uploads, native manager playlist editing, general-purpose overlays,
+  animated transitions
 
-Other useful but not yet hardware-verified cases: manager address fallback when
-one interface is actually down; the old-firmware warning on a real device; and
-the device-side key-revocation card on Pi 2. These are not blockers for the
-completed manager milestone.
+## Architecture Reference
 
-## Historical Carousel Findings (2026-10-30)
+See `docs/architecture.md` for full system architecture. Key files:
 
-The following measurements and deployment differences describe that checkpoint,
-not the current matched development deployment. The later Nov 7 recurrence above
-is the latest recorded long-run dashboard evidence.
+| Area | Files |
+|------|-------|
+| Device service | `src/webdisplay/app.py` |
+| Carousel/playlist | `src/webdisplay/carousel.py`, `src/webdisplay/scene_player.py`, `src/webdisplay/browser.py` |
+| Music | `src/webdisplay/plex.py`, `src/webdisplay/music.py`, `src/webdisplay/music_player.py` |
+| Providers | `src/webdisplay/raildata.py`, `src/webdisplay/weather.py` |
+| Network/Wi-Fi | `src/webdisplay/netmonitor.py`, `src/webdisplay/network.py`, `src/webdisplay/wifi_helper.py` |
+| Updates | `src/webdisplay/updater.py`, `src/webdisplay/releases.py` |
+| Remote view | `src/webdisplay/remote_view.py`, `src/webdisplay/sleep.py` |
+| Manager | `src/webdisplay_manager/` |
+| UI | `ui/` (device + manager) |
+| CYD | `cyd/` |
+| Android | `android/` |
+| Image | `image/stage-web-display/` |
 
-### Implementation And Deployment
+## API Specification
 
-- Chromium is controlled through inherited DevTools pipes, not a debugging TCP
-  listener. Keep at most two website tabs with LRU eviction and preserve their
-  page state. Hidden website and local dashboard tabs are frozen and thawed
-  before readiness checks. Dashboards update in place rather than navigate.
-- Reuse mpv for consecutive videos, but stop it only after browser handover
-  makes the next scene visible. Retaining idle mpv grew its memory across loops.
-  Use one decoder, a 32 MiB forward/4 MiB back-cache limit and a 15-second
-  read-ahead target. Consecutive-video transitions are not guaranteed gapless.
-- The stabilization patch bounds pipe writes, checks active browser scenes every
-  five seconds and contains the second process-wait timeout after SIGKILL.
-  A process that has not exited remains tracked; recovery backs off for
-  60 seconds rather than launching overlapping replacements.
-- At that checkpoint, configuration and update state were preserved by a targeted
-  patch with backed-up installed modules. That was different from today's
-  development pushes, which replace the factory package and clear installed
-  versions/state.
-- Initial two-cycle Pi 2 observation followed configured scene order without
-  failures or restarts, retained one Chromium process, and had no idle mpv in
-  browser scenes. Minimum available RAM was 433 MiB and peak mpv PSS 86.5 MiB.
-  That short run did not establish endurance.
-
-### Historical Endurance And Vitals
-
-The original overnight run after `9df7105` failed on Pi 2: 965 scene failures,
-947 browser-control timeouts and two automatic kiosk restarts were recorded.
-The fatal path was an uncaught final `process.wait(timeout=5)` during browser
-shutdown. No kernel OOM kill was recorded. Pi 3 had one scene failure and no
-restarts in that comparison; workloads differed.
-
-The first overnight attempt after stabilization was interrupted by unplugged
-power at an unknown time, so it is inconclusive, not evidence of a kiosk crash.
-Power was restored on 2026-10-29 morning. A fresh baseline at 07:40 UTC had about
-four minutes of uptime. Pre-NTP timestamps in the current boot must not be
-mistaken for overnight runtime; previous-boot logs were unavailable.
-
-| Snapshot (UTC) | Pi 2, Oct 29 21:55 | Pi 3, Oct 30 09:31 |
-| --- | --- | --- |
-| Uptime | 14.3 hours | About 9.1 days |
-| Sampled system CPU | 3.2% | 12.7% |
-| Available RAM | 385 MiB | 273 MiB |
-| Swap used | 277 MiB | 149 MiB |
-| Temperature | 50-52 C | 64-66 C |
-| Service automatic restarts | 0 | 0 |
-| Throttling | None | Historical frequency cap only |
-
-These are different scenes/software and short CPU samples, not controlled
-performance comparisons. Pi 2 swap grew from zero at boot, but that alone does
-not prove a leak. Its post-restoration logs had no browser-control timeouts,
-tracebacks, OOM kills or undervoltage events at the evening check.
-
-**Historical blocker:** Pi 2 logged 128 dashboard startup failures by Oct 29
-21:55, plus one Plex retry. Another 182 dashboard retries occurred between that
-snapshot and Oct 30 09:31. The recorded error is "Scene did not start within
-30 seconds." Other scene kinds continue playing, but the dashboard is skipped;
-zero service restarts must not be mistaken for correct carousel operation.
-The cause had not been established. Subsequent rendered-revision acknowledgment
-retries and stage-specific diagnostics did not eliminate the later recurrence.
-Relevant code remains `browser.py`, `scene_player.py` and
-`ui/src/SceneScreen.tsx`; do not merely increase timeouts or disable tab retention.
-
-Pi 2's fresh-boot 720p playback also showed rapidly increasing output-frame
-drops despite `v4l2m2m` and zero decoder drops; smooth playback remains unproven.
-Its evening mpv snapshot raced with transitions and could not assess playback.
-Pi 3's latest 640x352 hardware-decoded sample had zero output/decoder drops and
-no current scene failures. Do not infer visual acceptance from decoder counters.
-
-These results motivated the dashboard diagnostics/retries and remain reasons
-to measure scene failures/order as well as memory/swap and playback metrics.
-No future sampling job is scheduled. Keep raw vitals/logs in session artifacts
-rather than committing private configuration, Plex tokens or runtime capability
-URLs.
-
-## Device And Network Notes
-
-- Both Pis can be on Ethernet and Wi-Fi at once with different DHCP addresses.
-  Confirm current addresses (mDNS or the router) rather than relying on notes.
-- SSH account in development images: `webdebug`. Release images disable SSH.
-- Pi 2 Wi-Fi adapter is an Edimax RTL8188CUS. **Do not `modprobe -r` its
-  driver**; that previously hung the Pi.
-- WSL2 mDNS multicast does not discover LAN devices reliably. Run the manager
-  natively on Windows when using discovery:
-
-  ```powershell
-  $env:PYTHONPATH="src"; python -m webdisplay_manager
-  ```
-
-  The manager is cross-platform. Image and device-push shell scripts require
-  Linux/WSL.
-
-## Video Playback Findings (Pi 2, 2026-10-17, hardware)
-
-Measured on a Pi 2 for a possible carousel/video feature, using a 3.6 minute
-H.264 clip served by a Plex server on the LAN. These are one-off measurements,
-not automated tests.
-
-- Under the former fbdev X setup, Chromium playing a Plex HLS transcode at
-  about 404p and 2 Mbps (via hls.js)
-  was smooth: about 0.5% dropped frames, about 50% CPU (peaks near 90% at
-  start), peak 54 °C, no throttling, available memory down about 190 MB.
-- Chromium cannot play the original `.m2ts` (MPEG-TS) file directly
-  (`MEDIA_ERR_SRC_NOT_SUPPORTED`), and Chromium on Linux has no native HLS, so
-  hls.js is required. The initial fbdev run did not measure 720p or 1080p;
-  accelerated-X results are recorded below.
-- Native `mpv` (0.40, Debian Trixie) did not help under fbdev. The V4L2 stateful decoder
-  (`bcm2835-codec-decode`) works (`--hwdec=v4l2m2m-copy`), but under the former
-  fbdev Xorg driver output was CPU-bound. At 1440x1080 or 720p, `--vo=x11` ran at
-  about 88% CPU and played well under real time with hundreds of dropped
-  frames; software decode was no better. `--vo=xv` is unsupported, `--vo=drm`
-  crawled, and `--vo=gpu` (DRM or X11/EGL) dropped over half the frames.
-- Historical fbdev conclusion: Chromium at about 480p or lower was preferred.
-  The accelerated-X retests below supersede that recommendation; the current
-  carousel uses native mpv. Load one live video at a time and keep Plex tokens
-  in private device configuration only.
-- At this historical test mpv was installed by hand; current image configuration
-  includes it.
-
-## Development And Validation
-
-Run from the repository root. Full Python tests require Python 3.10+, `segno`,
-and OpenSSL 3 with `pkeyutl -rawin` support on `PATH`:
+The device API is documented in `docs/api/openapi.yaml` (OpenAPI 3.0). Update
+it whenever the API surface changes. Always validate with both tools:
 
 ```sh
-PYTHONPATH=src python3 -m unittest discover -s tests
+npx @redocly/cli lint docs/api/openapi.yaml
+npx @apidevtools/swagger-cli validate docs/api/openapi.yaml
+```
+
+## Quick Commands
+
+See `docs/developer-guide.md` for full reference.
+
+```sh
+# Tests
+PYTHONPATH=src python3 -m unittest discover -s tests -v
 (cd ui && npm ci && npm run typecheck && npm test && npm run build)
-python3 -m compileall -q src tests
-```
 
-The historical renderer-stabilization regression passed **257 Python tests**, including
-real desktop Chromium retention and local-tab freeze/thaw coverage. The most
-recent recorded UI suite passed **33 tests**, before the Python-only stabilization
-changes. Desktop/file-fixture browser checks do not replace network/hardware
-acceptance. Building the UI
-updates both committed bundles: `src/webdisplay/static/` and
-`src/webdisplay_manager/static/`. CI checks bundle freshness.
+# Build
+./build-image.sh                          # development
+VARIANT=release ./build-image.sh          # release
+(cd cyd && pio run -e cyd)               # CYD firmware
 
-Image/device operations:
-
-```sh
-./build-image.sh
-VARIANT=release ./build-image.sh
+# Deploy
 tools/push-to-device.sh webdebug@DEVICE_IP
+tools/push-to-device.sh --restart-kiosk webdebug@DEVICE_IP
 ```
-
-Image builds need Docker, privileged-container support, about 30 GB free, and a
-native Linux filesystem. A development push replaces the factory Python package
-and clears installed update versions/state; it is not equivalent to installing
-a signed bundle. Files such as the updater, helper programs, systemd units,
-sudoers rules, Avahi configuration and NetworkManager configuration are base
-image content and need a development push or image rebuild.
-
-When preparing a release, bump `WEB_DISPLAY_VERSION` in
-`image/stage-web-display/01-install/files/web-display-release` and `version` in
-`pyproject.toml` together; tests enforce alignment. The release tag must match.
-The signing private key is not in the repository; never commit or casually
-transfer it. See `README.md` and CI workflow for release details.
-
-## Architecture Pointers
-
-- Device service/API and address reporting: `src/webdisplay/app.py`.
-- Playlist schema/scheduler: `src/webdisplay/carousel.py`; retained renderers:
-  `src/webdisplay/browser.py`, `src/webdisplay/scene_player.py`.
-- Rail/weather providers: `src/webdisplay/raildata.py`, `src/webdisplay/weather.py`;
-  local rendering: `ui/src/SceneScreen.tsx`,
-  `ui/src/components/ServiceStationTimes.tsx`.
-- Music catalog/selection: `src/webdisplay/plex.py`; private queue/relay:
-  `src/webdisplay/music.py`; kiosk player: `src/webdisplay/music_player.py`;
-  administration: `ui/src/components/MusicCard.tsx`.
-- Music settings retain `{enabled, station_key, volume}`. Source keys accept
-  station paths, `/playlists/<id>/items` and `mix:artist:<IDs>` /
-  `mix:album:<IDs>`. `GET /api/plex/music/browse` accepts bounded library/kind/
-  search/offset queries, or a mix `key` alone for editing. Plex pagination must
-  send container start and size together. Reuse the validated source/metadata
-  helpers rather than inventing Plexamp `/mix` APIs.
-- Remote view: `src/webdisplay/remote_view.py`; sleep:
-  `src/webdisplay/sleep.py`; API types/clients: `ui/src/api.ts`,
-  `ui/src/manager/api.ts`.
-- Network supervisor and Wi-Fi recovery: `src/webdisplay/netmonitor.py`,
-  `src/webdisplay/network.py`, and `src/webdisplay/wifi_helper.py`.
-- Signed updates: `src/webdisplay/updater.py`, `src/webdisplay/releases.py`,
-  `tools/`, and `image/stage-web-display/01-install/`.
-- Manager backend: `src/webdisplay_manager/`; manager React UI:
-  `ui/src/manager/`; device key UI: `ui/src/components/ManagerKeysCard.tsx`.
-- Hardware tests are not represented by unit tests. Preserve the distinction
-  between automated test results and checks performed on physical Pis.
-
-## GPU-Accelerated X on Pi 2 (2026-10-17, hardware)
-
-- Xorg with modesetting and glamor (`VC4 V3D 2.1`) replaced fbdev. A fresh X
-  session was black on HDMI although X rendered correctly and the DRM state
-  looked normal; the cause was a zeroed colour matrix (CTM) on the output.
-  Setting it to the identity matrix (`xrandr --output <out> --set CTM
-  1,0,0,0,1,0,0,0,1`) fixes it. `kiosk-session` does this at start, and a cold
-  boot was confirmed to show the page.
-- Chromium idles under 5% CPU on the departures page. mpv with GPU output on the
-  1440x1080 clip reached about 10-21 fps (x11 about 5 fps) using about 22% CPU.
-- Pi 3 was also deployed with the same modesetting config and CTM reset. The
-  configured page was visually confirmed after a kiosk restart and a reboot;
-  Xorg reported glamor acceleration on VC4 V3D 2.1.
-
-### Chromium Video Retest
-
-The same Plex clip was played in kiosk-mode Chromium through hls.js 1.6.13 under
-modesetting/glamor; the viewport size was not recorded. Each measurement covered about one minute after playback
-started, with actual video dimensions checked. Chromium reported
-`V4L2VideoDecoder` and `kIsPlatformVideoDecoder=true` at all three resolutions.
-CPU below is whole-system utilization, normalized across all four cores.
-
-| Actual stream | Plex bitrate limit | Dropped frames | System CPU | End temperature |
-| --- | --- | --- | --- | --- |
-| 718x404, 25 fps | 1.5 Mbps | 22/1546 (1.4%) | 40% | 63 C |
-| 1280x720, 25 fps | 4 Mbps | 100/1589 (6.3%) | 54% | 63 C |
-| 1920x1080, 25 fps | 8 Mbps | 538/1592 (33.8%) | 69% | 65 C |
-
-No measured buffering stalls or throttling occurred. hls.js reported recovered,
-nonfatal `bufferFullError` events at every resolution. The low-resolution result
-was not visually confirmed because the timed run ended before the observer
-checked it; frame counters do not establish perceived smoothness. These runs
-used a temporary browser profile and a local forwarding proxy, so the earlier
-fbdev result is not a controlled before/after comparison.
-
-Keep roughly 480p as the conservative default. Hardware decoding works in
-Chromium, but 720p still drops some frames and 1080p is unsuitable in this
-configuration. The normal kiosk was restored after testing.
-
-### mpv Video Retest
-
-With accelerated X, mpv 0.40 played the same three Plex HLS transcodes
-fullscreen using `--no-config --vo=gpu --gpu-context=x11egl --hwdec=v4l2m2m`.
-mpv confirmed hardware decoding and `drm_prime` video frames at each verified
-resolution. The normal Chromium kiosk stayed running underneath the video.
-Each sample covered about one minute after the first five seconds of playback.
-CPU is whole-system utilization across all four cores, as in the Chromium test.
-
-| Actual stream | Plex bitrate limit | Output frame drops | System CPU | End temperature |
-| --- | --- | --- | --- | --- |
-| 718x404, 25 fps | 1.5 Mbps | 0 | 18% | 57 C |
-| 1280x720, 25 fps | 4 Mbps | 0 | 27% | 60 C |
-| 1920x1080, 25 fps | 8 Mbps | 77 (about 5% of expected frames) | 53% | 64 C |
-
-Playback advanced in real time at all three resolutions, with no decoder drops
-or sampled cache pauses. No throttling was recorded after the runs. The observer
-confirmed video was visible and smooth, without a separate per-resolution
-visual assessment. Audio was not validated: muted playback was requested, but
-the audio backends failed to open an output device.
-
-These results supersede the earlier fbdev conclusion for native playback:
-720p H.264 through mpv is a promising option on Pi 2, while 1080p still loses
-frames. They do not establish direct playback performance for the original
-interlaced clip or other codecs. Temperature differences from Chromium are
-not a controlled thermal comparison. mpv exited after each run, and the normal
-kiosk remained active; temporary playback files and forwarding were removed.
-
-### Chromium Screen-Filling Retest
-
-The observer reported that the earlier Chromium video initially did not fill
-the screen, unlike mpv. A repeat explicitly set the browser size and fullscreen
-window state. Browser measurements confirmed the video element covered the
-entire 1919x1079 viewport on a 1920x1080 output (a one-pixel window margin).
-The observer confirmed screen-filling playback at all three resolutions.
-The same bitrate limits and hardware decoder were used as above; successful
-samples lasted about two minutes.
-
-| Actual stream | Dropped frames | System CPU | End temperature | Visual result |
-| --- | --- | --- | --- | --- |
-| 718x404, 25 fps | 131/3061 (4.3%) | 49% | 64 C | Screen-filling, stutters |
-| 1280x720, 25 fps | 488/3052 (16.0%) | 58% | 66 C | Screen-filling, stutters |
-| 1920x1080, 25 fps | No complete sample | Not measured | Not measured | Stutter, then black picture |
-
-No buffering stalls or throttling were recorded in the completed samples;
-recovered hls.js buffer-full events still occurred. During 1080p playback the
-kernel logged vc4 GEM DMA allocation failures, followed by Chromium reporting
-that its GPU process exited unexpectedly with exit code 11. The observer saw a
-black picture with scroll bars. This is a playback failure, not a valid
-frame-drop measurement. Restarting the normal kiosk restored the configured
-page, visually confirmed by the observer.
-
-These visually verified results supersede the earlier Chromium smoothness
-assessment: even the low-resolution stream stutters when screen-filling.
-mpv remains the better candidate for fullscreen video on Pi 2. The earlier
-Chromium viewport was not recorded, so its performance cannot be directly
-attributed to a particular window size.
