@@ -2,9 +2,11 @@
 
 ## Starting or resuming a session
 
-- Read `.github/copilot-instructions.md` for commands, architecture and invariants,
-  then `HANDOFF.md` for current implementation, release, deployment and acceptance
-  status. `PLAN.md` records approved scope; `README.md` documents operation.
+- Read `.github/copilot-instructions.md` for commands and invariants,
+  `docs/architecture.md` and `docs/implementation.md` for architecture and
+  conventions, then `HANDOFF.md` for current implementation, release, deployment
+  and acceptance status. `PLAN.md` records approved scope; `README.md`
+  documents user-facing operation.
 - Inspect the worktree and recent commits before editing. Preserve existing
   changes; do not assume that deployed development code is a published release.
 - Use the dated current-status sections in `HANDOFF.md`, not its historical
@@ -18,7 +20,8 @@
 - Update `HANDOFF.md` with completed work, exact validation, deployment state,
   release boundaries and unresolved acceptance checks. Update `PLAN.md` when
   agreed scope or implementation status changes. Keep durable conventions in
-  `.github/copilot-instructions.md`; avoid duplicating transient status there.
+  `.github/copilot-instructions.md` and `docs/implementation.md`; avoid
+  duplicating transient status there.
 - Validate the change and rebuild both UI bundles when changing UI code.
 - Deploy completed iterations automatically to both development displays:
   Pi 2 (`web-display-pi2`) and Pi 3 (`web-display-pi3`), user `webdebug`.

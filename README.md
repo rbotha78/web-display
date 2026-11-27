@@ -114,11 +114,12 @@ Key components:
 ## Documentation
 
 | File | Purpose |
-|------|---------|
+|------|---------|  
 | [docs/architecture.md](docs/architecture.md) | System architecture |
 | [docs/implementation.md](docs/implementation.md) | Implementation conventions |
 | [docs/developer-guide.md](docs/developer-guide.md) | Build, test, deploy commands |
 | [docs/release-process.md](docs/release-process.md) | Release procedure |
+| [docs/api/openapi.yaml](docs/api/openapi.yaml) | Device API specification (OpenAPI 3.0) |
 | `HANDOFF.md` | Current implementation status, hardware observations |
 | `PLAN.md` | Approved scope and designs |
 | `.github/copilot-instructions.md` | Detailed workflow and invariants |

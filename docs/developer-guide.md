@@ -1,5 +1,17 @@
 # Developer Guide
 
+## API specification
+
+The OpenAPI 3.0 spec at `docs/api/openapi.yaml` documents the device API.
+Update it whenever the display's API surface changes.
+
+Always validate with **both** tools before committing:
+
+```sh
+npx @redocly/cli lint docs/api/openapi.yaml
+npx @apidevtools/swagger-cli validate docs/api/openapi.yaml
+```
+
 ## Requirements
 
 - Python 3.10+

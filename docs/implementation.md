@@ -1,5 +1,22 @@
 # Implementation Guide
 
+## API specification
+
+The OpenAPI 3.0 spec at `docs/api/openapi.yaml` documents the device API.
+Update it whenever the display's API surface changes (new endpoints, changed
+request/response shapes, new security requirements).
+
+Always validate with **both** tools before committing:
+
+```sh
+npx @redocly/cli lint docs/api/openapi.yaml
+npx @apidevtools/swagger-cli validate docs/api/openapi.yaml
+```
+
+The Redocly run may produce warnings (license, operationId, 4xx responses);
+these are best-practice suggestions, not errors. The spec must pass both
+validators with zero errors.
+
 ## Cross-cutting conventions
 
 ### UI bundles

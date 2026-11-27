@@ -1,0 +1,1846 @@
+openapi: 3.0.3
+info:
+  title: Web Display API
+  description: API for the Raspberry Pi Web Display appliance administration.
+  version: 0.5.29
+  contact:
+    name: Robert Botha
+
+servers:
+  - url: https://{host}:8443
+    description: Device administration HTTPS endpoint
+    variables:
+      host:
+        default: web-display.local
+        description: Device hostname (use .local after trusting the certificate)
+
+security: []
+paths:
+  /health:
+    get:
+      summary: Health check
+      tags: [System]
+      responses:
+        "200":
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  paired:
+                    type: boolean
+                    description: Whether the device has been paired
+                  version:
+                    type: string
+                    description: Running firmware version
+
+  /api/session:
+    get:
+      summary: Get current session
+      tags: [Authentication]
+      responses:
+        "200":
+          description: Current session information
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  csrf:
+                    type: string
+                    description: CSRF token for session mutations
+                  can_manage_keys:
+                    type: boolean
+                    description: Whether the session can manage API keys
+        "401":
+          description: Not authenticated
+
+  /api/pair:
+    post:
+      summary: Pair the device (first use)
+      tags: [Authentication]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                code:
+                  type: string
+                  description: Six-digit pairing code shown on display
+                password:
+                  type: string
+                  minLength: 12
+                  description: Administrator password
+              required: [code, password]
+      responses:
+        "200":
+          description: Paired successfully
+        "400":
+          description: Invalid pairing code or password
+        "429":
+          description: Too many attempts
+
+  /api/login:
+    post:
+      summary: Login with password
+      tags: [Authentication]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                password:
+                  type: string
+                  description: Administrator password
+              required: [password]
+      responses:
+        "200":
+          description: Login successful, session cookie set
+          headers:
+            Set-Cookie:
+              schema:
+                type: string
+            X-CSRF-Token:
+              schema:
+                type: string
+        "401":
+          description: Invalid password
+        "429":
+          description: Too many attempts
+
+  /api/admin-login-token:
+    post:
+      summary: Create a single-use admin login token
+      tags: [Authentication]
+      security:
+        - bearer: []
+      responses:
+        "201":
+          description: Token created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token:
+                    type: string
+                    description: Single-use token (expires in 60 seconds)
+                  expires_in:
+                    type: integer
+                    example: 60
+        "401":
+          description: API key required
+
+  /api/admin-login:
+    post:
+      summary: Exchange a login token for a session
+      tags: [Authentication]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                token:
+                  type: string
+                  description: Single-use token from admin-login-token
+              required: [token]
+      responses:
+        "200":
+          description: Session established
+          headers:
+            Set-Cookie:
+              schema:
+                type: string
+            X-CSRF-Token:
+              schema:
+                type: string
+        "401":
+          description: Token expired or invalid
+
+  /api/logout:
+    post:
+      summary: Logout current session
+      tags: [Authentication]
+      security:
+        - session: []
+          csrf: []
+      responses:
+        "200":
+          description: Logged out
+
+  /api/keys:
+    get:
+      summary: List API keys
+      tags: [Authentication]
+      security:
+        - session: []
+      responses:
+        "200":
+          description: List of API keys (hashes only)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  keys:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                        name:
+                          type: string
+                        created_at:
+                          type: string
+                          format: date-time
+    post:
+      summary: Create an API key
+      tags: [Authentication]
+      security:
+        - session: []
+          csrf: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  description: Key name
+              required: [name]
+      responses:
+        "201":
+          description: Key created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                  name:
+                    type: string
+                  key:
+                    type: string
+                    description: The bearer key (shown once only)
+        "400":
+          description: Invalid key name
+
+  /api/keys/{id}:
+    delete:
+      summary: Revoke an API key
+      tags: [Authentication]
+      security:
+        - session: []
+          csrf: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Key revoked
+        "400":
+          description: Invalid key ID
+
+  /api/config:
+    get:
+      summary: Get global configuration
+      tags: [Configuration]
+      security:
+        - session: []
+      responses:
+        "200":
+          description: Current configuration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GlobalConfig'
+    put:
+      summary: Update global configuration
+      tags: [Configuration]
+      security:
+        - session: []
+          csrf: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                url:
+                  type: string
+                  description: Display target URL
+                auto_ap:
+                  type: boolean
+                  description: Enable automatic setup AP on outage
+                ap_check:
+                  type: string
+                  enum: [gateway, internet]
+                  description: Method for checking internet connectivity
+                safe_area_percent:
+                  type: integer
+                  minimum: 0
+                  maximum: 10
+                  description: Overscan safe area percentage per edge
+                audio_output:
+                  type: string
+                  description: Audio output device (e.g., "hdmi", "alsa:1,0")
+      responses:
+        "200":
+          description: Configuration updated
+
+  /api/sleep:
+    get:
+      summary: Get sleep schedule
+      tags: [Sleep]
+      security:
+        - session: []
+      responses:
+        "200":
+          description: Weekly sleep schedule
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SleepConfig'
+    put:
+      summary: Save sleep schedule
+      tags: [Sleep]
+      security:
+        - session: []
+          csrf: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SleepConfig'
+      responses:
+        "200":
+          description: Schedule saved
+
+  /api/sleep/wake:
+    post:
+      summary: Wake temporarily
+      tags: [Sleep]
+      security:
+        - session: []
+          csrf: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                duration:
+                  type: string
+                  enum: [15m, 30m, 1h, 2h, 4h]
+                  description: Temporary wake duration
+              required: [duration]
+      responses:
+        "200":
+          description: Wake override applied
+
+  /api/audio/outputs:
+    get:
+      summary: List available audio outputs
+      tags: [Audio]
+      security:
+        - session: []
+      responses:
+        "200":
+          description: Available audio output devices
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                        name:
+                          type: string
+                        type:
+                          type: string
+                          enum: [hdmi, analog, bluetooth, usb]
+
+  /api/weather/config:
+    get:
+      summary: Get weather configuration
+      tags: [Weather]
+      security:
+        - session: []
+      responses:
+        "200":
+          description: Weather settings
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WeatherConfig'
+    put:
+      summary: Save weather configuration
+      tags: [Weather]
+      security:
+        - session: []
+          csrf: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WeatherConfig'
+      responses:
+        "200":
+          description: Configuration saved
+
+  /api/raildata/config:
+    get:
+      summary: Get train board configuration
+      tags: [RailData]
+      security:
+        - session: []
+      responses:
+        "200":
+          description: RailData settings
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RailDataConfig'
+    put:
+      summary: Save train board configuration
+      tags: [RailData]
+      security:
+        - session: []
+          csrf: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RailDataConfig'
+      responses:
+        "200":
+          description: Configuration saved
+
+  /api/plex/config:
+    get:
+      summary: Get Plex configuration
+      tags: [Plex]
+      security:
+        - session: []
+      responses:
+        "200":
+          description: Plex settings (server address and token status only)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlexConfig'
+    put:
+      summary: Save Plex configuration
+      tags: [Plex]
+      security:
+        - session: []
+          csrf: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PlexConfig'
+      responses:
+        "200":
+          description: Configuration saved
+
+  /api/plex/libraries:
+    get:
+      summary: List Plex libraries
+      tags: [Plex]
+      security:
+        - session: []
+      responses:
+        "200":
+          description: Available Plex libraries
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/PlexLibrary'
+    post:
+      summary: Browse a Plex library
+      tags: [Plex]
+      security:
+        - session: []
+      parameters:
+        - name: key
+          in: query
+          schema:
+            type: string
+          description: Plex container key
+      responses:
+        "200":
+          description: Library contents
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+
+  /api/plex/browse:
+    get:
+      summary: Browse Plex content
+      tags: [Plex]
+      security:
+        - session: []
+      parameters:
+        - name: key
+          in: query
+          schema:
+            type: string
+          description: Plex container key
+      responses:
+        "200":
+          description: Browsable content
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+
+  /api/plex/stations:
+    get:
+      summary: List Plex music sources
+      tags: [Plex, Music]
+      security:
+        - session: []
+      responses:
+        "200":
+          description: Available music stations and playlists
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/MusicSource'
+
+  /api/plex/music:
+    get:
+      summary: Get music configuration
+      tags: [Plex, Music]
+      security:
+        - session: []
+      responses:
+        "200":
+          description: Current background music settings
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MusicConfig'
+    put:
+      summary: Save music configuration
+      tags: [Plex, Music]
+      security:
+        - session: []
+          csrf: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MusicConfig'
+      responses:
+        "200":
+          description: Music settings saved
+
+  /api/plex/music/browse:
+    get:
+      summary: Browse music libraries
+      tags: [Plex, Music]
+      security:
+        - session: []
+      parameters:
+        - name: library
+          in: query
+          schema:
+            type: string
+          description: Plex library ID
+        - name: kind
+          in: query
+          schema:
+            type: string
+            enum: [artist, album]
+        - name: search
+          in: query
+          schema:
+            type: string
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+        - name: key
+          in: query
+          schema:
+            type: string
+            description: Existing mix key
+      responses:
+        "200":
+          description: Music browse results
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                  total:
+                    type: integer
+                  offset:
+                    type: integer
+
+  /api/plex/music/filters:
+    get:
+      summary: Get available music filters
+      tags: [Plex, Music]
+      security:
+        - session: []
+      parameters:
+        - name: library
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Plex library ID
+      responses:
+        "200":
+          description: Available filter options
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  decades:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                        label:
+                          type: string
+                  genres:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                        label:
+                          type: string
+                  moods:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                        label:
+                          type: string
+
+  /api/plex/music/playlists:
+    post:
+      summary: Create a Plex smart playlist
+      tags: [Plex, Music]
+      security:
+        - session: []
+          csrf: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                library:
+                  type: string
+                title:
+                  type: string
+                decade:
+                  type: string
+                genre:
+                  type: string
+                mood:
+                  type: string
+              required: [library, title]
+      responses:
+        "201":
+          description: Playlist created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  source_key:
+                    type: string
+                  title:
+                    type: string
+
+  /api/plex/music/playlists/preview:
+    post:
+      summary: Preview smart playlist match count
+      tags: [Plex, Music]
+      security:
+        - session: []
+          csrf: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                library:
+                  type: string
+                decade:
+                  type: string
+                genre:
+                  type: string
+                mood:
+                  type: string
+              required: [library]
+      responses:
+        "200":
+          description: Match preview
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  count:
+                    type: integer
+
+  /api/plex/music/control:
+    post:
+      summary: Control background music
+      tags: [Plex, Music]
+      security:
+        - session: []
+          csrf: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                action:
+                  type: string
+                  enum: [play, pause, resume, stop, skip]
+              required: [action]
+      responses:
+        "200":
+          description: Music status after action
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MusicStatus'
+
+  /api/plex/music/like:
+    post:
+      summary: Like (rate 5 stars) the current song
+      tags: [Plex, Music]
+      security:
+        - session: []
+          csrf: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                rating_key:
+                  type: string
+                  description: Current song Plex rating key
+              required: [rating_key]
+      responses:
+        "200":
+          description: Rating applied
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MusicStatus'
+
+  /api/radio/search:
+    get:
+      summary: Search Radio Browser stations
+      tags: [Radio]
+      security:
+        - session: []
+      parameters:
+        - name: name
+          in: query
+          schema:
+            type: string
+        - name: tag
+          in: query
+          schema:
+            type: string
+        - name: country
+          in: query
+          schema:
+            type: string
+            pattern: "^[A-Z]{2}$"
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        "200":
+          description: Search results (30 per page)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  stations:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/RadioStation'
+        "502":
+          description: Radio Browser unavailable
+
+  /api/playlist:
+    get:
+      summary: Get carousel playlist
+      tags: [Carousel]
+      security:
+        - session: []
+      responses:
+        "200":
+          description: Current carousel playlist
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Playlist'
+    put:
+      summary: Save carousel playlist
+      tags: [Carousel]
+      security:
+        - session: []
+          csrf: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Playlist'
+      responses:
+        "200":
+          description: Playlist saved
+
+  /api/playlist/status:
+    get:
+      summary: Get carousel playback status
+      tags: [Carousel]
+      security:
+        - session: []
+      responses:
+        "200":
+          description: Current playback status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlaylistStatus'
+
+  /api/playlist/control:
+    post:
+      summary: Control carousel transport
+      tags: [Carousel]
+      security:
+        - session: []
+          csrf: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                action:
+                  type: string
+                  enum: [pause, resume, next]
+              required: [action]
+      responses:
+        "200":
+          description: Transport applied
+        "409":
+          description: Carousel unavailable
+
+  /api/remote-view:
+    get:
+      summary: Get remote view snapshot
+      tags: [Remote View]
+      security:
+        - session: []
+      responses:
+        "200":
+          description: Sanitized remote view reconstruction
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RemoteView'
+
+  /api/status:
+    get:
+      summary: Get device status
+      tags: [System]
+      security:
+        - session: []
+      responses:
+        "200":
+          description: Device status summary
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceStatus'
+
+  /api/network:
+    get:
+      summary: Get network status
+      tags: [Network]
+      security:
+        - session: []
+      responses:
+        "200":
+          description: Network information
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NetworkStatus'
+
+  /api/wifi/scan:
+    post:
+      summary: Scan for Wi-Fi networks
+      tags: [Wi-Fi]
+      security:
+        - session: []
+          csrf: []
+      responses:
+        "200":
+          description: Available networks
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  networks:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/WifiNetwork'
+
+  /api/wifi/country:
+    post:
+      summary: Set Wi-Fi regulatory country
+      tags: [Wi-Fi]
+      security:
+        - session: []
+          csrf: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                country:
+                  type: string
+                  pattern: "^[A-Z]{2}$"
+              required: [country]
+      responses:
+        "200":
+          description: Country set
+
+  /api/wifi/connect:
+    post:
+      summary: Connect to a Wi-Fi network
+      tags: [Wi-Fi]
+      security:
+        - session: []
+          csrf: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                ssid:
+                  type: string
+                password:
+                  type: string
+              required: [ssid]
+      responses:
+        "200":
+          description: Connection attempt initiated
+
+  /api/wifi/forget:
+    post:
+      summary: Forget the saved Wi-Fi network
+      tags: [Wi-Fi]
+      security:
+        - session: []
+          csrf: []
+      responses:
+        "200":
+          description: Network forgotten
+
+  /api/hostname:
+    post:
+      summary: Set device hostname
+      tags: [Network]
+      security:
+        - session: []
+          csrf: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                hostname:
+                  type: string
+                  pattern: "^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$"
+                  description: RFC 1123 hostname label
+              required: [hostname]
+      responses:
+        "202":
+          description: Hostname change applied (requires reconnect)
+
+  /api/bluetooth:
+    get:
+      summary: Get Bluetooth status
+      tags: [Bluetooth]
+      security:
+        - session: []
+      responses:
+        "200":
+          description: Bluetooth speaker status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BluetoothStatus'
+    put:
+      summary: Save Bluetooth settings
+      tags: [Bluetooth]
+      security:
+        - session: []
+          csrf: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                enabled:
+                  type: boolean
+                delay_ms:
+                  type: integer
+                  minimum: -1000
+                  maximum: 1000
+              required: [enabled]
+      responses:
+        "200":
+          description: Bluetooth settings saved
+
+  /api/bluetooth/scan:
+    post:
+      summary: Scan for Bluetooth devices
+      tags: [Bluetooth]
+      security:
+        - session: []
+          csrf: []
+      responses:
+        "200":
+          description: Found devices
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  devices:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        address:
+                          type: string
+                        name:
+                          type: string
+
+  /api/bluetooth/pair:
+    post:
+      summary: Pair with a Bluetooth speaker
+      tags: [Bluetooth]
+      security:
+        - session: []
+          csrf: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                address:
+                  type: string
+                  description: Device MAC address
+              required: [address]
+      responses:
+        "200":
+          description: Pairing completed
+
+  /api/bluetooth/forget:
+    post:
+      summary: Forget paired Bluetooth speaker
+      tags: [Bluetooth]
+      security:
+        - session: []
+          csrf: []
+      responses:
+        "200":
+          description: Speaker forgotten
+
+  /api/music/sync:
+    get:
+      summary: Get music sync status
+      tags: [Music Sync]
+      security:
+        - session: []
+      responses:
+        "200":
+          description: Current sync configuration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MusicSyncConfig'
+    put:
+      summary: Save music sync configuration
+      tags: [Music Sync]
+      security:
+        - session: []
+          csrf: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MusicSyncConfig'
+      responses:
+        "200":
+          description: Sync settings saved
+
+  /api/music/sync/peer:
+    post:
+      summary: Handle music sync peer connection
+      tags: [Music Sync]
+      parameters:
+        - name: X-Music-Sync-Token
+          in: header
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Peer connected
+        "401":
+          description: Invalid token
+        "429":
+          description: Rate limited
+
+  /api/update/status:
+    get:
+      summary: Get update status
+      tags: [Updates]
+      security:
+        - session: []
+      responses:
+        "200":
+          description: Update state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpdateStatus'
+
+  /api/update/check:
+    post:
+      summary: Check for available updates
+      tags: [Updates]
+      security:
+        - session: []
+          csrf: []
+      responses:
+        "200":
+          description: Update check result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  available:
+                    type: boolean
+                  version:
+                    type: string
+                  url:
+                    type: string
+        "400":
+          description: No update available
+
+  /api/update/install:
+    post:
+      summary: Install available update
+      tags: [Updates]
+      security:
+        - session: []
+          csrf: []
+      responses:
+        "200":
+          description: Update installed (restart required)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                  version:
+                    type: string
+                  restart_required:
+                    type: boolean
+
+  /api/update/upload:
+    post:
+      summary: Upload a signed update bundle
+      tags: [Updates]
+      security:
+        - session: []
+          csrf: []
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+              description: .wdupdate bundle file
+      responses:
+        "200":
+          description: Bundle uploaded and installed
+        "400":
+          description: Invalid or unsigned bundle
+
+  /api/reboot:
+    post:
+      summary: Reboot the device
+      tags: [System]
+      security:
+        - session: []
+          csrf: []
+      responses:
+        "202":
+          description: Reboot initiated
+
+  /api/debug-keys:
+    get:
+      summary: List debug SSH keys
+      tags: [SSH]
+      security:
+        - session: []
+      responses:
+        "200":
+          description: SSH keys for debug access
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  keys:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                        key:
+                          type: string
+                        name:
+                          type: string
+    post:
+      summary: Add a debug SSH key
+      tags: [SSH]
+      security:
+        - session: []
+          csrf: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                key:
+                  type: string
+                  description: SSH public key
+                name:
+                  type: string
+                  description: Optional key label
+              required: [key]
+      responses:
+        "201":
+          description: Key added
+
+  /api/debug-keys/{id}:
+    delete:
+      summary: Remove a debug SSH key
+      tags: [SSH]
+      security:
+        - session: []
+          csrf: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Key removed
+
+  /api/cyd/firmware/status:
+    get:
+      summary: Get CYD firmware status
+      tags: [CYD Companion]
+      security:
+        - session: []
+      responses:
+        "200":
+          description: CYD firmware information
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  version:
+                    type: string
+                  ota_enabled:
+                    type: boolean
+                  paired:
+                    type: boolean
+
+  /api/cyd/firmware/manifest:
+    get:
+      summary: Get CYD firmware manifest
+      tags: [CYD Companion]
+      security:
+        - session: []
+      responses:
+        "200":
+          description: Signed OTA manifest
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  version:
+                    type: string
+                  files:
+                    type: object
+                    properties:
+                      firmware.bin:
+                        type: object
+                        properties:
+                          url:
+                            type: string
+                          size:
+                            type: integer
+                          sha256:
+                            type: string
+
+  /api/cyd/firmware/download:
+    get:
+      summary: Download CYD firmware binary
+      tags: [CYD Companion]
+      security:
+        - session: []
+      responses:
+        "200":
+          description: Firmware binary
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+
+components:
+  securitySchemes:
+    session:
+      type: apiKey
+      in: cookie
+      name: session
+      description: Session cookie obtained from POST /api/login
+    bearer:
+      type: http
+      scheme: bearer
+      description: API key obtained from device administration
+    csrf:
+      type: apiKey
+      in: header
+      name: X-CSRF-Token
+      description: Required for session-authenticated mutations
+  schemas:
+    GlobalConfig:
+      type: object
+      properties:
+        url:
+          type: string
+          description: Display target URL
+        auto_ap:
+          type: boolean
+          description: Enable automatic setup AP on outage
+        ap_check:
+          type: string
+          enum: [gateway, internet]
+          description: Internet connectivity check method
+        safe_area_percent:
+          type: integer
+          minimum: 0
+          maximum: 10
+          description: Overscan safe area percentage per edge
+        audio_output:
+          type: string
+          description: Audio output device identifier
+
+    SleepConfig:
+      type: object
+      properties:
+        schedule:
+          type: object
+          description: Weekly sleep schedule
+          additionalProperties:
+            type: object
+            properties:
+              enabled:
+                type: boolean
+              start:
+                type: string
+                description: Start time (HH:MM)
+              end:
+                type: string
+                description: End time (HH:MM)
+        override_deadline:
+          type: string
+          format: date-time
+          description: Temporary wake override deadline
+
+    WeatherConfig:
+      type: object
+      properties:
+        provider:
+          type: string
+          description: Weather provider (e.g., "openweather")
+        api_key:
+          type: string
+          description: Provider API key (write-only)
+        location:
+          type: string
+          description: Location identifier
+        units:
+          type: string
+          enum: [metric, imperial]
+          default: metric
+
+    RailDataConfig:
+      type: object
+      properties:
+        api_key:
+          type: string
+          description: RailData API key (write-only)
+        station_crs:
+          type: string
+          description: Station CRS code (3 letters)
+        destination_crs:
+          type: string
+          description: Destination CRS code filter
+        filter_station_crs:
+          type: string
+          description: Calling station CRS filter
+        refresh_interval:
+          type: integer
+          minimum: 30
+          description: Refresh interval in seconds
+        show_previous_departure:
+          type: boolean
+          default: true
+
+    PlexConfig:
+      type: object
+      properties:
+        server_address:
+          type: string
+          description: Plex Media Server URL
+        token:
+          type: string
+          description: Plex token (write-only, blank keeps current)
+        configured:
+          type: boolean
+          description: Whether a token is configured
+
+    MusicSource:
+      type: object
+      properties:
+        key:
+          type: string
+          description: Source identifier
+        name:
+          type: string
+        type:
+          type: string
+          enum: [station, playlist, mix]
+
+    MusicConfig:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+          default: false
+        station_key:
+          type: string
+          description: Selected music source key
+        volume:
+          type: integer
+          minimum: 0
+          maximum: 100
+          default: 30
+        day_sources:
+          type: object
+          description: Weekday source overrides
+          additionalProperties:
+            type: string
+            nullable: true
+
+    MusicStatus:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+        station_key:
+          type: string
+        volume:
+          type: integer
+        title:
+          type: string
+          description: Current song title
+        artist:
+          type: string
+        album:
+          type: string
+        state:
+          type: string
+          enum: [playing, paused, stopped, loading, error]
+        rating_key:
+          type: string
+        liked:
+          type: boolean
+        group_role:
+          type: string
+          enum: [off, leader, follower]
+
+    RadioStation:
+      type: object
+      properties:
+        station_uuid:
+          type: string
+        name:
+          type: string
+        url:
+          type: string
+        country:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+        favicon:
+          type: string
+
+    Playlist:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+        scenes:
+          type: array
+          items:
+            $ref: '#/components/schemas/PlaylistScene'
+      required: [enabled, scenes]
+
+    PlaylistScene:
+      type: object
+      properties:
+        id:
+          type: string
+        kind:
+          type: string
+          enum: [web, dashboard, video, train, weather, music]
+        title:
+          type: string
+        enabled:
+          type: boolean
+        duration:
+          type: integer
+          nullable: true
+          description: Duration in seconds (null = no cutoff)
+        url:
+          type: string
+          description: Required for web and video scenes
+        source:
+          type: string
+          description: plex scenes
+        plex_rating_key:
+          type: string
+          description: Plex content rating key
+        audio_enabled:
+          type: boolean
+          default: false
+          description: Enable audio for video scenes
+        plex_bitrate_kbps:
+          type: integer
+          minimum: 500
+          maximum: 20000
+          description: Override Plex bitrate
+        station_crs:
+          type: string
+          description: Required for train scenes
+        destination_crs:
+          type: string
+          description: Optional train destination filter
+        filter_station_crs:
+          type: string
+          description: Optional train calling station filter
+        show_previous_departure:
+          type: boolean
+          default: true
+
+    PlaylistStatus:
+      type: object
+      properties:
+        active_scene:
+          type: string
+        enabled:
+          type: boolean
+        paused:
+          type: boolean
+        transport_supported:
+          type: boolean
+        transport_available:
+          type: boolean
+        scene_title:
+          type: string
+        updated:
+          type: integer
+          format: epoch
+        failures:
+          type: object
+
+    RemoteView:
+      type: object
+      properties:
+        scene_kind:
+          type: string
+          enum: [web, dashboard, video, train, weather, music]
+        title:
+          type: string
+        paused:
+          type: boolean
+        sleeping:
+          type: boolean
+        data:
+          type: object
+          description: Scene-specific data (weather, train, now-playing, etc.)
+
+    DeviceStatus:
+      type: object
+      properties:
+        hostname:
+          type: string
+        version:
+          type: string
+        paired:
+          type: boolean
+        url:
+          type: string
+        music_state:
+          type: string
+        group_role:
+          type: string
+
+    NetworkStatus:
+      type: object
+      properties:
+        ethernet:
+          type: object
+          properties:
+            connected:
+              type: boolean
+            address:
+              type: string
+        wifi:
+          type: object
+          properties:
+            connected:
+              type: boolean
+            ssid:
+              type: string
+            signal_strength:
+              type: integer
+        internet_reachable:
+          type: boolean
+        site_reachable:
+          type: boolean
+        ap_active:
+          type: boolean
+
+    WifiNetwork:
+      type: object
+      properties:
+        ssid:
+          type: string
+        bssid:
+          type: string
+        signal_strength:
+          type: integer
+        security:
+          type: string
+          enum: [open, wpa2-psk, wpa3]
+
+    BluetoothStatus:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+        connected:
+          type: boolean
+        address:
+          type: string
+        delay_ms:
+          type: integer
+          minimum: -1000
+          maximum: 1000
+
+    MusicSyncConfig:
+      type: object
+      properties:
+        role:
+          type: string
+          enum: [off, leader, follower]
+        group_id:
+          type: string
+          nullable: true
+        token_hash:
+          type: string
+          nullable: true
+          description: Hash of sync token (leader only)
+        leader:
+          type: object
+          nullable: true
+          properties:
+            name:
+              type: string
+            hostname:
+              type: string
+            port:
+              type: integer
+            addresses:
+              type: array
+              items:
+                type: string
+            fingerprint:
+              type: string
+              description: SHA-256 certificate fingerprint
+
+    UpdateStatus:
+      type: object
+      properties:
+        base_version:
+          type: string
+        base_compat:
+          type: integer
+        running_version:
+          type: string
+        installed_version:
+          type: string
+        previous_version:
+          type: string
+        pending:
+          type: object
+          nullable: true
+          properties:
+            version:
+              type: string
+            previous:
+              type: string
+            attempts:
+              type: integer
+        floor:
+          type: string
+          nullable: true
+          description: Minimum installable version
+        failed:
+          type: array
+          items:
+            type: string
+
+    PlexLibrary:
+      type: object
+      properties:
+        key:
+          type: string
+        title:
+          type: string
+        type:
+          type: string
+          enum: [movie, tvshow, album]
