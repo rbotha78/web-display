@@ -14,11 +14,14 @@ findings below are not current vitals or deployment instructions.
 
 ## Current Release
 
-**Branch:** `main` | **Release:** v0.5.28 | **CYD firmware:** 0.2.27
+**Branch:** `main` | **Release:** v0.5.29 | **CYD firmware:** 0.2.27
 
-Release v0.5.28 keeps active non-video scenes visible in Android and PC manager
-remote views during display sleep, matching the CYD. Validation passed: 494
-Python tests plus successful `cyd` and `cyd-dev` PlatformIO builds.
+Release v0.5.29 includes signed CYD OTA updates with runtime controls, NTP-based
+time on the CYD, TLS handshake isolation to prevent listener blocking, matching
+sleeping remote views in both managers, Android remote view improvements, CYD
+enrollment/scene layout refinements, and the GroupPlayer Like button.
+Validation passed: 494 Python tests plus successful `cyd` and `cyd-dev`
+PlatformIO builds.
 
 ### Recent Features
 
