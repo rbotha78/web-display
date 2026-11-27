@@ -36,3 +36,8 @@
   if either device is no longer a development target, ask before replacing it.
 - Do not commit, push or publish releases unless requested.
 - Documentation-only handoff updates do not need another device deployment.
+
+- Before pushing any commit, always check `HANDOFF.md` and update it if the
+  commit changes release version, deployment state, validation results,
+  outstanding acceptance items, or known issues. The handoff must reflect
+  current reality before the changes go to the remote.
