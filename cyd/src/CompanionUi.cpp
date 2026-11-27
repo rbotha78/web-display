@@ -55,7 +55,7 @@ void CompanionUi::render(
       view.scene_kind == "dashboard" && view.scene_layout != "notice";
   if (!dashboard_clock) {
     lcd.setTextSize(2);
-    lcd.drawRightString(clockText(view.device_time), 312, 8);
+    lcd.drawRightString(clockText(), 312, 8);
   }
 
   if (error.length() || !view.valid) {
@@ -103,7 +103,7 @@ void CompanionUi::renderClock(const RemoteViewSnapshot& view) {
   lcd.setTextColor(TFT_WHITE, TFT_BLACK);
   lcd.setFont(&fonts::FreeSansBold24pt7b);
   lcd.drawCentreString(
-      clockText(view.device_time), 160, playback_controls_ ? 72 : 82);
+      clockText(), 160, playback_controls_ ? 72 : 82);
   lcd.setFont(&fonts::Font0);
   lcd.setTextSize(1);
   lcd.setTextColor(TFT_CYAN, TFT_BLACK);
@@ -120,7 +120,7 @@ void CompanionUi::renderDashboard(const RemoteViewSnapshot& view) {
   if (show_clock) {
     lcd.setTextColor(TFT_WHITE, TFT_BLACK);
     lcd.setFont(&fonts::FreeSansBold24pt7b);
-    lcd.drawCentreString(clockText(view.device_time), 160, 42);
+    lcd.drawCentreString(clockText(), 160, 42);
     lcd.setFont(&fonts::Font0);
     lcd.setTextSize(1);
     lcd.setTextColor(TFT_CYAN, TFT_BLACK);
@@ -473,9 +473,13 @@ void CompanionUi::invalidate() {
   last_signature_ = "";
 }
 
-String CompanionUi::clockText(const String& device_time) const {
-  const int time = device_time.indexOf('T');
-  return time >= 0 ? device_time.substring(time + 1, time + 6) : "--:--";
+String CompanionUi::clockText() const {
+  time_t now = time(nullptr);
+  if (now == 0) return "--:--";
+  struct tm* tm_info = localtime(&now);
+  char buf[6];
+  snprintf(buf, sizeof(buf), "%02d:%02d", tm_info->tm_hour, tm_info->tm_min);
+  return String(buf);
 }
 
 String CompanionUi::dateText(const String& device_time) const {
@@ -633,7 +637,7 @@ String CompanionUi::renderSignature(
   signature += view.carousel_paused ? "p|" : "-|";
   signature += view.mode;
   signature += '|';
-  signature += clockText(view.device_time);
+  signature += clockText();
   signature += '|';
   signature += headingText(view);
   signature += '|';

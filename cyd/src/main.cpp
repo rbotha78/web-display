@@ -1,5 +1,6 @@
 #include <Arduino.h>
 #include <WiFi.h>
+#include <time.h>
 
 #include "BoardDisplay.h"
 #include "CompanionConfig.h"
@@ -320,6 +321,7 @@ void loop() {
       state = AppState::kReady;
       heartbeat_at = 0;
       display.showStatus("CYD connected", WiFi.localIP().toString(), true);
+      configTime(0, 0, "pool.ntp.org", "time.google.com");
     } else {
       display.showStatus("Wi-Fi offline", "Retrying saved network", false);
       reconnect_at = millis() + 15000;

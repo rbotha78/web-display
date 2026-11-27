@@ -59,7 +59,7 @@ class CompanionUi {
   void renderControlFeedback(
       const RemoteViewSnapshot& view,
       bool enabled);
-  String clockText(const String& device_time) const;
+  String clockText() const;
 
   BoardDisplay& display_;
   String last_signature_;

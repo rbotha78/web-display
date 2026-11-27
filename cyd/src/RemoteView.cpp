@@ -55,6 +55,7 @@ bool RemoteViewClient::fetch(
   next.valid = true;
   next.mode = text(document["mode"], 20);
   next.device_time = text(document["device_time"], 40);
+  next.timezone = text(document["timezone"], 20);
   next.sleeping = document["sleep"]["sleeping"] | false;
   next.carousel_paused = document["carousel_paused"] | false;
   const double heartbeat_age = document["heartbeat_age_seconds"] | 0.0;

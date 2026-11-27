@@ -25,6 +25,7 @@ struct RemoteViewSnapshot {
   bool carousel_paused = false;
   String mode;
   String device_time;
+  String timezone;
   String scene_kind;
   String scene_title;
   String scene_text;
