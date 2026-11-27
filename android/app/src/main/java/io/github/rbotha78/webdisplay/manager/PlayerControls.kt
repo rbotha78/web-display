@@ -249,6 +249,11 @@ internal fun GroupPlayer(
                     enabled = ready && music?.enabled == true) { Text("Skip") }
                 OutlinedButton(onClick = { onCommand(leader.id, PlayerCommand.Music("stop")) },
                     enabled = ready && music?.enabled == true) { Text("Stop") }
+                val track = music?.status
+                if (track?.source != "radio") OutlinedButton(
+                    onClick = { track?.let { onCommand(leader.id, PlayerCommand.Like(it.ratingKey)) } },
+                    enabled = ready && track != null && track!!.ratingKey.matches(Regex("[0-9]{1,20}")) && !(track?.liked ?: false),
+                ) { Text(if (track?.liked == true) "Liked" else "Like song") }
             }
             player.commandError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         }
