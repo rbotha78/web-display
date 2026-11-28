@@ -136,6 +136,9 @@ export function DeviceCard({ device, notify, refresh, readd, configure }: Props)
         {device.hostname ? " · " + device.hostname : ""}
       </p>
       <p className="muted manager-sync-line" title={syncLine}>{syncLine}</p>
+      {sync?.role === "leader" && (
+        <p className="manager-leader-badge">Leader · {sync.members?.length ?? 0} followers</p>
+      )}
       {device.certificate_changed && (
         <p className="error">
           The certificate changed (for example after a rename or reflash).{" "}

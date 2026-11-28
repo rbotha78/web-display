@@ -102,9 +102,12 @@ function GlobalSettings({ notify, fail, canManageKeys, active, playbackConfig }:
       <CollapsibleCard title="Sleep schedule">
         <SleepCard notify={notify} fail={fail} />
       </CollapsibleCard>
-      <CollapsibleCard title="Plex">
-        <PlexCard notify={notify} fail={fail} playbackConfig={playbackConfig} />
-      </CollapsibleCard>
+      <section className="settings-section">
+        <h3 className="settings-section-heading">Background music</h3>
+        <CollapsibleCard title="Plex">
+          <PlexCard notify={notify} fail={fail} playbackConfig={playbackConfig} />
+        </CollapsibleCard>
+      </section>
       <CollapsibleCard title="National Rail">
         <RailDataCard notify={notify} fail={fail} />
       </CollapsibleCard>
