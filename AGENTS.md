@@ -37,6 +37,12 @@
 - Do not commit, push or publish releases unless requested.
 - Documentation-only handoff updates do not need another device deployment.
 
+- Before pushing any commit, always run the full CI test suite locally to
+  confirm all tests pass. For UI changes this means:
+  `cd ui && npm run typecheck && npm test && npm run build`. For Python
+  changes this means: `PYTHONPATH=src python3 -m unittest discover -s tests`.
+  Do not push commits that fail CI.
+
 - Before pushing any commit, always check `HANDOFF.md` and update it if the
   commit changes release version, deployment state, validation results,
   outstanding acceptance items, or known issues. The handoff must reflect

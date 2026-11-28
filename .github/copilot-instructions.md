@@ -36,6 +36,11 @@ done
 # Both React UIs: install from the lockfile, typecheck, test, and build
 (cd ui && npm ci && npm run typecheck && npm test && npm run build)
 
+**Always run the full test suite before pushing.** Never push commits that
+fail CI. For UI changes this means running `npm run typecheck`, `npm test`, and
+`npm run build` from the `ui/` directory. For Python changes this means running
+`PYTHONPATH=src python3 -m unittest discover -s tests` from the repository root.
+
 # One UI test file, optionally filtered to one test name
 (cd ui && npm test -- src/App.test.tsx)
 (cd ui && npm test -- src/App.test.tsx -t "shows pairing when the device is unpaired")
