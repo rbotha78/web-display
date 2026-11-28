@@ -112,7 +112,7 @@ export function DeviceCard({ device, notify, refresh, readd, configure }: Props)
   return (
     <section className="card manager-device-card" aria-label={device.name}>
       <h2
-        className="manager-device-title"
+        className={"manager-device-title" + (sync?.role === "leader" ? " manager-device-title-leader" : "")}
         onClick={() => setExpanded(!expanded)}
         role="button"
         tabIndex={0}
@@ -123,6 +123,11 @@ export function DeviceCard({ device, notify, refresh, readd, configure }: Props)
         <span className={"pill " + (device.online ? "ok" : "bad")}>
           {device.online ? "Online" : "Offline"}
         </span>
+        {sync?.role === "leader" && (
+          <span className="manager-leader-pill" aria-label={"Leader · " + (sync.members?.length ?? 0) + " followers"}>
+            Leader
+          </span>
+        )}
         <span className="manager-chevron" aria-hidden="true">
           {expanded ? "▾" : "▸"}
         </span>

@@ -326,6 +326,9 @@ private fun DeviceCard(
                     overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                 )
                 StatePill(if (status.online) "Online" else "Offline", status.online)
+                if (status.musicSync?.role == SyncRole.LEADER) {
+                    LeaderPill(status.musicSync.members?.size ?: 0)
+                }
                 Text(if (expanded) "▾" else "▸", modifier = Modifier.padding(start = 8.dp))
             }
             if (expanded) {
@@ -465,6 +468,22 @@ private fun StatePill(text: String, positive: Boolean) {
         color = if (positive) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.errorContainer,
         shape = MaterialTheme.shapes.small,
     ) { Text(text, Modifier.padding(horizontal = 10.dp, vertical = 5.dp)) }
+}
+
+@Composable
+private fun LeaderPill(followerCount: Int) {
+    Surface(
+        color = MaterialTheme.colorScheme.tertiaryContainer,
+        shape = MaterialTheme.shapes.small,
+        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+    ) {
+        Text(
+            "Leader · $followerCount followers",
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.Medium,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+        )
+    }
 }
 
 @Composable

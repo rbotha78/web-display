@@ -874,10 +874,25 @@ textarea {
 .manager-device-title:hover {
   opacity: 0.8;
 }
+.manager-device-title-leader {
+  border-left: 3px solid var(--warn);
+  padding-left: 0.75rem;
+}
 .manager-chevron {
   margin-left: auto;
   font-size: 0.9em;
   color: var(--muted);
+}
+.manager-leader-pill {
+  display: inline-block;
+  padding: 0.1rem 0.4rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--warn);
+  border: 1px solid var(--warn);
+  background: rgb(245 185 66 / 0.1);
+  margin-left: 0.5rem;
 }
 .manager-leader-badge {
   display: inline-block;
