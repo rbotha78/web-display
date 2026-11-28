@@ -1,10 +1,19 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import { sleepDays } from "../api";
 import { settingsApi } from "./api";
 import { ManagerApp } from "./ManagerApp";
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
+
+async function expandDeviceCard(deviceName: string) {
+  const title = await screen.findByRole("button", { name: new RegExp("^" + deviceName) });
+  if (title.getAttribute("aria-expanded") === "false") {
+    await act(() => {
+      fireEvent.click(title);
+    });
+  }
+}
 
 function routes(pendingConfig = false) {
   const calls: { path: string; init: RequestInit; request?: { method: string; path: string; body?: object } }[] = [];
@@ -54,6 +63,7 @@ test("edits both screens natively with per-device requests and retained drafts",
   const calls = routes();
   const open = vi.spyOn(window, "open");
   const rendered = render(<ManagerApp />);
+  await expandDeviceCard("Lobby");
   fireEvent.click((await screen.findAllByText("Configure device"))[0]);
   await screen.findByRole("region", { name: "Configuration for Lobby" });
   const url = await screen.findByLabelText("Web page URL") as HTMLInputElement;
@@ -86,6 +96,7 @@ test("closing configuration cancels in-flight device requests", async () => {
   const calls = routes(true);
   vi.spyOn(window, "confirm").mockReturnValue(true);
   render(<ManagerApp />);
+  await expandDeviceCard("Lobby");
   fireEvent.click((await screen.findAllByText("Configure device"))[0]);
   await screen.findByRole("region", { name: "Configuration for Lobby" });
   await waitFor(() => expect(calls.some(c => c.request?.path === "/api/config")).toBe(true));
@@ -93,6 +104,7 @@ test("closing configuration cancels in-flight device requests", async () => {
   fireEvent.click(screen.getByText("Back to devices"));
   expect(pending.init.signal?.aborted).toBe(true);
   expect(screen.queryByRole("region", { name: "Configuration for Lobby" })).toBeNull();
+  await expandDeviceCard("Lobby");
   await screen.findAllByText("Configure device");
 });
 

@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import { ManagerApp } from "./ManagerApp";
 
@@ -26,6 +26,15 @@ function stub(devices: object[]) {
   return calls;
 }
 
+async function expandDeviceCard(deviceName: string) {
+  const title = await screen.findByRole("button", { name: new RegExp("^" + deviceName) });
+  if (title.getAttribute("aria-expanded") === "false") {
+    await act(() => {
+      fireEvent.click(title);
+    });
+  }
+}
+
 test("lists devices and sends the token", async () => {
   window.location.hash = "#token=abc";
   const calls = stub([
@@ -34,6 +43,7 @@ test("lists devices and sends the token", async () => {
   ]);
   render(<ManagerApp />);
   expect(await screen.findByText("Lobby")).toBeTruthy();
+  await expandDeviceCard("Lobby");
   fireEvent.click(screen.getByText("More actions"));
   expect(screen.getByText("0.5.6")).toBeTruthy();
   expect(screen.getByText("Home (not connected)")).toBeTruthy();
@@ -46,6 +56,7 @@ test("offers to trust a changed certificate", async () => {
     { id: "aabbccddeeff", name: "Lobby", host: "10.0.0.5", port: 8443, online: false, certificate_changed: true, error: "changed" },
   ]);
   render(<ManagerApp />);
+  await expandDeviceCard("Lobby");
   fireEvent.click(await screen.findByText("Trust again"));
   await waitFor(() => expect(screen.getByText("Add a device")).toBeTruthy());
 });
@@ -106,6 +117,7 @@ test("shows manager version and an outdated firmware warning", async () => {
   );
   render(<ManagerApp />);
   expect(await screen.findByText(/Web Display Manager 0.5.7/)).toBeTruthy();
+  await expandDeviceCard("Old");
   expect(screen.getByText(/older than the 0.5.7/)).toBeTruthy();
 });
 
@@ -135,6 +147,7 @@ test("links to each device's admin page and manages its SSH keys", async () => {
   );
   vi.spyOn(window, "confirm").mockReturnValue(true);
   render(<ManagerApp />);
+  await expandDeviceCard("Lobby");
   fireEvent.click(await screen.findByText("More actions"));
   const link = (await screen.findByText("Open without automatic login")) as HTMLAnchorElement;
   expect(link.getAttribute("href")).toBe("https://10.0.0.5:8443/");
@@ -167,6 +180,7 @@ test("opens a one-time login link in an isolated tab", async () => {
   });
   vi.stubGlobal("fetch", fetch);
   render(<ManagerApp />);
+  await expandDeviceCard("Lobby");
   fireEvent.click(await screen.findByText("More actions"));
   fireEvent.click(await screen.findByText("Open admin page"));
   expect(window.open).toHaveBeenCalledWith("", "_blank");
@@ -187,6 +201,7 @@ test("closes the new tab and reports a failed automatic login", async () => {
       : { devices: [{ id: "aabbccddeeff", name: "Lobby", host: "device.example", port: 8443, online: true }] },
   })));
   render(<ManagerApp />);
+  await expandDeviceCard("Lobby");
   fireEvent.click(await screen.findByText("More actions"));
   fireEvent.click(await screen.findByText("Open admin page"));
   expect(await screen.findByText("Update device software first")).toBeTruthy();
@@ -210,6 +225,7 @@ test("hides SSH keys when the device has none to manage", async () => {
     }),
   );
   render(<ManagerApp />);
+  await expandDeviceCard("Lobby");
   fireEvent.click(await screen.findByText("More actions"));
   await screen.findByText("Open admin page");
   expect(screen.queryByText(/Development SSH keys/)).toBeNull();
@@ -258,7 +274,9 @@ test("lists sync groups and follower errors and posts leave and dissolve operati
   ]);
   vi.spyOn(window, "confirm").mockReturnValue(true);
   render(<ManagerApp />);
+  await expandDeviceCard("Kitchen");
   expect(await screen.findByText("Music sync: leading (1 followers)")).toBeTruthy();
+  await expandDeviceCard("Lounge");
   expect(screen.getByText("Music sync: following Kitchen — Different Plex server")).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Music sync groups" }));
   expect(screen.getByText("Leader: Kitchen")).toBeTruthy();
@@ -297,8 +315,10 @@ test("reserves the compact sync line across refresh states and lists offline las
   ];
   syncStub(devices);
   render(<ManagerApp />);
+  await expandDeviceCard("Kitchen");
   const unsupported = await screen.findByText("Music sync: unsupported (update firmware)");
   expect(unsupported.classList.contains("manager-sync-line")).toBe(true);
+  await expandDeviceCard("Lounge");
   expect(screen.getByText("Music sync: unavailable (offline)").classList.contains("manager-sync-line")).toBe(true);
   fireEvent.click(screen.getByRole("button", { name: "Music sync groups" }));
   expect(screen.getByText("Leader: Study")).toBeTruthy();
@@ -325,6 +345,7 @@ test("shows a floating player for a music sync group that controls its leader", 
     return { ok: true, status: 200, json: async () => ({ devices }) } as Response;
   }));
   render(<ManagerApp />);
+  await expandDeviceCard("Lobby");
   const player = await screen.findByRole("region", { name: "Audio player" });
   expect(await screen.findByText("Group song")).toBeTruthy();
   expect(player.textContent).toContain("Lobby group (+1)");

@@ -27,6 +27,15 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+async function expandDeviceCard(deviceName: string) {
+  const title = screen.getByRole("button", { name: new RegExp("^" + deviceName) });
+  if (title.getAttribute("aria-expanded") === "false") {
+    await act(() => {
+      fireEvent.click(title);
+    });
+  }
+}
+
 test("polls only when open, switches active scenes, ticks in device time and never loads web or media", async () => {
   vi.useFakeTimers();
   let value = initial;
@@ -36,6 +45,7 @@ test("polls only when open, switches active scenes, ticks in device time and nev
     device={{ id: "aabbccddeeff", name: "Lobby", host: "10.0.0.1", port: 8443, online: false }}
     notify={vi.fn()} refresh={vi.fn()} readd={vi.fn()} configure={vi.fn()} />);
   expect(fetch).not.toHaveBeenCalled();
+  await expandDeviceCard("Lobby");
   fireEvent.click(screen.getByText("Preview display"));
   await settle();
   expect(fetch).toHaveBeenCalledTimes(1);

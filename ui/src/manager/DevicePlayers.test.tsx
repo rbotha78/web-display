@@ -6,6 +6,15 @@ import { setToken } from "./api";
 
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
+async function expandDeviceCard(deviceName: string) {
+  const title = await screen.findByRole("button", { name: new RegExp("^" + deviceName) });
+  if (title.getAttribute("aria-expanded") === "false") {
+    await act(() => {
+      fireEvent.click(title);
+    });
+  }
+}
+
 test("keeps home compact and routes both transports to the selected display", async () => {
   setToken("manager-token");
   let paused = false;
@@ -36,6 +45,7 @@ test("keeps home compact and routes both transports to the selected display", as
   const notify = vi.fn();
   render(<DeviceCard device={{ id: "aabbccddeeff", name: "Lobby", host: "device.example",
     port: 8443, online: true }} notify={notify} refresh={vi.fn()} readd={vi.fn()} configure={vi.fn()} />);
+  await expandDeviceCard("Lobby");
   expect(await screen.findByText("Current song")).toBeTruthy();
   expect(await screen.findByText("Carousel playing")).toBeTruthy();
   expect(screen.queryByLabelText("Display address")).toBeNull();
