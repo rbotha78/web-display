@@ -90,7 +90,15 @@ export function ManagerApp() {
 
   const leaders = devices?.filter((device) => device.online && device.music_sync?.role === "leader") ?? [];
 
-  const unpaired = found.filter(item => !item.enrolled && !devices?.some(device =>
+  const sortedDevices = devices?.sort((a, b) => {
+    const aLeader = a.online && a.music_sync?.role === "leader";
+    const bLeader = b.online && b.music_sync?.role === "leader";
+    if (aLeader && !bLeader) return -1;
+    if (!aLeader && bLeader) return 1;
+    return 0;
+  }) ?? [];
+
+  const unpaired = found.filter(item => !item.enrolled && !sortedDevices.some(device =>
     device.port === item.port && [device.host, ...(device.addresses ?? []), device.hostname]
       .some(host => host && [item.host, item.name].some(value =>
         normalizedHostname(host) === normalizedHostname(value))),
@@ -153,7 +161,7 @@ export function ManagerApp() {
               ))}
           </section>
         )}
-        {devices?.map((device) => (
+        {sortedDevices.map((device) => (
           <DeviceCard
             key={device.id}
             device={device}
@@ -163,7 +171,7 @@ export function ManagerApp() {
             configure={() => setConfiguring(device)}
           />
         ))}
-        {devices && devices.length === 0 && !adding && (
+        {sortedDevices.length === 0 && !adding && (
           <p className="muted">No devices yet. Choose Add device to find or add one.</p>
         )}
       </div>}

@@ -13,6 +13,7 @@ interface Props {
 }
 
 export function DeviceCard({ device, notify, refresh, readd, configure }: Props) {
+  const [expanded, setExpanded] = useState(false);
   const [available, setAvailable] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [preview, setPreview] = useState(false);
@@ -110,12 +111,23 @@ export function DeviceCard({ device, notify, refresh, readd, configure }: Props)
 
   return (
     <section className="card manager-device-card" aria-label={device.name}>
-      <h2>
+      <h2
+        className="manager-device-title"
+        onClick={() => setExpanded(!expanded)}
+        role="button"
+        tabIndex={0}
+        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setExpanded(!expanded); }}
+        aria-expanded={expanded}
+      >
         {device.name}{" "}
         <span className={"pill " + (device.online ? "ok" : "bad")}>
           {device.online ? "Online" : "Offline"}
         </span>
+        <span className="manager-chevron" aria-hidden="true">
+          {expanded ? "▾" : "▸"}
+        </span>
       </h2>
+      {expanded && <>
       <p className="muted">
         {device.addresses && device.addresses.length > 1
           ? device.addresses.join(", ")
@@ -208,6 +220,7 @@ export function DeviceCard({ device, notify, refresh, readd, configure }: Props)
           Remove
         </button>
       </div>
+      </>}
       </>}
       {preview && <RemotePreview deviceId={device.id} deviceName={device.name} close={closePreview} />}
     </section>

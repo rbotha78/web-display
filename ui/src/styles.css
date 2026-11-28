@@ -863,6 +863,23 @@ textarea {
   font-size: 0.85rem;
 }
 
+/* PC manager device cards */
+.manager-device-title {
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.manager-device-title:hover {
+  opacity: 0.8;
+}
+.manager-chevron {
+  margin-left: auto;
+  font-size: 0.9em;
+  color: var(--muted);
+}
+
 /* PC manager music sync groups */
 .manager-sync-line {
   height: 1.5em;
