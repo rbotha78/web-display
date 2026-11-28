@@ -15,6 +15,7 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -127,6 +128,7 @@ fun ErrorText(text: String) = Text(text, color = MaterialTheme.colorScheme.error
 
 /**
  * Card wrapper with explicit loading, load-failure, unsupported, conflict and dirty states.
+ * Collapsed by default; click the title to expand.
  * [content] only runs when the device returned valid data.
  */
 @Composable
@@ -140,30 +142,36 @@ fun <S, D> SectionCard(
     onConflictOverwrite: (() -> Unit)? = null,
     content: @Composable (server: S, draft: D?) -> Unit,
 ) {
+    var expanded by remember { mutableStateOf(false) }
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-                if (dirty) Text("Unsaved", color = MaterialTheme.colorScheme.tertiary, fontWeight = FontWeight.SemiBold)
-                if (section.loading) CircularProgressIndicator(Modifier.padding(start = 8.dp).size(20.dp))
-            }
-            val server = section.server
-            when {
-                server == null && section.loading -> Text("Loading from the device…")
-                server == null && section.unsupported -> Hint(section.error ?: SettingsSession.UNSUPPORTED)
-                server == null -> {
-                    ErrorText(section.error ?: "Not loaded")
-                    OutlinedButton(onClick = { editor.reload(part) }, enabled = !section.loading) { Text("Retry") }
+                IconButton(onClick = { expanded = !expanded }, modifier = Modifier.weight(1f)) {
+                    Text(title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
                 }
-                else -> {
-                    content(server, section.draft)
-                    section.error?.let { ErrorText(it) }
-                    if (section.conflict) FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        onConflictOverwrite?.let { Button(onClick = it, enabled = !working) { Text("Overwrite device") } }
-                        OutlinedButton(onClick = { editor.reload(part) }, enabled = !working) { Text("Discard draft and reload") }
+                Text(if (expanded) "▾" else "▸", modifier = Modifier.padding(start = 8.dp))
+                if (dirty && expanded) Text("Unsaved", color = MaterialTheme.colorScheme.tertiary, fontWeight = FontWeight.SemiBold)
+                if (section.loading && expanded) CircularProgressIndicator(Modifier.padding(start = 8.dp).size(20.dp))
+            }
+            if (expanded) {
+                val server = section.server
+                when {
+                    server == null && section.loading -> Text("Loading from the device…")
+                    server == null && section.unsupported -> Hint(section.error ?: SettingsSession.UNSUPPORTED)
+                    server == null -> {
+                        ErrorText(section.error ?: "Not loaded")
+                        OutlinedButton(onClick = { editor.reload(part) }, enabled = !section.loading) { Text("Retry") }
                     }
-                    if (dirty && !section.conflict) {
-                        TextButton(onClick = { editor.discard(part) }, enabled = !working) { Text("Discard changes") }
+                    else -> {
+                        content(server, section.draft)
+                        section.error?.let { ErrorText(it) }
+                        if (section.conflict) FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            onConflictOverwrite?.let { Button(onClick = it, enabled = !working) { Text("Overwrite device") } }
+                            OutlinedButton(onClick = { editor.reload(part) }, enabled = !working) { Text("Discard draft and reload") }
+                        }
+                        if (dirty && !section.conflict) {
+                            TextButton(onClick = { editor.discard(part) }, enabled = !working) { Text("Discard changes") }
+                        }
                     }
                 }
             }

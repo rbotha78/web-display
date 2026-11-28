@@ -194,6 +194,26 @@ body {
   gap: 0.75rem;
 }
 
+.collapsible-card summary {
+  cursor: pointer;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.collapsible-card summary::-webkit-details-marker {
+  display: none;
+}
+
+.collapsible-card summary h2 {
+  display: inline;
+}
+
+.collapsible-card .chevron {
+  float: right;
+  margin-top: 0.1em;
+}
+
 .card.wide {
   grid-column: 1 / -1;
 }

@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -169,7 +170,10 @@ fun ManagerScreen(viewModel: ManagerViewModel) {
                             }
                         }
                     }
-                    items(statuses, key = { it.id }) { status ->
+                    val sorted = statuses.sortedByDescending { status ->
+                        status.musicSync?.role == SyncRole.LEADER && status.online
+                    }
+                    items(sorted, key = { it.id }) { status ->
                         DeviceCard(
                             status = status,
                             deviceBusy = "device:${status.id}" in busy || players[status.id]?.working == true,
@@ -291,6 +295,7 @@ private fun DeviceCard(
     onReenroll: () -> Unit,
 ) {
     val context = LocalContext.current
+    var expanded by remember(status.id) { mutableStateOf(false) }
     var more by remember(status.id) { mutableStateOf(false) }
     var available by remember(status.id) { mutableStateOf<String?>(null) }
     var confirmReboot by remember { mutableStateOf(false) }
@@ -311,110 +316,116 @@ private fun DeviceCard(
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.clickable { expanded = !expanded },
             ) {
-                Text(status.name, style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+                Text(
+                    status.name,
+                    style = MaterialTheme.typography.titleLarge,
+                    modifier = Modifier.weight(1f),
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                )
                 StatePill(if (status.online) "Online" else "Offline", status.online)
-                PlaybackSyncIndicator(
-                    refreshing = player?.refreshing == true,
-                    working = player?.working == true,
+                Text(if (expanded) "▾" else "▸", modifier = Modifier.padding(start = 8.dp))
+            }
+            if (expanded) {
+                Text(
+                    (status.addresses.takeIf { it.size > 1 }?.joinToString(", ") ?: status.host) +
+                        ":${status.port}" + (status.hostname?.let { " · $it" } ?: ""),
+                    style = MaterialTheme.typography.bodySmall,
                 )
-            }
-            Text(
-                (status.addresses.takeIf { it.size > 1 }?.joinToString(", ") ?: status.host) +
-                    ":${status.port}" + (status.hostname?.let { " · $it" } ?: ""),
-                style = MaterialTheme.typography.bodySmall,
-            )
-            Text(
-                MusicSyncRules.summary(status.musicSync),
-                style = MaterialTheme.typography.bodySmall,
-                maxLines = 1, minLines = 1,
-                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            if (status.certificateChanged) {
-                Text("The device certificate changed. Confirm its new fingerprint before trusting it again.",
-                    color = MaterialTheme.colorScheme.error)
-                OutlinedButton(onClick = onReenroll) { Text("Trust again") }
-            }
-            if (status.keyRejected) {
-                Text("The device rejected this manager's key.", color = MaterialTheme.colorScheme.error)
-                OutlinedButton(onClick = onReenroll) { Text("Enrol again") }
-            }
-            if (status.firmwareOutdated) {
-                Text("Firmware ${status.version} is older than ${status.minFirmware}. Update from the device admin page.",
-                    color = MaterialTheme.colorScheme.error)
-            }
-            if (status.error != null && !status.certificateChanged && !status.keyRejected) {
-                Text(status.error, color = MaterialTheme.colorScheme.error)
-            }
-            if (healthy && !status.firmwareOutdated) {
-                PlayerControls(
-                    player = player ?: PlayerState(),
-                    enabled = !deviceBusy,
-                    onCommand = { viewModel.playerCommand(status.id, it) },
-                    onReenroll = onReenroll,
+                Text(
+                    MusicSyncRules.summary(status.musicSync),
+                    style = MaterialTheme.typography.bodySmall,
+                    maxLines = 1, minLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    modifier = Modifier.fillMaxWidth(),
                 )
-            }
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(
-                    onClick = { viewModel.openSettings(status) },
-                    enabled = status.online && !status.certificateChanged && !status.keyRejected && !deviceBusy,
-                ) { Text("Configure device") }
-                OutlinedButton(
-                    onClick = { viewModel.openRemoteView(status.id, status.name) },
-                    enabled = !status.certificateChanged && !status.keyRejected,
-                ) { Text("Remote view") }
-                TextButton(onClick = { more = !more }) { Text(if (more) "Less" else "More") }
-            }
-            if (more && healthy) {
-                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text("Firmware: ${status.version ?: "unknown"}" +
-                        if (status.restartNeeded) " · ${status.installedVersion} installed; restart to apply" else "")
-                    Text("Connection: ${connection ?: "Unknown"}")
-                    status.wifiSsid?.let { Text("Wi-Fi: $it" + if (status.wifiConnected == true) "" else " (not connected)") }
-                    Text("Internet: ${status.internet?.let { if (it) "Online" else "Offline" } ?: "Unknown"}")
+                if (status.certificateChanged) {
+                    Text("The device certificate changed. Confirm its new fingerprint before trusting it again.",
+                        color = MaterialTheme.colorScheme.error)
+                    OutlinedButton(onClick = onReenroll) { Text("Trust again") }
+                }
+                if (status.keyRejected) {
+                    Text("The device rejected this manager's key.", color = MaterialTheme.colorScheme.error)
+                    OutlinedButton(onClick = onReenroll) { Text("Enrol again") }
+                }
+                if (status.firmwareOutdated) {
+                    Text("Firmware ${status.version} is older than ${status.minFirmware}. Update from the device admin page.",
+                        color = MaterialTheme.colorScheme.error)
+                }
+                if (status.error != null && !status.certificateChanged && !status.keyRejected) {
+                    Text(status.error, color = MaterialTheme.colorScheme.error)
+                }
+                if (healthy && !status.firmwareOutdated) {
+                    PlayerControls(
+                        player = player ?: PlayerState(),
+                        enabled = !deviceBusy,
+                        onCommand = { viewModel.playerCommand(status.id, it) },
+                        onReenroll = onReenroll,
+                    )
                 }
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(onClick = {
-                        viewModel.checkUpdate(status.id) { version ->
-                            available = version
-                            viewModel.reportNotice(if (version == null) "${status.name} is up to date" else "Version $version is available")
-                        }
-                    }, enabled = !deviceBusy) { Text("Check updates") }
+                    Button(
+                        onClick = { viewModel.openSettings(status) },
+                        enabled = status.online && !status.certificateChanged && !status.keyRejected && !deviceBusy,
+                    ) { Text("Configure device") }
+                    OutlinedButton(
+                        onClick = { viewModel.openRemoteView(status.id, status.name) },
+                        enabled = !status.certificateChanged && !status.keyRejected,
+                    ) { Text("Remote view") }
+                    TextButton(onClick = { more = !more }) { Text(if (more) "Less" else "More") }
                 }
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    if (available != null) {
-                        Button(onClick = { confirmInstall = true }, enabled = !deviceBusy) {
-                            Text("Install ${available}")
-                        }
+                if (more && healthy) {
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text("Firmware: ${status.version ?: "unknown"}" +
+                            if (status.restartNeeded) " · ${status.installedVersion} installed; restart to apply" else "")
+                        Text("Connection: ${connection ?: "Unknown"}")
+                        status.wifiSsid?.let { Text("Wi-Fi: $it" + if (status.wifiConnected == true) "" else " (not connected)") }
+                        Text("Internet: ${status.internet?.let { if (it) "Online" else "Offline" } ?: "Unknown"}")
                     }
-                    OutlinedButton(onClick = { confirmReboot = true }, enabled = !deviceBusy) { Text("Restart") }
-                }
-
-                TextButton(onClick = { keysOpen = !keysOpen }) {
-                    Text(if (keysOpen) "Hide development SSH keys" else "Development SSH keys")
-                }
-                if (keysOpen) SshKeysPanel(status.id, status.name, keyBusy, viewModel)
-            }
-            if (more) FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (healthy) {
-                    OutlinedButton(onClick = {
-                        viewModel.adminUrl(status.id) { url ->
-                            runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, url.toUri())) }
-                                .onFailure { viewModel.reportNotice("No browser is available to open the admin page.") }
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(onClick = {
+                            viewModel.checkUpdate(status.id) { version ->
+                                available = version
+                                viewModel.reportNotice(if (version == null) "${status.name} is up to date" else "Version $version is available")
+                            }
+                        }, enabled = !deviceBusy) { Text("Check updates") }
+                    }
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (available != null) {
+                            Button(onClick = { confirmInstall = true }, enabled = !deviceBusy) {
+                                Text("Install ${available}")
+                            }
                         }
-                    }, enabled = !deviceBusy) { Text("Open admin page") }
+                        OutlinedButton(onClick = { confirmReboot = true }, enabled = !deviceBusy) { Text("Restart") }
+                    }
+
+                    TextButton(onClick = { keysOpen = !keysOpen }) {
+                        Text(if (keysOpen) "Hide development SSH keys" else "Development SSH keys")
+                    }
+                    if (keysOpen) SshKeysPanel(status.id, status.name, keyBusy, viewModel)
                 }
-                OutlinedButton(onClick = {
-                    runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, adminUrl.toUri())) }
-                        .onFailure { viewModel.reportNotice("No browser is available to open the admin page.") }
-                }) { Text(if (healthy) "Open without login" else "Open admin page") }
-                TextButton(onClick = { confirmRemove = true }, enabled = !deviceBusy) { Text("Remove") }
-                TextButton(onClick = onReenroll, enabled = !deviceBusy) { Text("Re-enrol") }
-            }
-            if (more && healthy) {
-                Text("Automatic admin login opens your browser. The browser independently verifies TLS; do not bypass certificate warnings unless you have checked the device identity.",
-                    style = MaterialTheme.typography.bodySmall)
+                if (more) FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (healthy) {
+                        OutlinedButton(onClick = {
+                            viewModel.adminUrl(status.id) { url ->
+                                runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, url.toUri())) }
+                                    .onFailure { viewModel.reportNotice("No browser is available to open the admin page.") }
+                            }
+                        }, enabled = !deviceBusy) { Text("Open admin page") }
+                    }
+                    OutlinedButton(onClick = {
+                        runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, adminUrl.toUri())) }
+                            .onFailure { viewModel.reportNotice("No browser is available to open the admin page.") }
+                    }) { Text(if (healthy) "Open without login" else "Open admin page") }
+                    TextButton(onClick = { confirmRemove = true }, enabled = !deviceBusy) { Text("Remove") }
+                    TextButton(onClick = onReenroll, enabled = !deviceBusy) { Text("Re-enrol") }
+                }
+                if (more && healthy) {
+                    Text("Automatic admin login opens your browser. The browser independently verifies TLS; do not bypass certificate warnings unless you have checked the device identity.",
+                        style = MaterialTheme.typography.bodySmall)
+                }
             }
         }
     }

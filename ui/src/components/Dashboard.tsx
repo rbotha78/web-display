@@ -3,6 +3,7 @@ import { ApiError, type MusicConfig, type NetworkStatus, type Status } from "../
 import { useDeviceApi } from "../DeviceApiContext";
 import { DebugKeysCard } from "./DebugKeysCard";
 import { BluetoothCard } from "./BluetoothCard";
+import { CollapsibleCard } from "./CollapsibleCard";
 import { DisplayCard } from "./DisplayCard";
 import { PlaylistCard } from "./PlaylistCard";
 import { PlexCard } from "./PlexCard";
@@ -89,24 +90,52 @@ function GlobalSettings({ notify, fail, canManageKeys, active, playbackConfig }:
 
   return (
     <div className="grid">
-      <StatusCard status={status} network={network} />
-      <DisplayCard notify={notify} fail={fail} />
-      <BluetoothCard notify={notify} fail={fail} active={active} />
-      <SleepCard notify={notify} fail={fail} />
-      <PlexCard notify={notify} fail={fail} playbackConfig={playbackConfig} />
-      <RailDataCard notify={notify} fail={fail} />
-      <WeatherCard notify={notify} fail={fail} />
-      <HostnameCard current={status?.hostname ?? null} notify={notify} fail={fail} />
-      <WifiCard network={network} notify={notify} fail={fail} refresh={refreshNetwork} />
-      <UpdatesCard notify={notify} fail={fail} />
-      {canManageKeys ? <ManagerKeysCard notify={notify} fail={fail} /> : (
-        <section className="card">
-          <h2>Manager access</h2>
-          <p className="muted">Signed in through the display manager. Manager access cannot create, list or revoke API keys.
-            Those operations require an administrator-password session on the device.</p>
-        </section>
+      <CollapsibleCard title="Status">
+        <StatusCard status={status} network={network} />
+      </CollapsibleCard>
+      <CollapsibleCard title="Display">
+        <DisplayCard notify={notify} fail={fail} />
+      </CollapsibleCard>
+      <CollapsibleCard title="Bluetooth speaker">
+        <BluetoothCard notify={notify} fail={fail} active={active} />
+      </CollapsibleCard>
+      <CollapsibleCard title="Sleep schedule">
+        <SleepCard notify={notify} fail={fail} />
+      </CollapsibleCard>
+      <CollapsibleCard title="Plex">
+        <PlexCard notify={notify} fail={fail} playbackConfig={playbackConfig} />
+      </CollapsibleCard>
+      <CollapsibleCard title="National Rail">
+        <RailDataCard notify={notify} fail={fail} />
+      </CollapsibleCard>
+      <CollapsibleCard title="Weather">
+        <WeatherCard notify={notify} fail={fail} />
+      </CollapsibleCard>
+      <CollapsibleCard title="Hostname">
+        <HostnameCard current={status?.hostname ?? null} notify={notify} fail={fail} />
+      </CollapsibleCard>
+      <CollapsibleCard title="Wi-Fi">
+        <WifiCard network={network} notify={notify} fail={fail} refresh={refreshNetwork} />
+      </CollapsibleCard>
+      <CollapsibleCard title="Updates">
+        <UpdatesCard notify={notify} fail={fail} />
+      </CollapsibleCard>
+      {canManageKeys ? (
+        <CollapsibleCard title="Manager access">
+          <ManagerKeysCard notify={notify} fail={fail} />
+        </CollapsibleCard>
+      ) : (
+        <CollapsibleCard title="Manager access">
+          <section className="card">
+            <h2>Manager access</h2>
+            <p className="muted">Signed in through the display manager. Manager access cannot create, list or revoke API keys.
+              Those operations require an administrator-password session on the device.</p>
+          </section>
+        </CollapsibleCard>
       )}
-      <DebugKeysCard notify={notify} fail={fail} />
+      <CollapsibleCard title="SSH keys">
+        <DebugKeysCard notify={notify} fail={fail} />
+      </CollapsibleCard>
     </div>
   );
 }
